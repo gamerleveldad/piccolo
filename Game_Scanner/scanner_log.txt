@@ -1,0 +1,109 @@
+Traceback (most recent call last):
+  File "D:\_CodingProjects\Game_Scanner\scanner.py", line 6, in <module>
+    from google.genai import Client
+ModuleNotFoundError: No module named 'google.genai'
+
+Processing batch 1 (8 games)...
+Update posted to Discord for Star Wars Zero Company.
+Update posted to Discord for Madden NFL 27.
+Update posted to Discord for Ace Combat 8: Wings of Theve.
+Update posted to Discord for Kingdom Hearts IV.
+
+Processing batch 1 (8 games)...
+Update posted to Discord for Star Wars Zero Company.
+Update posted to Discord for Madden NFL 27.
+Update posted to Discord for Ace Combat 8: Wings of Theve.
+Update posted to Discord for Kingdom Hearts IV.
+
+Processing batch 1 (8 games)...
+Gemini API busy (503). Retrying in 60s...
+Update posted to Discord for Star Wars Zero Company.
+Update posted to Discord for Final Fantasy VII: Revelations.
+Update posted to Discord for Madden NFL 27.
+Update posted to Discord for Ace Combat 8: Wings of Theve.
+Update posted to Discord for Kingdom Hearts IV.
+
+Processing batch 1 (8 games)...
+Gemini API busy (503). Retrying in 60s...
+Gemini API busy (503). Retrying in 120s...
+Traceback (most recent call last):
+  File "D:\_CodingProjects\Game_Scanner\scanner.py", line 163, in <module>
+    run_scan("daily")
+    ~~~~~~~~^^^^^^^^^
+  File "D:\_CodingProjects\Game_Scanner\scanner.py", line 136, in run_scan
+    updates = evaluate_game_batch(batch_payload, scan_type)
+  File "D:\_CodingProjects\Game_Scanner\scanner.py", line 98, in evaluate_game_batch
+    response = call_gemini_with_retry(contents=prompt)
+  File "D:\_CodingProjects\Game_Scanner\scanner.py", line 27, in call_gemini_with_retry
+    raise e
+  File "D:\_CodingProjects\Game_Scanner\scanner.py", line 20, in call_gemini_with_retry
+    return client.models.generate_content(model=model, contents=contents)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\_CodingProjects\Game_Scanner\venv\Lib\site-packages\google\genai\models.py", line 6549, in generate_content
+    response = self._generate_content(
+        model=model, contents=contents, config=parsed_config_to_call
+    )
+  File "D:\_CodingProjects\Game_Scanner\venv\Lib\site-packages\google\genai\models.py", line 4977, in _generate_content
+    response = self._api_client.request(
+        'post', path, request_dict, http_options
+    )
+  File "D:\_CodingProjects\Game_Scanner\venv\Lib\site-packages\google\genai\_api_client.py", line 1650, in request
+    response = self._request(http_request, http_options, stream=False)
+  File "D:\_CodingProjects\Game_Scanner\venv\Lib\site-packages\google\genai\_api_client.py", line 1443, in _request
+    return self._retry(self._request_once, http_request, stream)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\_CodingProjects\Game_Scanner\venv\Lib\site-packages\tenacity\__init__.py", line 470, in __call__
+    do = self.iter(retry_state=retry_state)
+  File "D:\_CodingProjects\Game_Scanner\venv\Lib\site-packages\tenacity\__init__.py", line 371, in iter
+    result = action(retry_state)
+  File "D:\_CodingProjects\Game_Scanner\venv\Lib\site-packages\tenacity\__init__.py", line 413, in exc_check
+    raise retry_exc.reraise()
+          ~~~~~~~~~~~~~~~~~^^
+  File "D:\_CodingProjects\Game_Scanner\venv\Lib\site-packages\tenacity\__init__.py", line 184, in reraise
+    raise self.last_attempt.result()
+          ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\treyTest\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\_base.py", line 443, in result
+    return self.__get_result()
+           ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\treyTest\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\_base.py", line 395, in __get_result
+    raise self._exception
+  File "D:\_CodingProjects\Game_Scanner\venv\Lib\site-packages\tenacity\__init__.py", line 473, in __call__
+    result = fn(*args, **kwargs)
+  File "D:\_CodingProjects\Game_Scanner\venv\Lib\site-packages\google\genai\_api_client.py", line 1420, in _request_once
+    errors.APIError.raise_for_response(response)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "D:\_CodingProjects\Game_Scanner\venv\Lib\site-packages\google\genai\errors.py", line 155, in raise_for_response
+    cls.raise_error(response.status_code, response_json, response)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\_CodingProjects\Game_Scanner\venv\Lib\site-packages\google\genai\errors.py", line 186, in raise_error
+    raise ServerError(status_code, response_json, response)
+google.genai.errors.ServerError: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}
+
+Processing batch 1 (8 games)...
+Update posted to Discord for Orbitals.
+Update posted to Discord for Ace Combat 8: Wings of Theve.
+Update posted to Discord for Fire Emblem: Fortune's Weave.
+Update posted to Discord for Xenoblade Genesis.
+
+Processing batch 1 (8 games)...
+Update posted to Discord for Ace Combat 8: Wings of Theve.
+
+Processing batch 1 (8 games)...
+Gemini API blocked (Error 503). Retrying in 60s... (Attempt 1/6)
+Gemini API blocked (Error 503). Retrying in 90s... (Attempt 2/6)
+Update posted to Discord for Star Wars Zero Company.
+Update posted to Discord for Madden NFL 27.
+Update posted to Discord for Ace Combat 8: Wings of Theve.
+
+Processing batch 1 (8 games)...
+Gemini API blocked (Error 503). Retrying in 60s... (Attempt 1/6)
+Gemini API blocked (Error 503). Retrying in 90s... (Attempt 2/6)
+Gemini API blocked (Error 503). Retrying in 135s... (Attempt 3/6)
+Gemini API blocked (Error 503). Retrying in 202s... (Attempt 4/6)
+Update posted to Discord for Madden NFL 27.
+Update posted to Discord for Ace Combat 8: Wings of Theve.
+
+Processing batch 1 (8 games)...
+Update posted to Discord for Madden NFL 27.
+Update posted to Discord for Ace Combat 8: Wings of Theve.
+Outside of the 6 PM - 1 AM window. Skipping daily scan.

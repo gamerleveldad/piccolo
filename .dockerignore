@@ -1,0 +1,10 @@
+.git
+.gitignore
+.dockerignore
+.env
+*.db
+data/
+node_modules/
+dist/
+token.json
+credentials.json

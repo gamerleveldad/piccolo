@@ -1,0 +1,29 @@
+{
+  "folders": [
+    {
+      "path": "Family_Dashboard",
+      "name": "Family Dashboard"
+    },
+    {
+      "path": "Game_Scanner",
+      "name": "Game Scanner"
+    },
+    {
+      "path": "Crunchyroll_Scanner",
+      "name": "Crunchyroll Scanner"
+    },
+    {
+      "path": ".",
+      "name": "Piccolo Root"
+    }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/.git": true,
+      "**/__pycache__": true,
+      "**/.pytest_cache": true,
+      "**/node_modules": true,
+      "**/dist": true
+    }
+  }
+}

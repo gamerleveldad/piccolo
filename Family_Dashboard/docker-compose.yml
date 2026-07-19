@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  dashboard:
+    build: .
+    container_name: howls-dashboard
+    restart: unless-stopped
+    # By deleting the "ports:" section and keeping this, 
+    # the container shares the laptop's physical Wi-Fi card!
+    network_mode: "host" 
+    volumes:
+      - ./assets:/app/assets
+      - ./token.json:/app/token.json
+      - ./credentials.json:/app/credentials.json
+    environment:
+      - TZ=America/New_York

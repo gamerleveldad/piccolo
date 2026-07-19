@@ -1,0 +1,65 @@
+version: '3.8'
+
+networks:
+  piccolo_net:
+    name: piccolo_net
+    driver: bridge
+
+services:
+  # --- Family Tactical Dashboard Hub ---
+  family_dashboard:
+    build:
+      context: ./Family_Dashboard
+      dockerfile: Dockerfile
+    container_name: howls-dashboard
+    restart: unless-stopped
+    # Mandatory requirement to intercept local Tempest UDP broadcast strings on port 50222
+    network_mode: "host"
+    volumes:
+      - ./Family_Dashboard/assets:/app/assets
+      - ./Family_Dashboard/token.json:/app/token.json
+      - ./Family_Dashboard/credentials.json:/app/credentials.json
+    environment:
+      - TZ=America/New_York
+      - STATION_ID=${STATION_ID}
+      - WEATHER_API_TOKEN=${WEATHER_API_TOKEN}
+      - BIBLE_API_TOKEN=${BIBLE_API_TOKEN}
+      - LATITUDE=${LATITUDE}
+      - LONGITUDE=${LONGITUDE}
+
+  # --- Agentic Video Game Metadata Microservice ---
+  game_scanner_api:
+    build:
+      context: ./Game_Scanner
+      dockerfile: Dockerfile
+    container_name: game_scanner_api
+    restart: unless-stopped
+    ports:
+      - "8001:8000" # Exposed on 8001 to prevent port space conflicts on the host
+    volumes:
+      - ./data/game_scanner:/app/data
+    environment:
+      - DB_PATH=/app/data/database.db
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - RAWG_API_KEY=${RAWG_API_KEY}
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
+      - DISCORD_WEBHOOK_URL=${GAME_DISCORD_WEBHOOK}
+    networks:
+      - piccolo_net
+
+  # --- Persistent Crunchyroll Scanner Daemon ---
+  crunchyroll_scanner:
+    build:
+      context: ./Crunchyroll_Scanner
+      dockerfile: Dockerfile
+    container_name: crunchyroll_scanner
+    restart: unless-stopped
+    volumes:
+      - ./data/cr_notifier:/app/data
+    environment:
+      - DB_PATH=/app/data/anime_tracker.db
+      - DISCORD_WEBHOOK=${ANIME_DISCORD_WEBHOOK}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - TZ=America/New_York
+    networks:
+      - piccolo_net

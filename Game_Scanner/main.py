@@ -1,0 +1,151 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import sqlite3
+import requests
+import json
+import os
+from google.genai import Client
+from dotenv import load_dotenv
+
+load_dotenv()
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Drive database paths via environmental flags for clean volume persistence
+DB_NAME = os.getenv("DB_PATH", "database.db")
+RAWG_API_KEY = os.getenv("RAWG_API_KEY")
+client = Client()
+
+class NewGameRequest(BaseModel):
+    title: str
+    platform: str
+
+def init_db():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS games (
+                    id INTEGER PRIMARY KEY,
+                    title TEXT UNIQUE,
+                    igdb_id TEXT,
+                    rawg_id TEXT,
+                    youtube_channel_id TEXT,
+                    release_date TEXT,
+                    last_scanned TIMESTAMP
+                 )''')
+    conn.commit()
+    conn.close()
+
+@app.on_event("startup")
+def startup_event():
+    init_db()
+
+def call_gemini_with_retry(contents, model='gemini-3.5-flash', max_retries=3, initial_delay=60):
+    delay = initial_delay
+    for attempt in range(max_retries):
+        try:
+            return client.models.generate_content(model=model, contents=contents)
+        except APIError as e:
+            if e.code in [503, 429] and attempt < max_retries - 1:
+                print(f"Gemini API busy ({e.code}). Retrying in {delay}s...")
+                time.sleep(delay)
+                delay *= 2
+            else:
+                raise e
+
+def search_rawg(query):
+    if not RAWG_API_KEY:
+        return []
+    url = "https://api.rawg.io/api/games"
+    payload = {"search": query, "key": RAWG_API_KEY}
+    response = requests.get(url, params=payload)
+    if response.status_code == 200:
+        return response.json().get("results", [])[:5]
+    return []
+
+def agentic_metadata_extraction(target_game, target_platform, search_results):
+    prompt = f"""
+    You are an intelligent data extraction agent. 
+    The user wants to track the game "{target_game}" specifically for the "{target_platform}" platform.
+    
+    Here are the top 5 search results from the RAWG API:
+    {json.dumps(search_results, indent=2)}
+    
+    STRICT RULES:
+    1. Look for a strong semantic match. Subtitles, missing colons, or minor variations are acceptable.
+    2. Do NOT match completely unrelated games.
+    3. PLATFORM VETO: If the user requested a modern console (e.g., Switch 2) and the search result is clearly an older, unrelated game exclusive to a different platform (like an old PC-only game with a similar name), you MUST REJECT IT.
+    4. If it is a valid match, extract it. If rejected or missing entirely, return a null match.
+    
+    Output ONLY a valid JSON object:
+    {{
+       "matched": true or false,
+       "title": "The exact title from the data if matched, otherwise null",
+       "rawg_id": integer ID if matched, otherwise null,
+       "release_date": "YYYY-MM-DD if available, otherwise null"
+    }}
+    """
+    
+    response = call_gemini_with_retry(contents=prompt)
+    try:
+        clean_text = response.text.replace("```json", "").replace("```", "").strip()
+        return json.loads(clean_text)
+    except (json.JSONDecodeError, AttributeError):
+        return {"matched": False, "title": None, "rawg_id": None, "release_date": None}
+
+@app.get("/games")
+def get_games():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT id, title, rawg_id, release_date FROM games")
+    games = [{"id": row[0], "title": row[1], "rawg_id": row[2], "release_date": row[3]} for row in c.fetchall()]
+    conn.close()
+    return games
+
+@app.delete("/games/{game_id}")
+def delete_game(game_id: int):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("DELETE FROM games WHERE id = ?", (game_id,))
+    conn.commit()
+    conn.close()
+    return {"status": "success", "message": "Target terminated."}
+
+@app.post("/games/add")
+def add_game(request: NewGameRequest):
+    print(f"\n--- NEW TRACKING REQUEST ---")
+    print(f"Target: {request.title} | Platform: {request.platform}")
+    
+    raw_results = search_rawg(request.title)
+    metadata = agentic_metadata_extraction(request.title, request.platform, raw_results)
+    
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    
+    try:
+        if metadata and metadata.get("matched"):
+            c.execute(
+                "INSERT INTO games (title, rawg_id, release_date, igdb_id, youtube_channel_id) VALUES (?, ?, ?, ?, ?)",
+                (metadata['title'], metadata['rawg_id'], metadata['release_date'], "", "")
+            )
+            message = f"Successfully tracked: {metadata['title']}"
+        else:
+            c.execute(
+                "INSERT INTO games (title, rawg_id, release_date, igdb_id, youtube_channel_id) VALUES (?, ?, ?, ?, ?)",
+                (request.title, "custom_search", "Upcoming / TBD", "", "")
+            )
+            message = f"RAWG entry missing/rejected. Saved '{request.title}' as Custom Search."
+        conn.commit()
+        return {"status": "success", "message": message}
+    except sqlite3.IntegrityError:
+        return {"status": "error", "message": f"'{request.title}' is already active."}
+    finally:
+        conn.close()

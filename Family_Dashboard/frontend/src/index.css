@@ -1,0 +1,5 @@
+@import "tailwindcss";
+
+/* This tells Tailwind v4 where to look for your code */
+@source "./index.html";
+@source "./src/**/*.{js,ts,jsx,tsx}";
