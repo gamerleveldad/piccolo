@@ -38,12 +38,16 @@ args, _ = parser.parse_known_args()
 RUN_SIMULATOR = args.simulate
 
 # --- USER CREDENTIALS ---
-STATION_ID = 222180       
-API_TOKEN = "d90ee428-ba14-4d7b-9725-9a2bea94c02e"
-API_TOKEN_BIBLE = 't01Bj4DYMqMxPoXeZ1V2Sf0c46GHtcIqrDAwXeC58v7WFS69'
+# --- USER CREDENTIALS ---
+# Fallback values are provided for the integers/floats, but tokens must be explicitly defined in the environment.
+STATION_ID = int(os.getenv("STATION_ID", 222180))
+API_TOKEN = os.getenv("WEATHER_API_TOKEN")
+API_TOKEN_BIBLE = os.getenv("BIBLE_API_TOKEN")
+LATITUDE = float(os.getenv("LATITUDE", 28.66))
+LONGITUDE = float(os.getenv("LONGITUDE", -81.36))
 
-LATITUDE = 28.66
-LONGITUDE = -81.36
+if not API_TOKEN or not API_TOKEN_BIBLE:
+    logger.warning("CRITICAL: API Tokens are missing from the environment configuration.")
 
 rest_cache = {
     "pressure_trend": "Steady",

@@ -2,6 +2,10 @@ import os
 import re
 import sqlite3
 import requests
+import time
+import schedule
+import threading
+import sys
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -404,3 +408,24 @@ def send_discord_notification(matches_list, alerts_list, recommendation_str=None
 
 if __name__ == "__main__":
     scan_live_calendar()
+
+def run_anime_pipeline():
+    print("🚀 Initiating Crunchyroll schedule evaluation...")
+    scan_live_calendar()
+
+def anime_scheduler_worker():
+    # Execute daily sweep at 1:15 PM
+    schedule.every().day.at("13:15").do(run_anime_pipeline)
+    
+    print("⏰ Crunchyroll Tracker online. Awaiting 13:15 PM window...")
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 or os.environ.get("MANUAL_TRIGGER") == "true":
+        scan_live_calendar()
+    else:
+        t = threading.Thread(target=anime_scheduler_worker, daemon=True)
+        t.start()
+        t.join()

@@ -103,7 +103,7 @@ export function GooglePhotosWidget() {
   useEffect(() => {
     const fetchPhotos = async () => {
       try {
-        const host = window.location.hostname || '192.168.4.183';
+        const host = import.meta.env.VITE_BACKEND_HOST || window.location.hostname;
         const res = await fetch(`http://${host}:8000/api/photos`);
         if (res.ok) {
           const data = await res.json();
@@ -217,7 +217,7 @@ useEffect(() => {
     let reconnectTimeout;
 
     const connectWebSocket = () => {
-      const host = window.location.hostname || '192.168.4.183';
+      const host = import.meta.env.VITE_BACKEND_HOST || window.location.hostname;
       ws = new WebSocket(`ws://${host}:8000/ws`);
 
       ws.onopen = () => {
@@ -453,7 +453,7 @@ useEffect(() => {
 
   const fetchTasks = async () => {
     try {
-      const host = window.location.hostname || '192.168.4.183';
+      const host = import.meta.env.VITE_BACKEND_HOST || window.location.hostname;
       const res = await fetch(`http://${host}:8000/api/tasks`);
       if (res.ok) {
         const data = await res.json();
@@ -466,7 +466,7 @@ useEffect(() => {
 
   const fetchSleeperData = async () => {
     try {
-      const host = window.location.hostname || '192.168.4.183';
+      const host = import.meta.env.VITE_BACKEND_HOST || window.location.hostname;
       const res = await fetch(`http://${host}:8000/api/sleeper`);
       if (res.ok) {
         const data = await res.json();
@@ -1115,7 +1115,7 @@ export function LowerModuleTasks({ tasks, onRefresh }) {
   const handleCompleteTask = async (taskId, e) => {
     e.stopPropagation();
     try {
-      const host = window.location.hostname || '192.168.4.183';
+      const host = import.meta.env.VITE_BACKEND_HOST || window.location.hostname;
       const res = await fetch(`http://${host}:8000/api/tasks/complete/${taskId}`, { method: 'POST' });
       if (res.ok) onRefresh();
     } catch (err) {

@@ -3,6 +3,9 @@ import requests
 import json
 import os
 import time
+import schedule
+import threading
+import sys
 from google.genai import Client
 from google.genai.errors import APIError
 from dotenv import load_dotenv
@@ -185,3 +188,24 @@ if __name__ == "__main__":
             print("Outside of the 6 PM - 1 AM window. Skipping daily scan.")
     else:
         run_scan(scan_type)
+
+def schedule_worker():
+    # Execute daily logic exactly at 7:00 AM
+    schedule.every().day.at("07:00").do(run_scan, scan_type="daily")
+    
+    # Execute weekly and monthly summaries slightly offset to avoid API collisions
+    schedule.every().monday.at("07:05").do(run_scan, scan_type="weekly")
+    schedule.every().month.at("07:10").do(run_scan, scan_type="monthly")
+    
+    print("Video Game Scanner Daemon online. Awaiting 07:00 AM window...")
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        run_scan(sys.argv[1])
+    else:
+        t = threading.Thread(target=schedule_worker, daemon=True)
+        t.start()
+        t.join()
