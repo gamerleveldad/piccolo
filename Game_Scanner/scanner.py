@@ -189,18 +189,34 @@ if __name__ == "__main__":
     else:
         run_scan(scan_type)
 
+def run_monthly_if_first():
+    from datetime import datetime
+    # Only execute the monthly scan if it is the 1st of the month
+    if datetime.now().day == 1:
+        run_scan(scan_type="monthly")
+
 def schedule_worker():
     # Execute daily logic exactly at 7:00 AM
     schedule.every().day.at("07:00").do(run_scan, scan_type="daily")
     
-    # Execute weekly and monthly summaries slightly offset to avoid API collisions
+    # Execute weekly summary slightly offset to avoid API collisions
     schedule.every().monday.at("07:05").do(run_scan, scan_type="weekly")
-    schedule.every().month.at("07:10").do(run_scan, scan_type="monthly")
+    
+    # Execute daily at 7:10 AM, but the wrapper function checks if it's the 1st of the month
+    schedule.every().day.at("07:10").do(run_monthly_if_first)
     
     print("Video Game Scanner Daemon online. Awaiting 07:00 AM window...")
     while True:
         schedule.run_pending()
         time.sleep(1)
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        run_scan(sys.argv[1])
+    else:
+        t = threading.Thread(target=schedule_worker, daemon=True)
+        t.start()
+        t.join()
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:

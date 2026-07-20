@@ -22,6 +22,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from googleapiclient.http import MediaIoBaseDownload
 from fastapi.responses import FileResponse
+from google.genai import Client
+from google.genai.errors import APIError # Add this line
 
 # --- LOGGING CONFIGURATION (Debian 12 Ready) ---
 logging.basicConfig(
@@ -182,6 +184,8 @@ def get_calendar_credentials():
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
+            with open('token.json', 'w') as token:
+                token.write(creds.to_json())
         else:
             flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
             creds = flow.run_local_server(port=0)

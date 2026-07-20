@@ -18,18 +18,23 @@ WORKDIR /app
 
 # Install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy Python backend code
 COPY . .
+
+# Explicitly copy OAuth credentials securely into the container image layer
+COPY credentials.json /credentials.json
+COPY token.json /token.json
 
 # Extract ONLY the compiled static files from Stage 1
 RUN mkdir -p static
 COPY --from=frontend-builder /build/dist/ ./static/
 
-# Expose ports
 EXPOSE 8000
 EXPOSE 50222/udp
-
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--loop", "asyncio"]
+#CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--loop", "asyncio"]
 # Launch Uvicorn using standard asyncio loop
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--loop", "asyncio"]
+#CMD ["/opt/venv/bin/python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--loop", "asyncio"]

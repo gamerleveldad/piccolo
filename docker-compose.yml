@@ -1,11 +1,23 @@
-version: '3.8'
-
 networks:
   piccolo_net:
     name: piccolo_net
     driver: bridge
 
 services:
+  postgres_db:
+      image: postgres:15-alpine
+      container_name: postgres_db
+      restart: unless-stopped
+      environment:
+        POSTGRES_USER: ${POSTGRES_USER}
+        POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+        POSTGRES_DB: ${POSTGRES_DB}
+      volumes:
+        # Maps local directory to persist database data
+        - ./data/postgres:/var/lib/postgresql/data
+        - ./data/postgres-init/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh
+      networks:
+        - piccolo_net
   # --- Family Tactical Dashboard Hub ---
   family_dashboard:
     build:
@@ -13,12 +25,12 @@ services:
       dockerfile: Dockerfile
     container_name: howls-dashboard
     restart: unless-stopped
-    # Mandatory requirement to intercept local Tempest UDP broadcast strings on port 50222
-    network_mode: "host"
+    #network_mode: "host"
+    ports:
+      - "8000:8000"
+      - "50222:50222/udp"
     volumes:
       - ./Family_Dashboard/assets:/app/assets
-      - ./Family_Dashboard/token.json:/app/token.json
-      - ./Family_Dashboard/credentials.json:/app/credentials.json
     environment:
       - TZ=America/New_York
       - STATION_ID=${STATION_ID}
@@ -26,6 +38,12 @@ services:
       - BIBLE_API_TOKEN=${BIBLE_API_TOKEN}
       - LATITUDE=${LATITUDE}
       - LONGITUDE=${LONGITUDE}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=postgres_db
+    networks:
+        - piccolo_net
 
   # --- Agentic Video Game Metadata Microservice ---
   game_scanner_api:
@@ -35,7 +53,7 @@ services:
     container_name: game_scanner_api
     restart: unless-stopped
     ports:
-      - "8001:8000" # Exposed on 8001 to prevent port space conflicts on the host
+      - "8001:8000"
     volumes:
       - ./data/game_scanner:/app/data
     environment:
@@ -44,6 +62,10 @@ services:
       - RAWG_API_KEY=${RAWG_API_KEY}
       - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
       - DISCORD_WEBHOOK_URL=${GAME_DISCORD_WEBHOOK}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=game_scanner_db
+      - POSTGRES_HOST=postgres_db
     networks:
       - piccolo_net
 
@@ -61,5 +83,47 @@ services:
       - DISCORD_WEBHOOK=${ANIME_DISCORD_WEBHOOK}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - TZ=America/New_York
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=crunchyroll_db
+      - POSTGRES_HOST=postgres_db
     networks:
       - piccolo_net
+
+  game_scanner_daemon:
+      build:
+        context: ./Game_Scanner
+        dockerfile: Dockerfile
+      container_name: game_scanner_daemon
+      restart: unless-stopped
+      command: ["python", "scanner.py"]
+      volumes:
+        - ./data/game_scanner:/app/data
+      environment:
+        - DB_PATH=/app/data/database.db
+        - GEMINI_API_KEY=${GEMINI_API_KEY}
+        - RAWG_API_KEY=${RAWG_API_KEY}
+        - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
+        - DISCORD_WEBHOOK_URL=${GAME_DISCORD_WEBHOOK}
+        - POSTGRES_USER=${POSTGRES_USER}
+        - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+        - POSTGRES_DB=game_scanner_db
+        - POSTGRES_HOST=postgres_db
+      networks:
+        - piccolo_net
+
+  game_scanner_ui:
+      build:
+        context: ./Game_Scanner/src/frontend  # Path to your React UI directory
+        dockerfile: Dockerfile
+      container_name: game_scanner_ui
+      restart: unless-stopped
+      ports:
+        - "8082:80"  # Exposes the UI on port 8082 to avoid collisions
+      environment:
+        - POSTGRES_USER=${POSTGRES_USER}
+        - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+        - POSTGRES_DB=game_scanner_db
+        - POSTGRES_HOST=postgres_db
+      networks:
+        - piccolo_net
