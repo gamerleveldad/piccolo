@@ -1,6 +1,6 @@
-import sqlite3
 import requests
 import json
+import psycopg2
 import os
 import time
 import schedule
@@ -15,7 +15,13 @@ load_dotenv()
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 client = Client()
 BATCH_SIZE = 10
-
+def get_db_connection():
+    return psycopg2.connect(
+        host=os.getenv("POSTGRES_HOST", "postgres_db"),
+        database=os.getenv("POSTGRES_DB", "game_scanner_db"),
+        user=os.getenv("POSTGRES_USER"),
+        password=os.getenv("POSTGRES_PASSWORD")
+    )
 def call_gemini_with_retry(contents, model='gemini-3.5-flash', max_retries=6, initial_delay=60):
     delay = initial_delay
     for attempt in range(max_retries):
@@ -126,9 +132,8 @@ def evaluate_game_batch(batch_data, scan_type):
         return []
 
 def run_scan(scan_type="daily"):
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     c = conn.cursor()
-    # Now pulling the youtube_channel_id from the database
     c.execute("SELECT title, igdb_id, rawg_id, youtube_channel_id FROM games")
     all_games = c.fetchall()
     conn.close()

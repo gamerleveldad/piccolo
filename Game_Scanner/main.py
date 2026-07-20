@@ -1,9 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import sqlite3
 import requests
 import json
+import psycopg2
+from psycopg2 import errors
 import os
 from google.genai import Client
 from dotenv import load_dotenv
@@ -30,10 +31,10 @@ class NewGameRequest(BaseModel):
     platform: str
 
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS games (
-                    id INTEGER PRIMARY KEY,
+                    id SERIAL PRIMARY KEY,
                     title TEXT UNIQUE,
                     igdb_id TEXT,
                     rawg_id TEXT,
@@ -43,7 +44,13 @@ def init_db():
                  )''')
     conn.commit()
     conn.close()
-
+def get_db_connection():
+    return psycopg2.connect(
+        host=os.getenv("POSTGRES_HOST", "postgres_db"),
+        database=os.getenv("POSTGRES_DB", "game_scanner_db"),
+        user=os.getenv("POSTGRES_USER"),
+        password=os.getenv("POSTGRES_PASSWORD")
+    )
 @app.on_event("startup")
 def startup_event():
     init_db()
@@ -103,7 +110,7 @@ def agentic_metadata_extraction(target_game, target_platform, search_results):
 
 @app.get("/games")
 def get_games():
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT id, title, rawg_id, release_date FROM games")
     games = [{"id": row[0], "title": row[1], "rawg_id": row[2], "release_date": row[3]} for row in c.fetchall()]
@@ -112,9 +119,9 @@ def get_games():
 
 @app.delete("/games/{game_id}")
 def delete_game(game_id: int):
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     c = conn.cursor()
-    c.execute("DELETE FROM games WHERE id = ?", (game_id,))
+    c.execute("DELETE FROM games WHERE id = %s", (game_id,))
     conn.commit()
     conn.close()
     return {"status": "success", "message": "Target terminated."}
@@ -127,25 +134,26 @@ def add_game(request: NewGameRequest):
     raw_results = search_rawg(request.title)
     metadata = agentic_metadata_extraction(request.title, request.platform, raw_results)
     
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     c = conn.cursor()
     
     try:
         if metadata and metadata.get("matched"):
             c.execute(
-                "INSERT INTO games (title, rawg_id, release_date, igdb_id, youtube_channel_id) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO games (title, rawg_id, release_date, igdb_id, youtube_channel_id) VALUES (%s, %s, %s, %s, %s)",
                 (metadata['title'], metadata['rawg_id'], metadata['release_date'], "", "")
             )
             message = f"Successfully tracked: {metadata['title']}"
         else:
             c.execute(
-                "INSERT INTO games (title, rawg_id, release_date, igdb_id, youtube_channel_id) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO games (title, rawg_id, release_date, igdb_id, youtube_channel_id) VALUES (%s, %s, %s, %s, %s)",
                 (request.title, "custom_search", "Upcoming / TBD", "", "")
             )
             message = f"RAWG entry missing/rejected. Saved '{request.title}' as Custom Search."
         conn.commit()
         return {"status": "success", "message": message}
-    except sqlite3.IntegrityError:
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback() # Critical for Postgres to reset the transaction block
         return {"status": "error", "message": f"'{request.title}' is already active."}
     finally:
         conn.close()

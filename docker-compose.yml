@@ -66,8 +66,52 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=game_scanner_db
       - POSTGRES_HOST=postgres_db
+    depends_on:
+      - postgres_db
     networks:
       - piccolo_net
+
+  game_scanner_daemon:
+    build:
+      context: ./Game_Scanner
+      dockerfile: Dockerfile
+    container_name: game_scanner_daemon
+    restart: unless-stopped
+    command: ["python", "scanner.py"]
+    volumes:
+      - ./data/game_scanner:/app/data
+    environment:
+      - DB_PATH=/app/data/database.db
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - RAWG_API_KEY=${RAWG_API_KEY}
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
+      - DISCORD_WEBHOOK_URL=${GAME_DISCORD_WEBHOOK}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=game_scanner_db
+      - POSTGRES_HOST=postgres_db
+    depends_on:
+      - postgres_db
+    networks:
+      - piccolo_net
+
+  game_scanner_ui:
+      build:
+        context: ./Game_Scanner/src/frontend  # Path to your React UI directory
+        dockerfile: Dockerfile
+      container_name: game_scanner_ui
+      restart: unless-stopped
+      ports:
+        - "8082:80"  # Exposes the UI on port 8082 to avoid collisions
+      environment:
+        - POSTGRES_USER=${POSTGRES_USER}
+        - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+        - POSTGRES_DB=game_scanner_db
+        - POSTGRES_HOST=postgres_db
+      depends_on:
+        - postgres_db
+      networks:
+        - piccolo_net
 
   # --- Persistent Crunchyroll Scanner Daemon ---
   crunchyroll_scanner:
@@ -87,43 +131,55 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=crunchyroll_db
       - POSTGRES_HOST=postgres_db
+    depends_on:
+      - postgres_db
+    networks:
+      - piccolo_net
+  crunchyroll_api:
+    build:
+      context: ./Crunchyroll_API
+      dockerfile: Dockerfile
+    container_name: crunchyroll_api
+    restart: unless-stopped
+    ports:
+      - "8002:8000"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=crunchyroll_db
+      - POSTGRES_HOST=postgres_db
     networks:
       - piccolo_net
 
-  game_scanner_daemon:
-      build:
-        context: ./Game_Scanner
-        dockerfile: Dockerfile
-      container_name: game_scanner_daemon
-      restart: unless-stopped
-      command: ["python", "scanner.py"]
-      volumes:
-        - ./data/game_scanner:/app/data
-      environment:
-        - DB_PATH=/app/data/database.db
-        - GEMINI_API_KEY=${GEMINI_API_KEY}
-        - RAWG_API_KEY=${RAWG_API_KEY}
-        - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
-        - DISCORD_WEBHOOK_URL=${GAME_DISCORD_WEBHOOK}
-        - POSTGRES_USER=${POSTGRES_USER}
-        - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-        - POSTGRES_DB=game_scanner_db
-        - POSTGRES_HOST=postgres_db
-      networks:
-        - piccolo_net
+  # --- Crunchyroll React UI ---
+  crunchyroll_ui:
+    build:
+      context: ./Crunchyroll_UI
+      dockerfile: Dockerfile
+    container_name: crunchyroll_ui
+    restart: unless-stopped
+    ports:
+      - "8083:5173"
+    environment:
+      # React needs to know where to send API requests
+      - VITE_API_BASE_URL=http://localhost:8002
+    volumes:
+      # Mounts your local src so you get hot-reloading while developing
+      - ./Crunchyroll_UI:/app
+      - /app/node_modules
+    networks:
+      - piccolo_net
 
-  game_scanner_ui:
-      build:
-        context: ./Game_Scanner/src/frontend  # Path to your React UI directory
-        dockerfile: Dockerfile
-      container_name: game_scanner_ui
-      restart: unless-stopped
-      ports:
-        - "8082:80"  # Exposes the UI on port 8082 to avoid collisions
-      environment:
-        - POSTGRES_USER=${POSTGRES_USER}
-        - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-        - POSTGRES_DB=game_scanner_db
-        - POSTGRES_HOST=postgres_db
-      networks:
-        - piccolo_net
+
+  # --- Uptime Kuma Monitoring ---
+  uptime_kuma:
+    image: louislam/uptime-kuma:1
+    container_name: uptime_kuma
+    restart: unless-stopped
+    volumes:
+      - ./data/uptime-kuma:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "3001:3001"
+    networks:
+      - piccolo_net

@@ -1,6 +1,6 @@
 import os
 import re
-import sqlite3
+import psycopg2
 import requests
 import time
 import schedule
@@ -32,10 +32,29 @@ SEED_WATCHLIST = [
 ]
 
 # ─── DATABASE OPERATIONS ──────────────────────────────────────────────────────
-
+def get_db_connection():
+    """Attempts to connect to PostgreSQL, retrying if the database is still booting up."""
+    retries = 5
+    delay = 3
+    
+    for i in range(retries):
+        try:
+            return psycopg2.connect(
+                host=os.environ.get("POSTGRES_HOST"),
+                database=os.environ.get("POSTGRES_DB"),
+                user=os.environ.get("POSTGRES_USER"),
+                password=os.environ.get("POSTGRES_PASSWORD")
+            )
+        except psycopg2.OperationalError as e:
+            if i < retries - 1:
+                print(f"⏳ PostgreSQL isn't ready yet (Attempt {i+1}/{retries}). Retrying in {delay}s...")
+                time.sleep(delay)
+            else:
+                # Out of retries, raise the original error
+                raise e
 def init_db():
     """Initializes the tracking database with support for active tracking, history, and recommendations."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     
     # Feature #1: Schedule Tracking
@@ -71,8 +90,9 @@ def init_db():
         print("🌱 Seeding watch_history table...")
         for anime in SEED_WATCHLIST:
             cursor.execute('''
-                INSERT OR IGNORE INTO watch_history (anime_name, status, user_rating)
-                VALUES (?, 'Watching', 'Liked')
+                INSERT INTO watch_history (anime_name, status, user_rating)
+                VALUES (%s, 'Watching', 'Liked')
+                ON CONFLICT (anime_name) DO NOTHING
             ''', (anime,))
             
     # ─── SEED RECOMMENDATION POOL (TEST SHOWS) ──────────────────────────────
@@ -88,8 +108,9 @@ def init_db():
         ]
         for name, genre, desc in test_recommendations:
             cursor.execute('''
-                INSERT OR IGNORE INTO recommendation_pool (anime_name, genre, description)
-                VALUES (?, ?, ?)
+                INSERT INTO recommendation_pool (anime_name, genre, description)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (anime_name) DO NOTHING
             ''', (name, genre, desc))
             
     conn.commit()
@@ -98,7 +119,7 @@ def init_db():
 
 def get_scan_targets():
     """Fetches all anime names from the database that require active scraping ('Watching' + 'Dormant')."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT anime_name FROM watch_history WHERE status IN ('Watching', 'Dormant')")
     scan_shows = [row[0] for row in cursor.fetchall()]
@@ -107,7 +128,7 @@ def get_scan_targets():
 
 def get_active_watching_list():
     """Fetches ONLY the shows you are currently watching to run missing schedule verification against."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT anime_name FROM watch_history WHERE status = 'Watching'")
     active_shows = [row[0] for row in cursor.fetchall()]
@@ -116,11 +137,11 @@ def get_active_watching_list():
 
 def update_show_schedule(anime_name, weekday_idx, date_str):
     """Saves or updates a show's expected release day index in the database."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO watchlist_schedule (anime_name, expected_weekday, last_seen_date)
-        VALUES (?, ?, ?)
+        VALUES (%s, %s, %s)
         ON CONFLICT(anime_name) DO UPDATE SET
             expected_weekday = excluded.expected_weekday,
             last_seen_date = excluded.last_seen_date
@@ -132,9 +153,9 @@ def check_missing_schedules(found_titles, current_weekday):
     """Compares database schedules against what actually aired today to detect anomalies."""
     active_watchlist = get_active_watching_list()
     
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT anime_name FROM watchlist_schedule WHERE expected_weekday = ?", (current_weekday,))
+    cursor.execute("SELECT anime_name FROM watchlist_schedule WHERE expected_weekday = %s", (current_weekday,))
     scheduled_shows = [row[0] for row in cursor.fetchall()]
     conn.close()
     
@@ -157,7 +178,7 @@ def get_smart_recommendation():
         return None
 
     # 1. Gather your real historical preferences from SQLite
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     
     # Get everything you're currently watching or liked
@@ -206,7 +227,7 @@ def get_smart_recommendation():
         print("🧠 Querying Gemini for a personalized recommendation...")
         client = genai.Client(api_key=gemini_key)
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.5-flash',
             contents=prompt,
         )
         
