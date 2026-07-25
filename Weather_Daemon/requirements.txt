@@ -1,0 +1,5 @@
+requests
+schedule
+google-generativeai
+influxdb-client
+feedparser
