@@ -234,6 +234,8 @@ services:
       - WEATHERFLOW_COLLECTOR_INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
     depends_on:
       - influxdb
+    volumes:
+      - ./influxdb.py:/app/weatherflow-collector/storage/influxdb.py
     networks:
       - piccolo_net
 
