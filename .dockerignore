@@ -1,10 +1,5 @@
-.git
-.gitignore
-.dockerignore
+node_modules
+npm-debug.log
+__pycache__
+*.pyc
 .env
-*.db
-data/
-node_modules/
-dist/
-token.json
-credentials.json

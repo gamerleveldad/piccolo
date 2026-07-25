@@ -162,7 +162,7 @@ services:
       - "8083:5173"
     environment:
       # React needs to know where to send API requests
-      - VITE_API_BASE_URL=http://localhost:8002
+      - VITE_API_BASE_URL=http://192.168.4.55:8002
     volumes:
       # Mounts your local src so you get hot-reloading while developing
       - ./Crunchyroll_UI:/app
