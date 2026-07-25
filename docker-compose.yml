@@ -183,3 +183,56 @@ services:
       - "3001:3001"
     networks:
       - piccolo_net
+
+  # --- InfluxDB for WeatherFlow ---
+  influxdb:
+    image: influxdb:2-alpine
+    container_name: influxdb
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    volumes:
+      - ./data/influxdb:/var/lib/influxdb2
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUXDB_USER}
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUXDB_PASSWORD}
+      - DOCKER_INFLUXDB_INIT_ORG=${INFLUXDB_ORG}
+      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUXDB_BUCKET}
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_TOKEN}
+    networks:
+      - piccolo_net
+
+  # --- Grafana for Dashboards ---
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data/grafana:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+    depends_on:
+      - influxdb
+    networks:
+      - piccolo_net
+
+  # --- WeatherFlow Collector ---
+  weatherflow_collector:
+    image: lux4rd0/weatherflow-collector:latest
+    container_name: weatherflow-collector-lux4rd0
+    restart: unless-stopped
+    environment:
+      - TZ=America/New_York
+      - WEATHERFLOW_COLLECTOR_API_TOKEN=${WEATHER_API_TOKEN}
+      - WEATHERFLOW_COLLECTOR_INFLUXDB_URL=http://influxdb:8086
+      - WEATHERFLOW_COLLECTOR_INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      - WEATHERFLOW_COLLECTOR_INFLUXDB_ORG=${INFLUXDB_ORG}
+      - WEATHERFLOW_COLLECTOR_INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
+    depends_on:
+      - influxdb
+    networks:
+      - piccolo_net
