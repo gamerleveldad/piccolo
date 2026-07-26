@@ -293,8 +293,8 @@ services:
     restart: unless-stopped
     environment:
       - TZ=America/New_York
-      - LATITUDE=${HOME_LATITUDE}
-      - LONGITUDE=${HOME_LONGITUDE}
+      - HOME_LATITUDE=${HOME_LATITUDE}
+      - HOME_LONGITUDE=${HOME_LONGITUDE}
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB}
