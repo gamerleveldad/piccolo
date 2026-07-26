@@ -261,3 +261,24 @@ services:
       - influxdb
     networks:
       - piccolo_net
+
+  # --- Netdata System Monitoring ---
+  netdata:
+    image: netdata/netdata:latest
+    container_name: netdata
+    hostname: piccolo
+    restart: unless-stopped
+    ports:
+      - "19999:19999"
+    cap_add:
+      - SYS_PTRACE
+      - DAC_READ_SEARCH
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /etc/os-release:/host/etc/os-release:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - piccolo_net
