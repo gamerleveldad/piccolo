@@ -283,3 +283,28 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - piccolo_net
+
+  # --- Flight Tracking Daemon (API based) ---
+  flight_tracker_daemon:
+    build:
+      context: ./Flight_Tracker
+      dockerfile: Dockerfile
+    container_name: flight_tracker_daemon
+    restart: unless-stopped
+    environment:
+      - TZ=America/New_York
+      - LATITUDE=${LATITUDE}
+      - LONGITUDE=${LONGITUDE}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=postgres_db
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      - INFLUXDB_ORG=${INFLUXDB_ORG}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
+    depends_on:
+      - postgres_db
+      - influxdb
+    networks:
+      - piccolo_net

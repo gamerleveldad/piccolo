@@ -1,0 +1,4 @@
+requests==2.31.0
+psycopg2-binary==2.9.9
+influxdb-client==1.36.1
+haversine==2.8.0
