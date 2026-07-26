@@ -158,7 +158,7 @@ def build_discord_message():
     print(f"[{datetime.now()}] Sending payload to Gemini...")
     try:
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.6-flash',
             contents=prompt
         )
         final_message = response.text.strip()
