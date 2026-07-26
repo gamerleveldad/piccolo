@@ -1,4 +1,5 @@
-fastapi
-uvicorn
-psycopg2-binary
-pydantic
+requests
+schedule
+google-genai
+influxdb-client
+feedparser

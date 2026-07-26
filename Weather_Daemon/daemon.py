@@ -4,7 +4,7 @@ import requests
 import feedparser
 import schedule
 from datetime import datetime
-import google.generativeai as genai
+from google import genai
 from influxdb_client import InfluxDBClient
 
 # Configuration from environment variables
@@ -20,8 +20,7 @@ INFLUX_ORG = os.environ.get("INFLUXDB_ORG")
 INFLUX_BUCKET = os.environ.get("INFLUXDB_BUCKET")
 
 # Initialize Gemini (Using 1.5-flash for speed and optimal rate limit preservation)
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 def get_influx_data():
     try:
@@ -162,7 +161,10 @@ def build_discord_message():
     
     print(f"[{datetime.now()}] Sending payload to Gemini...")
     try:
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model='gemini-3.6-flash',
+            contents=prompt
+        )
         final_message = response.text.strip()
     except Exception as e:
         print(f"Error communicating with Gemini: {e}")
