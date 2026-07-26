@@ -7,7 +7,6 @@ from datetime import datetime
 from google import genai
 from influxdb_client import InfluxDBClient
 
-# Configuration from environment variables
 WEBHOOK_URL = os.environ.get("WEATHER_DISCORD_WEBHOOK")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 WU_API_KEY = os.environ.get("WU_API_KEY")
@@ -19,14 +18,12 @@ INFLUX_TOKEN = os.environ.get("INFLUXDB_TOKEN")
 INFLUX_ORG = os.environ.get("INFLUXDB_ORG")
 INFLUX_BUCKET = os.environ.get("INFLUXDB_BUCKET")
 
-# Initialize Gemini (Using 1.5-flash for speed and optimal rate limit preservation)
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 def get_influx_data():
     try:
-        client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
-        query_api = client.query_api()
-        # Grabbing the latest forecast push from the weatherflow collector
+        client_influx = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+        query_api = client_influx.query_api()
         query = f'''
             from(bucket: "{INFLUX_BUCKET}")
             |> range(start: -24h)
@@ -133,7 +130,6 @@ def build_discord_message():
     [Write a 1-2 sentence discussion comparing the GFS and Euro expectations for the day based on the data provided.]
     
     ### Future Forecast
-    [Provide the 10-day forecast table, or as many days as the data supports, using a consensus of NWS and WU data. Format exactly like the example table, using actual upcoming dates in MM/DD format.]
     |     | [Date 1] | [Date 2] | [Date 3] | [Date 4] | [Date 5] | [Date 6] | [Date 7] | [Date 8] | [Date 9] | [Date 10] |
     |-----|---|---|---|---|---|---|---|---|---|---|
     | Hi  | | | | | | | | | | |
@@ -162,7 +158,7 @@ def build_discord_message():
     print(f"[{datetime.now()}] Sending payload to Gemini...")
     try:
         response = client.models.generate_content(
-            model='gemini-3.6-flash',
+            model='gemini-2.5-flash',
             contents=prompt
         )
         final_message = response.text.strip()
@@ -180,13 +176,8 @@ def build_discord_message():
 
 if __name__ == "__main__":
     print("Weather Brief Daemon started.")
-    
-    # Run once immediately on startup for testing
     build_discord_message()
-    
-    # Schedule to run every morning at 6:00 AM
     schedule.every().day.at("06:00").do(build_discord_message)
-    
     while True:
         schedule.run_pending()
         time.sleep(60)
