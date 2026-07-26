@@ -302,7 +302,8 @@ services:
       - INFLUXDB_URL=http://influxdb:8086
       - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
       - INFLUXDB_ORG=${INFLUXDB_ORG}
-      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
+      - FLIGHT_TRACKER_BUCKET=${FLIGHT_TRACKER_BUCKET}
+      
     depends_on:
       - postgres_db
       - influxdb

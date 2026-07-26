@@ -22,7 +22,7 @@ PG_DB = os.getenv("POSTGRES_DB")
 INFLUX_URL = os.getenv("INFLUXDB_URL", "http://influxdb:8086")
 INFLUX_TOKEN = os.getenv("INFLUXDB_TOKEN")
 INFLUX_ORG = os.getenv("INFLUXDB_ORG")
-INFLUX_BUCKET = os.getenv("INFLUXDB_BUCKET")
+INFLUX_BUCKET = os.getenv("FLIGHT_TRACKER_BUCKET", "flight_data")
 
 API_URL = f"https://api.adsb.lol/v2/lat/{LATITUDE}/lon/{LONGITUDE}/dist/{RADIUS_NM}"
 HOME_COORDS = (LATITUDE, LONGITUDE)
