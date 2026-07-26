@@ -1,5 +1,4 @@
-requests
-schedule
-influxdb-client
-feedparser
-google-genai==2.12.1
+fastapi
+uvicorn
+psycopg2-binary
+pydantic

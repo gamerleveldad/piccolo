@@ -1,5 +1,5 @@
 requests
 schedule
-google-generativeai
 influxdb-client
 feedparser
+google-genai==2.12.1
