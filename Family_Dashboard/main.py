@@ -36,7 +36,6 @@ parser = argparse.ArgumentParser(description="Tactical Weather Dashboard Backend
 parser.add_argument('--simulate', action='store_true', help="Run the telemetry simulator instead of live UDP.")
 args, _ = parser.parse_known_args()
 
-# UPDATE: Local simulation override
 SIMULATION_MODE = os.getenv("LOCAL_MODE", "false").lower() == "true" or args.simulate
 
 STATION_ID = int(os.getenv("STATION_ID", 222180))
@@ -178,8 +177,6 @@ async def poll_calendar_events():
             service = build('calendar', 'v3', credentials=creds, cache_discovery=False)
             now = datetime.datetime.now(datetime.timezone.utc)
             time_min = now.isoformat()
-            
-            # UPDATE: Expanded to 28 days
             time_max = (now + datetime.timedelta(days=28)).isoformat()
             
             aggregated_events = []
@@ -421,7 +418,6 @@ async def poll_tempest_rest_api():
                         rest_cache["pressure_trend"] = current.get("pressure_trend", "Steady")
                         rest_cache["rain_accumulation_day_in"] = float(current.get("precip_accum_local_day", 0.0))
                         
-                        # UPDATE: Removed rain_rate assignment here to let UDP handle live intensity
                         rest_cache["icon_api"] = current.get("icon", "clear-day")
                         rest_cache["conditions"] = current.get("conditions", "Clear")
                         
@@ -452,7 +448,9 @@ async def poll_tempest_rest_api():
                                 "icon": day.get("icon", "clear-day"),
                                 "high": int(day.get("air_temp_high", 75)),
                                 "low": int(day.get("air_temp_low", 60)),
-                                "rain_pct": int(day.get("precip_probability", 0))
+                                "rain_pct": int(day.get("precip_probability", 0)),
+                                "sunrise": day.get("sunrise"),
+                                "sunset": day.get("sunset")
                             })
                         if parsed_days:
                             rest_cache["forecast_daily_api"] = parsed_days
@@ -538,7 +536,6 @@ def parse_tempest_packet(raw_packet: dict) -> dict | None:
         temp_c = obs[7]
         rh = obs[8]
         
-        # UPDATE: Rain Rate calculated from active 1-minute accumulation
         rain_min_mm = obs[12]
         rain_rate_in_hr = round(mm_to_inches(rain_min_mm) * 60, 2)
         rest_cache["rain_rate_in_hr"] = rain_rate_in_hr
@@ -584,14 +581,16 @@ async def simulate_weather_stream():
     now = datetime.datetime.now()
     mock_events = [{
         "id": "mock1", "summary": "Mock: Pathfinder RPG", "start": (now + datetime.timedelta(hours=2)).isoformat(),
-        "location": None, "is_all_day": False, "color": "#a4bdfc", "source": "family", "forecast": {"temp": 75, "icon": "clear-day"}
+        "location": None, "is_all_day": False, "color": "#a4bdfc", "source": "family", "forecast": {"temp": 75, "icon": "clear-day", "rain_pct": 10}
     }]
+    
+    # Calculate mock sunrise/sunset to test driving glare logic
+    sunrise_ts = int(now.replace(hour=6, minute=30, second=0).timestamp())
+    sunset_ts = int(now.replace(hour=20, minute=0, second=0).timestamp())
     
     while True:
         try:
-            # Force volatile jumps so the simulation is obvious
             sim_temp += random.uniform(-1.5, 1.5)
-            # Safely clamp humidity so it never drops below zero and crashes the dew point math
             sim_rh = max(min(sim_rh + random.uniform(-5.0, 5.0), 99.0), 15.0)
             sim_pressure += random.uniform(-0.04, 0.04)
             sim_heading = (sim_heading + random.randint(-40, 40)) % 360
@@ -600,7 +599,6 @@ async def simulate_weather_stream():
             gust_wind = round(base_wind * random.uniform(1.2, 2.0), 1)
             pressure_shift = random.choice(["Falling", "Rising", "Steady"])
             
-            # Dynamic Rain states (50% chance of rain to rapidly test UI changes)
             if random.random() < 0.25:
                 sim_rain_rate = round(random.uniform(0.3, 2.5), 2)
             elif random.random() < 0.50:
@@ -608,7 +606,6 @@ async def simulate_weather_stream():
             else:
                 sim_rain_rate = 0.0
                 
-            # Accumulate the rain dynamically so the UI gauge actually fills up over time
             if sim_rain_rate > 0:
                 sim_rain_accum += (sim_rain_rate / 3600) * 5.5
 
@@ -651,13 +648,13 @@ async def simulate_weather_stream():
                 "alerts": rest_cache.get("alerts", []),
                 "daily_verse": {"reference": "Simulation 1:1", "text": "This is simulated environment data generating actively."},
                 "forecast_daily_api": [
-                    {"day_name": "Mon", "icon": "clear-day", "high": 92, "low": 75, "rain_pct": 10},
-                    {"day_name": "Tue", "icon": "partly-cloudy-day", "high": 90, "low": 76, "rain_pct": 25},
-                    {"day_name": "Wed", "icon": "rainy", "high": 86, "low": 74, "rain_pct": 80},
-                    {"day_name": "Thu", "icon": "thunderstorm", "high": 85, "low": 73, "rain_pct": 95},
-                    {"day_name": "Fri", "icon": "partly-cloudy-day", "high": 89, "low": 75, "rain_pct": 40},
-                    {"day_name": "Sat", "icon": "clear-day", "high": 93, "low": 77, "rain_pct": 5},
-                    {"day_name": "Sun", "icon": "clear-day", "high": 94, "low": 76, "rain_pct": 0}
+                    {"day_name": "Mon", "icon": "clear-day", "high": 92, "low": 75, "rain_pct": 10, "sunrise": sunrise_ts, "sunset": sunset_ts},
+                    {"day_name": "Tue", "icon": "partly-cloudy-day", "high": 90, "low": 76, "rain_pct": 25, "sunrise": sunrise_ts, "sunset": sunset_ts},
+                    {"day_name": "Wed", "icon": "rainy", "high": 86, "low": 74, "rain_pct": 80, "sunrise": sunrise_ts, "sunset": sunset_ts},
+                    {"day_name": "Thu", "icon": "thunderstorm", "high": 85, "low": 73, "rain_pct": 95, "sunrise": sunrise_ts, "sunset": sunset_ts},
+                    {"day_name": "Fri", "icon": "partly-cloudy-day", "high": 89, "low": 75, "rain_pct": 40, "sunrise": sunrise_ts, "sunset": sunset_ts},
+                    {"day_name": "Sat", "icon": "clear-day", "high": 93, "low": 77, "rain_pct": 5, "sunrise": sunrise_ts, "sunset": sunset_ts},
+                    {"day_name": "Sun", "icon": "clear-day", "high": 94, "low": 76, "rain_pct": 0, "sunrise": sunrise_ts, "sunset": sunset_ts}
                 ]
             }
             
@@ -720,7 +717,6 @@ async def listen_to_tempest_udp():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # UPDATE: Simulation Mode completely stops external API loops and UDP listeners
     sim_task = None
     if SIMULATION_MODE:
         logger.info("Local Simulator Active. External APIs halted.")

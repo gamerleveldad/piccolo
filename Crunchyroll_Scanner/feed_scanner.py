@@ -378,7 +378,7 @@ def scan_live_calendar():
     recommendation_line = get_smart_recommendation(len(matched_drops))
     if len(matched_drops) < 2:
         print("Quiet night detected (fewer than 2 active drops). Querying engine for a suggestion...")
-        recommendation_line = get_smart_recommendation()
+        recommendation_line = get_smart_recommendation(len(matched_drops))
     
     # 3. Deliver structured message out to Discord
     if matched_drops or missing_alerts or recommendation_line:

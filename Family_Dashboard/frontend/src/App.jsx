@@ -147,7 +147,7 @@ export function GooglePhotosWidget() {
         key={photos[currentIndex]}
         src={photos[currentIndex]}
         className="w-full h-full object-cover transition-opacity duration-1000" 
-        alt="Family Display Board" 
+        alt="Display Board" 
       />
       <div className="absolute bottom-2 right-2 px-2 py-0.5 bg-black/50 backdrop-blur-sm rounded text-[8px] font-mono text-slate-400">
         {currentIndex + 1} / {photos.length}
@@ -213,7 +213,7 @@ function App() {
     "Default": { icon: "/assets/weather/weather-icons-master/svg/wi-alien.svg", color: "text-slate-400", bg: "bg-slate-900/40", border: "border-slate-800", pulse: false }
   };
 
-  useEffect(() => {
+useEffect(() => {
     let ws;
     let reconnectTimeout;
 
@@ -325,15 +325,23 @@ function App() {
     const currentLightningDist = weather.last_strike_distance !== null ? parseFloat(weather.last_strike_distance) : 999;
     const currentMinsSinceStrike = weather.last_strike_time ? Math.floor((Date.now() - weather.last_strike_time) / 60000) : 999;
 
-    const todayForecast = weather.forecast_daily_api?.[0] || { high: currentTemp, low: currentTemp, rain_pct: 0, icon: 'clear-day' };
+    const todayForecast = weather.forecast_daily_api?.[0] || { high: currentTemp, low: currentTemp, rain_pct: 0, icon: 'clear-day', sunrise: 0, sunset: 0 };
     const fcTemp = (parseFloat(todayForecast.high) + parseFloat(todayForecast.low)) / 2;
     const fcRainChance = parseInt(todayForecast.rain_pct) || 0;
 
     const evaluateActivity = (temp, feels, humidity, wind, gust, rainAccum, lightningDist, minsSinceStrike, isForecast = false) => {
-      let scores = { Walking: 10, Airbrushing: 10, "Yard Work": 10, Basketball: 10, Football: 10, Swimming: 10 };
+      let scores = { Walking: 10, Airbrushing: 10, "Yard Work": 10, "Video Games": 5, Basketball: 10, Football: 10, Swimming: 10, Driving: 10 };
       const hasRecentRain = rainAccum > 0 && rainAccum <= 0.15;
       const hasHeavyRecentRain = rainAccum > 0.15;
       const isLightningThreat = lightningDist <= 20 && minsSinceStrike <= 45;
+      
+      const isNight = (weather.icon_api || '').includes('night');
+      const nowSecs = Math.floor(Date.now() / 1000);
+      const sunrise = todayForecast.sunrise || 0;
+      const sunset = todayForecast.sunset || 0;
+      const nearSunrise = Math.abs(nowSecs - sunrise) <= 3600;
+      const nearSunset = Math.abs(nowSecs - sunset) <= 3600;
+      const rainRate = parseFloat(weather.rain_rate_in_hr) || 0;
 
       if (temp < 65) scores.Football -= Math.min((65 - temp) / 4, 3);
       if (temp > 75) scores.Football -= Math.min((temp - 75) / 3, 4);
@@ -386,6 +394,50 @@ function App() {
       }
       if (isLightningThreat) scores.Swimming = 0;
       if (isForecast && fcRainChance > 60) scores.Swimming -= 4;
+
+      // VIDEO GAMES LOGIC
+      let vgScore = 5; 
+      if (isNight) vgScore = 10;
+      if (rainRate > 0) vgScore = 10;
+      if (temp >= 80) vgScore += (temp - 80) * 0.2; 
+      if (temp >= 90) vgScore += (temp - 90) * 0.5; 
+      if (feels >= 95) vgScore = 10;
+      if (temp <= 60) vgScore += (60 - temp) * 0.2;
+      if (temp <= 40) vgScore += (40 - temp) * 0.5;
+      if (feels <= 35) vgScore = 10;
+      
+      if (isForecast) {
+        let fcVg = 5;
+        if (fcTemp >= 80) fcVg += (fcTemp - 80) * 0.3;
+        if (fcTemp <= 60) fcVg += (60 - fcTemp) * 0.3;
+        if (fcRainChance > 20) fcVg += (fcRainChance / 15);
+        scores["Video Games"] = fcVg;
+      } else {
+        scores["Video Games"] = vgScore;
+      }
+
+      // DRIVING LOGIC
+      let drScore = 10;
+      if (rainRate > 0) {
+        if (rainRate < 0.1) drScore -= 2;
+        else if (rainRate < 0.5) drScore -= 5;
+        else drScore -= 9; 
+      }
+      if (!isForecast && (nearSunrise || nearSunset)) {
+        const diffSunrise = Math.abs(nowSecs - sunrise);
+        const diffSunset = Math.abs(nowSecs - sunset);
+        const minDiff = Math.min(diffSunrise, diffSunset);
+        drScore -= Math.max(0, 6 - (minDiff / 600)); 
+      }
+      
+      if (isForecast) {
+        let fcDr = 10;
+        if (fcRainChance > 20) fcDr -= (fcRainChance / 15);
+        fcDr -= 2; 
+        scores["Driving"] = fcDr;
+      } else {
+        scores["Driving"] = drScore;
+      }
 
       const clamp = (val) => Math.min(Math.max(Math.round(val), 0), 10);
       return Object.keys(scores).reduce((acc, key) => {
@@ -446,7 +498,7 @@ function App() {
         setDashboardTasksArray(data);
       }
     } catch (err) {
-      console.error("❌ Failed syncing chores matrix", err);
+      console.error("Failed syncing chores matrix", err);
     }
   };
 
@@ -459,7 +511,7 @@ function App() {
         setSleeperPayloadState(data);
       }
     } catch (err) {
-      console.error("❌ Failed syncing Sleeper payload", err);
+      console.error("Failed syncing Sleeper payload", err);
     }
   };
 
@@ -556,7 +608,6 @@ function App() {
                   const pulseClass = tempDelta >= 2.0 ? 'animate-pulse' : '';
                   const feelsColorClass = isHeatIndex ? 'text-rose-500' : 'text-cyan-400';
                   
-                  // Pressure Math for Vertical Gauge
                   const minP = 28.5; const maxP = 30.5;
                   const pVal = parseFloat(weather.pressure_inhg) || 29.92;
                   const pPct = Math.min(Math.max(((pVal - minP) / (maxP - minP)) * 100, 0), 100);
@@ -583,42 +634,35 @@ function App() {
                         </div>
                       </div>
 
+                      {/* BRIGHTER TEMPERATURE GAUGE */}
                       <div className="col-span-2 flex justify-center items-center h-28 relative">
-                        <div className="w-4 h-full rounded-full bg-gradient-to-t from-blue-950 via-blue-800 via-emerald-950 via-amber-950 to-red-950/60 relative border border-slate-900/80 shadow-inner">
+                        <div className="w-5 h-full rounded-full bg-gradient-to-t from-blue-600 via-emerald-500 via-amber-500 to-red-600 relative border border-slate-800 shadow-[0_0_8px_rgba(0,0,0,0.5)]">
                           {tempDelta > 0 && (
                             <div 
                               style={{ bottom: `${Math.min(airPct, feelsPct)}%`, height: `${tempDelta}%` }}
                               className={`absolute left-0 right-0 w-full rounded-sm transition-all duration-1000 ease-out ${overlayColor} ${pulseClass}`}
                             />
                           )}
-                          <div style={{ bottom: `${airPct}%` }} className="absolute left-1/2 -translate-x-1/2 mb-[-1px] w-5 h-0.5 bg-white rounded-full shadow-[0_0_4px_white] border border-black/40 transition-all duration-1000 z-20" />
-                          <div style={{ bottom: `${feelsPct}%` }} className={`absolute left-1/2 -translate-x-1/2 mb-[-1px] w-5 h-0.5 rounded-full shadow-lg border border-black/40 transition-all duration-1000 z-10 ${isHeatIndex ? 'bg-red-500' : 'bg-blue-400'}`} />
+                          <div style={{ bottom: `${airPct}%` }} className="absolute left-1/2 -translate-x-1/2 mb-[-1px] w-6 h-0.5 bg-white rounded-full shadow-[0_0_4px_white] border border-black/40 transition-all duration-1000 z-20" />
+                          <div style={{ bottom: `${feelsPct}%` }} className={`absolute left-1/2 -translate-x-1/2 mb-[-1px] w-6 h-0.5 rounded-full shadow-lg border border-black/40 transition-all duration-1000 z-10 ${isHeatIndex ? 'bg-red-500' : 'bg-blue-400'}`} />
                         </div>
                       </div>
 
-                      {/* ADDED: Vertical Pressure Gauge */}
-                      {/* VERTICAL PRESSURE GAUGE WITH THRESHOLD TICKS */}
+                      {/* DIMMER & SKINNIER PRESSURE GAUGE */}
                       <div className="col-span-2 flex flex-col justify-center items-center h-28 relative gap-1">
-                        <div className="w-3 h-full rounded-full bg-gradient-to-t from-red-600 via-yellow-500 via-slate-400 to-cyan-400 relative border border-slate-900/80 shadow-inner flex items-center">
-                          {[
-                            { val: 28.94, color: 'bg-red-500' },
-                            { val: 29.23, color: 'bg-orange-500' },
-                            { val: 29.53, color: 'bg-amber-400' },
-                            { val: 29.71, color: 'bg-yellow-400' },
-                            { val: 29.80, color: 'bg-slate-400' },
-                            { val: 30.20, color: 'bg-cyan-400' }
-                          ].map((t, idx) => {
-                            const tickPct = Math.min(Math.max(((t.val - 28.5) / (30.5 - 28.5)) * 100, 0), 100);
+                        <div className="w-1.5 h-full rounded-full bg-gradient-to-t from-rose-900/60 via-amber-900/60 via-slate-700/60 to-cyan-900/60 relative border border-slate-900/80 shadow-inner flex items-center">
+                          {[28.94, 29.23, 29.53, 29.71, 29.80, 30.20].map((val, idx) => {
+                            const tickPct = Math.min(Math.max(((val - 28.5) / (30.5 - 28.5)) * 100, 0), 100);
                             return (
                               <div 
                                 key={idx}
                                 style={{ bottom: `${tickPct}%` }}
-                                className={`absolute -left-1 w-1.5 h-[1.5px] ${t.color} z-10`}
-                                title={`${t.val} inHg`}
+                                className="absolute -left-[2px] w-2.5 h-[1.5px] bg-slate-950 z-10"
+                                title={`${val} inHg`}
                               />
                             );
                           })}
-                          <div style={{ bottom: `${pPct}%` }} className="absolute left-1/2 -translate-x-1/2 mb-[-2px] w-4 h-1 bg-white rounded-full shadow-[0_0_4px_black] border border-slate-900 transition-all duration-1000 z-20" />
+                          <div style={{ bottom: `${pPct}%` }} className="absolute left-1/2 -translate-x-1/2 mb-[-2px] w-2.5 h-1.5 bg-white rounded-full shadow-[0_0_4px_black] border border-slate-900 transition-all duration-1000 z-20" />
                         </div>
                       </div>
                       
@@ -664,7 +708,7 @@ function App() {
 
             {/* ACTIVITY PLANNER */}
             <div className="col-span-2 bg-slate-950 border border-purple-950/40 p-3 rounded-2xl shadow-2xl flex flex-col justify-between">
-              <div className="grid grid-cols-3 gap-2 overflow-y-auto max-h-[140px] custom-scrollbar">
+              <div className="grid grid-cols-4 gap-2 overflow-y-auto max-h-[160px] custom-scrollbar">
                 {activityRatings.map((activity) => (
                   <ActivityStatusWidget 
                     key={activity.name}
@@ -677,7 +721,7 @@ function App() {
               </div>
               <div className="flex justify-between border-t border-slate-900 pt-2 mt-2 text-[8px] font-semibold uppercase font-mono text-slate-600">
                 <span>Tap cells for diagnostics</span>
-                <span>Matrix v2.3</span>
+                <span>Matrix v2.4</span>
               </div>
             </div>
 
@@ -760,10 +804,10 @@ function App() {
         {/* COL 3: RIGHT SIDE COMMAND CHANNELS */}
         <div className="col-span-4 flex flex-col gap-3 h-full min-h-0">
           <CompactChronoHeader />
-          <div className="flex-1 min-h-0 relative">
+          <div className="flex-[2] min-h-0 relative">
             <DashboardCalendarWidget events={events} />
           </div>
-          <div className="flex flex-col gap-3 shrink-0 h-[48%]">
+          <div className="flex flex-col gap-3 shrink-0 h-[28%] min-h-[160px]">
             <div className="flex-1 h-full relative">
               <LowerModuleTasks tasks={dashboardTasksArray} onRefresh={fetchTasks} />
             </div>
@@ -778,7 +822,7 @@ function App() {
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setIsVerseModalOpen(false)}>
           <div className="bg-slate-950 border border-purple-900/40 w-full max-w-md p-6 rounded-2xl shadow-2xl font-mono text-slate-200" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-slate-900 pb-3 mb-4">
-              <h4 className="text-sm font-black uppercase tracking-wider text-purple-400 flex items-center gap-2">📖 Daily Scripture • NLT</h4>
+              <h4 className="text-sm font-black uppercase tracking-wider text-purple-400 flex items-center gap-2">Daily Scripture • NLT</h4>
               <button onClick={() => setIsVerseModalOpen(false)} className="text-slate-500 hover:text-slate-300 text-lg">✕</button>
             </div>
             <p className="text-lg font-serif italic text-slate-300 leading-relaxed mb-4 max-h-[50vh] overflow-y-auto custom-scrollbar pr-2">"{weather.daily_verse?.text}"</p>
@@ -933,7 +977,12 @@ function DashboardCalendarWidget({ events }) {
                       <span className="font-bold text-slate-200 truncate text-[11px]">{ev.summary}</span>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0 text-[10px]">
-                      {ev.forecast && <span className="font-mono font-black text-slate-400">{ev.forecast.temp}°</span>}
+                      {ev.forecast && (
+                        <div className="flex items-center gap-1 font-mono font-black text-slate-400">
+                          <span>{ev.forecast.temp}°</span>
+                          {ev.forecast.rain_pct > 0 && <span className="text-blue-400">{ev.forecast.rain_pct}%</span>}
+                        </div>
+                      )}
                       {ev.is_all_day ? (
                         <span className="text-[8px] bg-slate-950 text-slate-500 px-1 rounded border border-slate-900 font-mono">ALL</span>
                       ) : (
@@ -1004,7 +1053,7 @@ export function LowerModuleTasks({ tasks, onRefresh }) {
 
   return (
     <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-2.5 flex flex-col absolute inset-0 w-full h-full">
-      <h3 className="text-[11px] font-black font-mono uppercase tracking-wider text-slate-400 mb-2 shrink-0">📋 Tasks</h3>
+      <h3 className="text-[11px] font-black font-mono uppercase tracking-wider text-slate-400 mb-2 shrink-0">Tasks</h3>
       <div className="flex-1 overflow-y-auto space-y-1 pr-0.5 custom-scrollbar text-[11px] relative">
         {tasks.length === 0 ? (
           <div className="text-center text-slate-600 mt-6 italic text-[10px]">House clean!</div>
@@ -1057,7 +1106,7 @@ export function LowerModuleSleeper({ data }) {
   return (
     <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-2.5 flex flex-col absolute inset-0 w-full h-full">
       <h3 className="text-[11px] font-black font-mono uppercase tracking-wider text-slate-400 mb-2 flex justify-between shrink-0">
-        <span>🏆 Sleeper W{data.week}</span>
+        <span>Sleeper W{data.week}</span>
       </h3>
       <div className="flex-1 overflow-y-auto space-y-1 pr-0.5 custom-scrollbar text-[11px] relative">
         {data.matchups?.map((match, idx) => {
@@ -1133,7 +1182,9 @@ export function ActivityStatusWidget({ name, currentScore, forecastScore, weathe
     'Yard Work': 'yard_work.svg',
     'Basketball': 'basketball.svg',
     'Football': 'football.svg',
-    'Walking': 'walking.svg'
+    'Walking': 'walking.svg',
+    'Video Games': 'video_game.svg',
+    'Driving': 'driving.svg'
   };
   
   const fileName = iconMapping[name] || 'default.svg';
@@ -1142,6 +1193,7 @@ export function ActivityStatusWidget({ name, currentScore, forecastScore, weathe
   const generateDiagnostics = (mode) => {
     const isFc = mode === 'forecast';
     const curTemp = parseFloat(weather.temperature_f) || 72;
+    const curFeels = parseFloat(weather.feels_like_f) || curTemp;
     const curWind = parseFloat(weather.wind_speed_mph) || 0;
     const curHum = parseFloat(weather.humidity_pct) || 50;
     const rainAccum = parseFloat(weather.rain_accumulation_day_in) || 0.0;
@@ -1167,7 +1219,7 @@ export function ActivityStatusWidget({ name, currentScore, forecastScore, weathe
         break;
       case 'Swimming':
         add("Temperature", `${temp.toFixed(1)}°F`, temp < 70 ? "critical" : temp < 75 ? "warning" : "optimal");
-        if (isLightningThreat) add("Lightning", `${lightningDist} mi (${minsSinceStrike}m ago)`, "critical");
+        if (isLightningThreat) add("Lightning", `${lightningDist} mi`, "critical");
         if (isFc) add("Precip Chance", `${fcRainPct}%`, fcRainPct > 60 ? "critical" : fcRainPct > 30 ? "warning" : "optimal");
         break;
       case 'Yard Work':
@@ -1191,6 +1243,15 @@ export function ActivityStatusWidget({ name, currentScore, forecastScore, weathe
         add("Wind speed", `${wind.toFixed(1)} mph`, wind > 22 ? "critical" : wind > 15 ? "warning" : "optimal");
         if (isFc) add("Precip Chance", `${fcRainPct}%`, fcRainPct > 40 ? "critical" : fcRainPct > 20 ? "warning" : "optimal");
         if (isLightningThreat) add("Lightning", `${lightningDist} mi`, "critical");
+        break;
+      case 'Video Games':
+        add("Temperature", `${temp.toFixed(1)}°F`, temp > 90 || temp < 40 ? "optimal" : "warning");
+        add("Feels Like", `${curFeels.toFixed(1)}°F`, curFeels >= 95 || curFeels <= 35 ? "optimal" : "warning");
+        if (isFc) add("Precip Chance", `${fcRainPct}%`, fcRainPct > 40 ? "optimal" : "warning");
+        break;
+      case 'Driving':
+        add("Rain Impact", `${parseFloat(weather.rain_rate_in_hr).toFixed(2)} in/hr`, parseFloat(weather.rain_rate_in_hr) > 0.5 ? "critical" : parseFloat(weather.rain_rate_in_hr) > 0 ? "warning" : "optimal");
+        if (isFc) add("Precip Chance", `${fcRainPct}%`, fcRainPct > 40 ? "critical" : fcRainPct > 20 ? "warning" : "optimal");
         break;
       default:
         add("Temperature", `${temp.toFixed(1)}°F`, "optimal");
@@ -1221,7 +1282,7 @@ export function ActivityStatusWidget({ name, currentScore, forecastScore, weathe
             <div className="flex justify-between items-center border-b border-slate-900 pb-2 mb-3">
               <div>
                 <h4 className="text-xs font-black uppercase tracking-wider text-slate-100 flex items-center gap-1.5">
-                  📋 {name} 
+                  {name} 
                   <span className={`text-[8px] px-1.5 py-0.5 rounded border ${modalState.mode === 'current' ? 'bg-blue-950/50 text-blue-400 border-blue-900/50' : 'bg-purple-950/50 text-purple-400 border-purple-900/50'}`}>
                     {modalState.mode}
                   </span>
@@ -1325,7 +1386,9 @@ function LightningRadarWidget({ weather }) {
         </svg>
 
         <div className={`absolute w-6 h-6 rounded-full flex items-center justify-center transition-all duration-500 z-30 ${recentCloseStrike ? 'bg-rose-600/20 border border-rose-500 text-rose-400' : 'bg-slate-900 text-slate-500'}`}>
-          <span className={`text-[10px] font-black select-none ${recentCloseStrike ? 'text-rose-400 scale-110 animate-pulse' : ''}`}>⚡</span>
+          <svg className={`w-3 h-3 fill-current select-none ${recentCloseStrike ? 'text-rose-400 scale-110 animate-pulse' : ''}`} viewBox="0 0 20 20">
+            <path d="M11 0L3 10h6l-2 10 8-12H9l2-8z"/>
+          </svg>
         </div>
       </div>
 
