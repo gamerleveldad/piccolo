@@ -24,7 +24,7 @@ INFLUX_TOKEN = os.getenv("INFLUXDB_TOKEN")
 INFLUX_ORG = os.getenv("INFLUXDB_ORG")
 INFLUX_BUCKET = os.getenv("FLIGHT_TRACKER_BUCKET", "flight_data")
 
-API_URL = f"https://api.adsb.lol/v2/lat/{LATITUDE}/lon/{LONGITUDE}/dist/{RADIUS_NM}"
+API_URL = f"https://api.adsb.lol/v2/point/{LATITUDE}/{LONGITUDE}/{RADIUS_NM}"
 HOME_COORDS = (LATITUDE, LONGITUDE)
 
 def init_postgres():
@@ -59,7 +59,7 @@ def main():
 
     while True:
         try:
-            response = requests.get(API_URL, timeout=10)
+            response = requests.get(API_URL, timeout=30)
             response.raise_for_status()
             data = response.json()
             aircraft_list = data.get("ac", [])
@@ -133,11 +133,11 @@ def main():
                 """, (icao_hex, registration, callsign, ac_type, emitter_cat, altitude_ft, 
                       vertical_rate, ground_speed_kts, heading, distance_nm, squawk, emergency))
 
-            # Prune stale flights (older than 3 minutes) from Postgres
-            pg_cur.execute("DELETE FROM flights_overhead WHERE last_seen < NOW() - INTERVAL '3 minutes';")
+            # Prune stale flights (older than 24 hours) from Postgres
+            pg_cur.execute("DELETE FROM flights_overhead WHERE last_seen < NOW() - INTERVAL '24 hours';")
             pg_conn.commit()
             
-            print(f"[{time.strftime('%X')}] Tracked {len(aircraft_list)} aircraft.")
+            print(f"[{time.strftime('%X')}] Tracked {len(aircraft_list)} aircraft around {LATITUDE}, {LONGITUDE} ({RADIUS_NM}nm radius).")
 
         except Exception as e:
             print(f"Error fetching/saving flight data: {e}")
