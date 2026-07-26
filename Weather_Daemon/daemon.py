@@ -4,7 +4,7 @@ import requests
 import feedparser
 import schedule
 from datetime import datetime
-from google.genai import Client
+from google import genai
 from influxdb_client import InfluxDBClient
 
 WEBHOOK_URL = os.environ.get("WEATHER_DISCORD_WEBHOOK")
@@ -18,7 +18,7 @@ INFLUX_TOKEN = os.environ.get("INFLUXDB_TOKEN")
 INFLUX_ORG = os.environ.get("INFLUXDB_ORG")
 INFLUX_BUCKET = os.environ.get("INFLUXDB_BUCKET")
 
-client = Client(api_key=GEMINI_API_KEY)
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 def get_influx_data():
     try:
