@@ -167,82 +167,82 @@ def check_missing_schedules(found_titles, current_weekday):
             
     return missing_alerts
 
-def get_smart_recommendation():
+def get_smart_recommendation(active_drops):
     """
-    Gathers user preferences from SQLite and queries Gemini 
-    to generate a tailored, minimalist anime recommendation.
+    Checks if a recommendation is needed based on active drops and pending queue.
+    If needed, queries Gemini and automatically inserts the suggestion into the database.
     """
     gemini_key = os.environ.get("GEMINI_API_KEY")
     if not gemini_key:
-        print("⚠️ Warning: Skipping AI recommendation. Missing GEMINI_API_KEY environment variable.")
+        print("⚠️ Warning: Skipping AI recommendation. Missing GEMINI_API_KEY.")
         return None
 
-    # 1. Gather your real historical preferences from SQLite
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Get everything you're currently watching or liked
-    cursor.execute("SELECT anime_name FROM watch_history WHERE status = 'Watching' OR user_rating = 'Liked'")
+    # 1. Check the Pending Queue limit
+    cursor.execute("SELECT COUNT(*) FROM watch_history WHERE status = 'Pending'")
+    pending_count = cursor.fetchone()[0]
+    
+    if active_drops >= 2 or pending_count >= 3:
+        conn.close()
+        return None # We have enough to watch, skip the AI query!
+        
+    print(f"Quiet night and only {pending_count} pending shows. Asking Gemini...")
+
+    # 2. Gather preferences for the AI
+    cursor.execute("SELECT anime_name FROM watch_history WHERE status IN ('Watching', 'Dormant', 'Completed') OR user_rating = 'Liked'")
     liked_shows = [row[0] for row in cursor.fetchall()]
     
-    # Get everything you explicitly hate
-    cursor.execute("SELECT anime_name FROM watch_history WHERE user_rating = 'Disliked'")
-    disliked_shows = [row[0] for row in cursor.fetchall()]
-    
-    conn.close()
+    cursor.execute("SELECT anime_name FROM watch_history WHERE user_rating = 'Disliked' OR status = 'Pending'")
+    excluded_shows = [row[0] for row in cursor.fetchall()]
 
-    # 2. Define your custom preference prompt instructions
     user_style_prompt = (
         "I enjoy action, fantasy, progression systems, and well-animated combat. "
-        "I prefer anime that has comedy mixed in."
-        "I do not like anime that has strong mature themes"
-        "I only want age range 16+ and under via the German rating system"
-        "I like any anime with aviation mixed in"
-        "I do not like anime with a lot of gore"
-        "I do not like bittersweet anime"
-        "I do like rom com but it has to lean more on the comedy"
-        "I do not like shows with excessive fan service"
-        "I do not like shows that lean heavy on the harem story type."
-        "I will tolerate shows with very mild fan service or harem elements, especially if they are for comedic effect without taking away from the story."
+        "I prefer anime that has comedy mixed in. "
+        "I do not like anime that has strong mature themes. "
+        "I only want age range 16+ and under via the German rating system. "
+        "I like any anime with aviation mixed in. "
+        "I do not like anime with a lot of gore. "
+        "I do not like bittersweet anime. "
+        "I do like rom com but it has to lean more on the comedy. "
+        "I do not like shows with excessive fan service. "
+        "I do not like shows that lean heavy on the harem story type. "
+        "I will tolerate shows with very mild fan service or harem elements, especially if they are for comedic effect."
     )
 
-    # 3. Construct the dynamic AI instruction packet
     prompt = f"""
-    You are an expert anime recommendation engine tailored to my specific taste.
+    You are an expert anime recommendation engine.
+    My preferences: {user_style_prompt}
+    Shows I like/know: {', '.join(liked_shows) if liked_shows else 'None'}
+    DO NOT SUGGEST THESE: {', '.join(excluded_shows) if excluded_shows else 'None'}
     
-    Here is my profile data:
-    - My general preferences: {user_style_prompt}
-    - Anime I currently watch and love: {', '.join(liked_shows) if liked_shows else 'None logged yet'}
-    - CRITICAL EXCLUSION LIST (Never suggest these or anything highly similar): {', '.join(disliked_shows) if disliked_shows else 'None'}
-    
-    Based on this data, select ONE highly rated English-dubbed anime available on Crunchyroll that I have not watched yet.
-    
-    CRITICAL FORMATTING RULE:
-    Your entire response must be exactly one single line matching this format without any introductory prose, markdown bolding around the title, or conversational filler:
-    Looking for something new? Try starting: [Anime Name] ([Genre]) - [One sentence hook explaining why I will love it based on my history]
+    Recommend exactly ONE English-dubbed anime on Crunchyroll I haven't watched.
+    Your response must be ONLY the exact title of the anime. No formatting, no quotes, no explanations.
     """
 
-    # 4. Initialize the Gemini client and dispatch the secure request
     try:
-        print("🧠 Querying Gemini for a personalized recommendation...")
         client = genai.Client(api_key=gemini_key)
-        response = client.models.generate_content(
-            model='gemini-3.5-flash',
-            contents=prompt,
-        )
+        response = client.models.generate_content(model='gemini-3.5-flash', contents=prompt)
+        suggested_title = response.text.strip()
         
-        ai_suggestion = response.text.strip()
-        
-        # Format safety wrap: Ensures your markdown bold requirements match your styling preference
-        if "Try starting:" in ai_suggestion:
-            # Safely inject the bold styling around the title if the AI returned it raw
-            ai_suggestion = ai_suggestion.replace("Try starting: ", "Try starting: **")
-            ai_suggestion = ai_suggestion.replace(" (", "** (", 1)
+        if suggested_title:
+            print(f"🧠 Gemini suggested: {suggested_title}. Adding to Pending queue...")
             
-        return ai_suggestion
-
+            # 3. Automatically add the new suggestion to the database
+            cursor.execute('''
+                INSERT INTO watch_history (anime_name, status, user_rating, current_episode, total_episodes)
+                VALUES (%s, 'Pending', 'Neutral', 0, 0)
+                ON CONFLICT (anime_name) DO NOTHING
+            ''', (suggested_title,))
+            conn.commit()
+            
+            conn.close()
+            return f"**New Suggestion Added to Pending:** {suggested_title}"
+            
     except Exception as e:
         print(f"Gemini AI Generation failed: {e}")
+        conn.close()
         return None
 
 # ─── PARSING & SCRAPING HELPERS ───────────────────────────────────────────────
@@ -375,7 +375,7 @@ def scan_live_calendar():
     missing_alerts = check_missing_schedules(found_titles_today, now_local.weekday())
     
     # 2. FEATURE #2 TRIGGER: If fewer than 2 episodes aired tonight, grab a recommendation
-    recommendation_line = None
+    recommendation_line = get_smart_recommendation(len(matched_drops))
     if len(matched_drops) < 2:
         print("Quiet night detected (fewer than 2 active drops). Querying engine for a suggestion...")
         recommendation_line = get_smart_recommendation()

@@ -104,6 +104,7 @@ def build_discord_message():
     2. Do not include any conversational filler. 
     3. Output ONLY the filled-in markdown text.
     4. Location context is Altamonte Springs, Florida.
+    5. Tables MUST be wrapped inside monospaced code blocks (```) and padded with spaces so every column pipe (|) aligns vertically.
     
     Raw Data:
     Tempest (InfluxDB): {influx_data}
@@ -120,21 +121,25 @@ def build_discord_message():
     ## Today's Forecast
     
     ### Forecast Comparisons
-    | Stat       | Tmpst | WxUG | NWS | Euro | GFS | Avg |
-    |------------|-------|------|-----|------|-----|-----|
-    | High       | [fill]| [fill]| [fill]| [fill]| [fill]| [avg]|
-    | PoP        | [fill]| [fill]| [fill]| [fill]| [fill]| [avg]|
-    | Heat Index | [fill]| [fill]| [fill]| [fill]| [fill]| [avg]|
+    ```
+    | Stat       | Tmpst | WxUG  | NWS   | Euro  | GFS   | Avg   |
+    |------------|-------|-------|-------|-------|-------|-------|
+    | High       | [fill]| [fill]| [fill]| [fill]| [fill]| [avg] |
+    | PoP        | [fill]| [fill]| [fill]| [fill]| [fill]| [avg] |
+    | Heat Index | [fill]| [fill]| [fill]| [fill]| [fill]| [avg] |
+    ```
     
     ### Today's Forecast Discussion
     [Write a 1-2 sentence discussion comparing the GFS and Euro expectations for the day based on the data provided.]
     
     ### Future Forecast
+    ```
     |     | [Date 1] | [Date 2] | [Date 3] | [Date 4] | [Date 5] | [Date 6] | [Date 7] | [Date 8] | [Date 9] | [Date 10] |
-    |-----|---|---|---|---|---|---|---|---|---|---|
-    | Hi  | | | | | | | | | | |
-    | Lo  | | | | | | | | | | |
-    | PoP | | | | | | | | | | |
+    |-----|----------|----------|----------|----------|----------|----------|----------|----------|----------|-----------|
+    | Hi  | [fill]   | [fill]   | [fill]   | [fill]   | [fill]   | [fill]   | [fill]   | [fill]   | [fill]   | [fill]    |
+    | Lo  | [fill]   | [fill]   | [fill]   | [fill]   | [fill]   | [fill]   | [fill]   | [fill]   | [fill]   | [fill]    |
+    | PoP | [fill]   | [fill]   | [fill]   | [fill]   | [fill]   | [fill]   | [fill]   | [fill]   | [fill]   | [fill]    |
+    ```
     
     ## Tropics Update
     ### Current Storms

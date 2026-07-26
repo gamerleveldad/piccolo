@@ -32,6 +32,7 @@ services:
     volumes:
       - ./Family_Dashboard/assets:/app/assets
     environment:
+      - LOCAL_MODE=true
       - TZ=America/New_York
       - STATION_ID=${STATION_ID}
       - WEATHER_API_TOKEN=${WEATHER_API_TOKEN}

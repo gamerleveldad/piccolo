@@ -26,10 +26,14 @@ class HistoryItem(BaseModel):
     anime_name: str
     status: str
     user_rating: str
+    current_episode: int = 0
+    total_episodes: int = 0
 
 class HistoryUpdate(BaseModel):
     status: str
     user_rating: str
+    current_episode: int
+    total_episodes: int
 
 # --- Schedule Routes (Read-Only) ---
 @app.get("/api/schedule")
@@ -57,9 +61,9 @@ def add_history(item: HistoryItem):
     cursor = conn.cursor()
     try:
         cursor.execute('''
-            INSERT INTO watch_history (anime_name, status, user_rating)
-            VALUES (%s, %s, %s)
-        ''', (item.anime_name, item.status, item.user_rating))
+            INSERT INTO watch_history (anime_name, status, user_rating, current_episode, total_episodes)
+            VALUES (%s, %s, %s, %s, %s)
+        ''', (item.anime_name, item.status, item.user_rating, item.current_episode, item.total_episodes))
         conn.commit()
     except psycopg2.IntegrityError:
         conn.rollback()
@@ -74,9 +78,9 @@ def update_history(anime_name: str, item: HistoryUpdate):
     cursor = conn.cursor()
     cursor.execute('''
         UPDATE watch_history 
-        SET status = %s, user_rating = %s 
+        SET status = %s, user_rating = %s, current_episode = %s, total_episodes = %s
         WHERE anime_name = %s
-    ''', (item.status, item.user_rating, anime_name))
+    ''', (item.status, item.user_rating, item.current_episode, item.total_episodes, anime_name))
     conn.commit()
     conn.close()
     return {"message": "Updated successfully"}
@@ -89,3 +93,18 @@ def delete_history(anime_name: str):
     conn.commit()
     conn.close()
     return {"message": "Deleted successfully"}
+
+@app.get("/api/progress")
+def get_progress():
+    """Dedicated endpoint for rendering dashboard progress bars."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT anime_name, current_episode, total_episodes 
+        FROM watch_history 
+        WHERE status = 'Watching' 
+        ORDER BY anime_name
+    ''')
+    progress = [{"name": row[0], "current": row[1], "total": row[2]} for row in cursor.fetchall()]
+    conn.close()
+    return progress

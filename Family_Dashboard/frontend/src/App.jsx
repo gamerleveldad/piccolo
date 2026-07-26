@@ -12,10 +12,9 @@ const weatherAssets = {
   'thunderstorm': '/assets/weather/thunderstorm.gif',
   'windy': '/assets/weather/windy.gif',
   'default': '/assets/weather/clear-day.gif',
-  'alien': '/assets/weather/weather-icons-master/svg/wi-alien.svg' // Easter egg fallback asset
+  'alien': '/assets/weather/weather-icons-master/svg/wi-alien.svg'
 };
 
-// HELPER: SvgWeatherIcon rebuilt with aggressive string matching so unknown APIs don't trigger the alien
 const SvgWeatherIcon = ({ icon, className = "w-4 h-4" }) => {
   const mapping = {
     'clear-day': { file: 'wi-day-sunny.svg', color: 'text-yellow-400' },
@@ -35,7 +34,7 @@ const SvgWeatherIcon = ({ icon, className = "w-4 h-4" }) => {
     if (!rawIcon) return mapping['clear-day'];
     const key = rawIcon.toLowerCase();
     
-    if (key === 'alien') return mapping['alien']; // Hardcode trigger for easter egg
+    if (key === 'alien') return mapping['alien']; 
     if (key.includes('clear') && key.includes('night')) return mapping['clear-night'];
     if (key.includes('clear') || key.includes('sun')) return mapping['clear-day'];
     if (key.includes('partly') && key.includes('night')) return mapping['partly-cloudy-night'];
@@ -46,11 +45,11 @@ const SvgWeatherIcon = ({ icon, className = "w-4 h-4" }) => {
     if (key.includes('snow') || key.includes('ice') || key.includes('flurr') || key.includes('sleet')) return mapping['snow'];
     if (key.includes('fog') || key.includes('mist')) return mapping['fog'];
     if (key.includes('wind')) return mapping['windy'];
-    
-    return mapping['cloudy']; // Failsafe to a normal cloud instead of an alien
+    return mapping['cloudy']; 
   };
   
   const meta = getSafeMeta(icon);
+  
   if (meta.file === 'wi-thunderstorm.svg') {
     return (
       <div 
@@ -60,12 +59,27 @@ const SvgWeatherIcon = ({ icon, className = "w-4 h-4" }) => {
           WebkitMaskSize: 'contain',
           WebkitMaskRepeat: 'no-repeat',
           WebkitMaskPosition: 'center',
-          // Paint the top 55% slate-400 (grey) and the bottom amber-400 (yellow)
           backgroundImage: 'linear-gradient(to bottom, #94a3b8 55%, #fbbf24 60%)'
         }}
       />
     );
   }
+  
+  if (meta.file === 'wi-day-cloudy.svg') {
+    return (
+      <div 
+        className={`${className}`}
+        style={{
+          WebkitMaskImage: `url(/assets/weather/weather-icons-master/svg/${meta.file})`,
+          WebkitMaskSize: 'contain',
+          WebkitMaskRepeat: 'no-repeat',
+          WebkitMaskPosition: 'center',
+          backgroundImage: 'linear-gradient(225deg, #fbbf24 35%, #94a3b8 40%)'
+        }}
+      />
+    );
+  }
+
   return (
     <div 
       className={`${className} ${meta.color}`}
@@ -80,22 +94,12 @@ const SvgWeatherIcon = ({ icon, className = "w-4 h-4" }) => {
   );
 };
 
-// HELPER: Wind Color Scaling
 const getWindColor = (mph) => {
   if (mph < 12) return 'text-emerald-400';
   if (mph < 25) return 'text-amber-400';
   return 'text-rose-500 animate-pulse drop-shadow-[0_0_8px_rgba(225,29,72,0.6)]';
 };
 
-// HELPER: Pressure Trend Arrows
-const getPressureTrendIcon = (trend) => {
-  const basePath = "/assets/weather/weather-icons-master/svg";
-  if (trend === 'Rising') return `${basePath}/wi-direction-up-right.svg`;
-  if (trend === 'Falling') return `${basePath}/wi-direction-down-right.svg`;
-  return `${basePath}/wi-direction-right.svg`;
-};
-
-// COMPONENT: Google Photos Display Widget
 export function GooglePhotosWidget() {
   const [photos, setPhotos] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -107,7 +111,6 @@ export function GooglePhotosWidget() {
         const res = await fetch(`http://${host}:8000/api/photos`);
         if (res.ok) {
           const data = await res.json();
-          // FIX: Add the backend IP address to the start of the image paths
           const fullUrls = (data.urls || []).map(url => `http://${host}:8000${encodeURI(url)}`);
           setPhotos(fullUrls);
         }
@@ -190,8 +193,6 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [events, setEvents] = useState([]);
   const [easterEggActive, setEasterEggActive] = useState(false);
-  
-  // CORRECT PLACEMENT FOR THE VERSE MODAL STATE
   const [isVerseModalOpen, setIsVerseModalOpen] = useState(false);
 
   const ALERT_CONFIGS = {
@@ -212,7 +213,7 @@ function App() {
     "Default": { icon: "/assets/weather/weather-icons-master/svg/wi-alien.svg", color: "text-slate-400", bg: "bg-slate-900/40", border: "border-slate-800", pulse: false }
   };
 
-useEffect(() => {
+  useEffect(() => {
     let ws;
     let reconnectTimeout;
 
@@ -221,19 +222,15 @@ useEffect(() => {
       ws = new WebSocket(`ws://${host}:8000/ws`);
 
       ws.onopen = () => {
-        console.log("WebSocket Connected!");
         setConnected(true);
       };
 
       ws.onclose = () => {
-        console.log("WebSocket Disconnected. Attempting to reconnect in 3 seconds...");
         setConnected(false);
-        // Auto-reconnect automatically revives the dashboard after deployments/restarts
         reconnectTimeout = setTimeout(connectWebSocket, 3000);
       };
 
       ws.onerror = (err) => {
-        console.error("WebSocket Error!", err);
         ws.close();
       };
 
@@ -287,11 +284,12 @@ useEffect(() => {
     return () => {
       clearTimeout(reconnectTimeout);
       if (ws) {
-        ws.onclose = null; // Prevent a loop if the component unmounts
+        ws.onclose = null;
         ws.close();
       }
     };
   }, []);
+  
   useEffect(() => {
     if (weather.strike_trigger_ring) {
       const timer = setTimeout(() => {
@@ -316,8 +314,6 @@ useEffect(() => {
     return               { text: 'L10: Misery Soup', color: 'text-purple-500 font-extrabold animate-pulse' };
   };
   const comfort = getComfortLevel(weather.dew_point_f);
-
-  const correctedArrowRotation = (parseFloat(weather.wind_direction_deg) + 180) % 360;
 
   const getActivityRatings = () => {
     const currentTemp = parseFloat(weather.temperature_f) || 72;
@@ -416,28 +412,17 @@ useEffect(() => {
     let tierColor = 'text-slate-300';
     
     if (current >= 30.20) { 
-      tier = 'High System'; 
       tierColor = 'text-cyan-400'; 
     } else if (current < 29.80) {
-      if (current < 28.94) { 
-        tier = 'Major Hurricane'; 
-        tierColor = 'text-red-500 font-black animate-pulse'; 
-      } else if (current < 29.23) {
-        tier = 'Hurricane Depr.'; 
-        tierColor = 'text-orange-500 font-extrabold'; 
-      } else if (current < 29.53) {
-        tier = 'Tropical Storm'; 
-        tierColor = 'text-amber-500 font-bold'; 
-      } else if (current < 29.71) {
-        tier = 'Tropical Depr.'; 
-        tierColor = 'text-yellow-400'; 
-      } else { 
-        tier = 'Low Pressure'; 
-        tierColor = 'text-purple-400'; 
-      }
+      if (current < 28.94) { tierColor = 'text-red-500 font-black animate-pulse'; 
+      } else if (current < 29.23) { tierColor = 'text-orange-500 font-extrabold'; 
+      } else if (current < 29.53) { tierColor = 'text-amber-500 font-bold'; 
+      } else if (current < 29.71) { tierColor = 'text-yellow-400'; 
+      } else { tierColor = 'text-purple-400'; }
     }
     return { tier, tierColor };
   };
+
   const getRainStatus = (rate) => {
     const r = parseFloat(rate) || 0.0;
     if (r === 0) return { text: "Not Raining", color: "text-emerald-500" };
@@ -447,6 +432,7 @@ useEffect(() => {
   };
   
   const rainStatus = getRainStatus(weather.rain_rate_in_hr);
+  const pressDiag = getPressureDiagnostics();
   
   const [dashboardTasksArray, setDashboardTasksArray] = useState([]);
   const [sleeperPayloadState, setSleeperPayloadState] = useState({ mode: "disabled" });
@@ -492,12 +478,6 @@ useEffect(() => {
     return () => clearInterval(interval);
   }, []);
 
-  const triggerManualSocketPull = () => {
-    fetchTasks();
-  };
-
-  const pressDiag = getPressureDiagnostics();
-
   return (
     <div className="min-h-screen bg-black text-slate-100 p-4 font-sans tracking-tight overflow-hidden select-none">
       
@@ -509,7 +489,6 @@ useEffect(() => {
               <h1 
                 className="text-lg font-black uppercase tracking-wider text-slate-100 font-mono cursor-pointer transition-colors hover:text-purple-400"
                 onClick={() => setEasterEggActive(!easterEggActive)}
-                title="Tap to toggle system overrides"
               >
                 Howls Moving Dashboard
               </h1>
@@ -517,13 +496,7 @@ useEffect(() => {
                 {weather?.alerts && weather.alerts.length > 0 ? (
                   weather.alerts.map((alert, idx) => {
                     const config = ALERT_CONFIGS[alert.event.trim()] || ALERT_CONFIGS["Default"];
-                    return (
-                      <WeatherAlertBadge 
-                        key={alert.id || idx} 
-                        alert={alert} 
-                        config={config} 
-                      />
-                    );
+                    return <WeatherAlertBadge key={alert.id || idx} alert={alert} config={config} />;
                   })
                 ) : (
                   <span className="text-[9px] font-mono font-black tracking-widest text-emerald-500/80 bg-emerald-950/20 border border-emerald-900/40 rounded-full px-2.5 py-0.5 uppercase flex items-center gap-1.5 animate-pulse">
@@ -539,7 +512,6 @@ useEffect(() => {
               <div 
                 className="flex items-center gap-1 cursor-pointer hover:bg-purple-900/20 px-1.5 py-0.5 rounded transition-colors"
                 onClick={() => setIsVerseModalOpen(true)}
-                title="Tap to read full passage"
               >
                 <span className="text-purple-500/90 font-black">Verse:</span>
                 <span className="text-slate-300 normal-case font-semibold truncate max-w-[200px] sm:max-w-[300px]">
@@ -554,9 +526,7 @@ useEffect(() => {
           <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
             {connected ? 'Active' : 'Offline'}
           </span>
-          <span className={`h-2.5 w-2.5 rounded-full ${
-            connected ? 'bg-blue-500 shadow-[0_0_8px_#3b82f6]' : 'bg-rose-500 shadow-[0_0_8px_#f43f5e]'
-          }`} />
+          <span className={`h-2.5 w-2.5 rounded-full ${connected ? 'bg-blue-500 shadow-[0_0_8px_#3b82f6]' : 'bg-rose-500 shadow-[0_0_8px_#f43f5e]'}`} />
         </div>
       </header>  
 
@@ -571,7 +541,7 @@ useEffect(() => {
         <div className="col-span-6 flex flex-col gap-3 overflow-y-auto pr-0.5 max-h-full content-start no-scrollbar">
           
           <div className="grid grid-cols-2 gap-3">
-            {/* TEMPERATURE BLOCK */}
+            {/* TEMPERATURE & PRESSURE BLOCK */}
             <div className="col-span-2 bg-slate-950 border border-blue-950/40 p-4 rounded-2xl flex flex-col justify-between shadow-2xl relative overflow-hidden">
               <div className="grid grid-cols-12 gap-2 items-center">
                 {(() => {
@@ -585,9 +555,14 @@ useEffect(() => {
                   const overlayColor = isHeatIndex ? 'bg-red-500/20' : 'bg-blue-500/20';
                   const pulseClass = tempDelta >= 2.0 ? 'animate-pulse' : '';
                   const feelsColorClass = isHeatIndex ? 'text-rose-500' : 'text-cyan-400';
+                  
+                  // Pressure Math for Vertical Gauge
+                  const minP = 28.5; const maxP = 30.5;
+                  const pVal = parseFloat(weather.pressure_inhg) || 29.92;
+                  const pPct = Math.min(Math.max(((pVal - minP) / (maxP - minP)) * 100, 0), 100);
+
                   const activeIconKey = easterEggActive ? 'alien' : (weather.icon_api || 'clear-day');
                   const currentAsset = easterEggActive ? weatherAssets['alien'] : (weatherAssets[activeIconKey] || weatherAssets['default']);
-                  const humanConditions = weather.conditions || 'Steady';
 
                   return (
                     <>
@@ -608,7 +583,7 @@ useEffect(() => {
                         </div>
                       </div>
 
-                      <div className="col-span-3 flex justify-center items-center h-28 relative">
+                      <div className="col-span-2 flex justify-center items-center h-28 relative">
                         <div className="w-4 h-full rounded-full bg-gradient-to-t from-blue-950 via-blue-800 via-emerald-950 via-amber-950 to-red-950/60 relative border border-slate-900/80 shadow-inner">
                           {tempDelta > 0 && (
                             <div 
@@ -620,15 +595,41 @@ useEffect(() => {
                           <div style={{ bottom: `${feelsPct}%` }} className={`absolute left-1/2 -translate-x-1/2 mb-[-1px] w-5 h-0.5 rounded-full shadow-lg border border-black/40 transition-all duration-1000 z-10 ${isHeatIndex ? 'bg-red-500' : 'bg-blue-400'}`} />
                         </div>
                       </div>
+
+                      {/* ADDED: Vertical Pressure Gauge */}
+                      {/* VERTICAL PRESSURE GAUGE WITH THRESHOLD TICKS */}
+                      <div className="col-span-2 flex flex-col justify-center items-center h-28 relative gap-1">
+                        <div className="w-3 h-full rounded-full bg-gradient-to-t from-red-600 via-yellow-500 via-slate-400 to-cyan-400 relative border border-slate-900/80 shadow-inner flex items-center">
+                          {[
+                            { val: 28.94, color: 'bg-red-500' },
+                            { val: 29.23, color: 'bg-orange-500' },
+                            { val: 29.53, color: 'bg-amber-400' },
+                            { val: 29.71, color: 'bg-yellow-400' },
+                            { val: 29.80, color: 'bg-slate-400' },
+                            { val: 30.20, color: 'bg-cyan-400' }
+                          ].map((t, idx) => {
+                            const tickPct = Math.min(Math.max(((t.val - 28.5) / (30.5 - 28.5)) * 100, 0), 100);
+                            return (
+                              <div 
+                                key={idx}
+                                style={{ bottom: `${tickPct}%` }}
+                                className={`absolute -left-1 w-1.5 h-[1.5px] ${t.color} z-10`}
+                                title={`${t.val} inHg`}
+                              />
+                            );
+                          })}
+                          <div style={{ bottom: `${pPct}%` }} className="absolute left-1/2 -translate-x-1/2 mb-[-2px] w-4 h-1 bg-white rounded-full shadow-[0_0_4px_black] border border-slate-900 transition-all duration-1000 z-20" />
+                        </div>
+                      </div>
                       
-                      <div className="col-span-5 flex flex-col items-center justify-center relative pr-1">
-                        <div className="w-20 h-20 rounded-full bg-slate-950 relative overflow-hidden flex items-center justify-center border border-slate-900/40 shadow-xl">
+                      <div className="col-span-4 flex flex-col items-center justify-center relative pr-1">
+                        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-slate-950 relative overflow-hidden flex items-center justify-center border border-slate-900/40 shadow-xl">
                           {easterEggActive ? (
                             <SvgWeatherIcon icon="alien" className="w-14 h-14" />
                           ) : (
                             <img 
                               src={currentAsset} 
-                              alt={humanConditions} 
+                              alt="" 
                               className="w-full h-full object-cover opacity-90 select-none pointer-events-none"
                               style={{ WebkitMaskImage: 'radial-gradient(circle, rgba(0,0,0,1) 60%, rgba(0,0,0,0) 100%)' }}
                             />
@@ -636,14 +637,14 @@ useEffect(() => {
                           <div className="absolute inset-0 w-full h-full rounded-full shadow-[inset_0_0_10px_rgba(2,6,23,0.9)]" />
                         </div>
                         
-                        <div className="flex flex-col items-center justify-center mt-1.5 w-full px-2">
-                          <div className="flex items-center justify-center gap-1.5 w-full">
-                            <SvgWeatherIcon icon={activeIconKey} className="w-5 h-5 shrink-0" />
+                        <div className="flex flex-col items-center justify-center mt-1.5 w-full px-1">
+                          <div className="flex items-center justify-center gap-1 w-full">
+                            <SvgWeatherIcon icon={activeIconKey} className="w-4 h-4 shrink-0" />
                             <span 
-                              className="text-[10px] font-black uppercase tracking-wider text-slate-300 text-center leading-tight break-words" 
+                              className="text-[9px] font-black uppercase tracking-wider text-slate-300 text-center leading-tight break-words" 
                               style={{ textWrap: 'balance' }}
                             >
-                              {easterEggActive ? "ALIEN INVASION" : humanConditions}
+                              {easterEggActive ? "ALIEN INVASION" : (weather.conditions || 'Steady')}
                             </span>
                           </div>
                         </div>
@@ -651,112 +652,13 @@ useEffect(() => {
                     </>
                   );
                 })()}
-
               </div>
 
               <div className="mt-2 pt-2 border-t border-slate-900 text-[11px] font-semibold uppercase tracking-wider text-slate-500 flex justify-between items-center">
                 <div>Comfort: <span className={`font-bold ml-1 ${comfort.color}`}>{comfort.text}</span></div>
-                <div className="text-[9px] font-mono text-slate-600">0° - 120°</div>
-              </div>
-            </div>
-
-            {/* WIND VECTOR */}
-            <div className="bg-slate-950 border border-purple-950/40 p-3 rounded-2xl flex flex-col items-center justify-center relative shadow-2xl">
-              <span className="absolute top-2 left-3 text-[9px] font-bold uppercase tracking-widest text-purple-400">Wind</span>
-              
-              <svg className="w-24 h-24 relative mt-2" viewBox="0 0 200 200">
-                <circle cx="100" cy="100" r="84" className="stroke-purple-950/20" strokeWidth="2" fill="transparent" />
-                <circle cx="100" cy="100" r="80" className="stroke-slate-900" strokeWidth="4" fill="transparent" />
-                
-                <text x="100" y="32" textAnchor="middle" className="fill-purple-400 text-[16px] font-black">N</text>
-                <text x="174" y="104" textAnchor="middle" className="fill-slate-600 text-[11px] font-bold">E</text>
-                <text x="100" y="178" textAnchor="middle" className="fill-slate-600 text-[11px] font-bold">S</text>
-                <text x="26" y="104" textAnchor="middle" className="fill-slate-600 text-[11px] font-bold">W</text>
-
-                <g style={{ transform: `rotate(${correctedArrowRotation}deg)`, transformOrigin: '100px 100px' }} className="transition-transform duration-700 ease-out">
-                  <polygon points="100,6 108,24 100,20 92,24" className="fill-cyan-400 drop-shadow-[0_0_6px_#22d3ee]" />
-                </g>
-              </svg>
-
-              <div className="absolute text-center mt-3">
-                <div className="leading-none">
-                  <span className={`text-xl font-black tracking-tighter ${getWindColor(weather.wind_speed_mph)}`}>
-                    {weather.wind_speed_mph}
-                  </span>
-                  <span className="text-[8px] font-bold text-slate-500 uppercase ml-0.5">mph</span>
+                <div className="text-[10px] font-mono text-slate-400">
+                  <span className={pressDiag.tierColor}>{parseFloat(weather.pressure_inhg).toFixed(2)} inHg</span> ({weather.pressure_trend_api})
                 </div>
-                <div className="text-[7px] font-semibold text-slate-400 tracking-tight mt-0.5">
-                  G: <span className="text-rose-400 font-bold">{weather.wind_gust_mph}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* BAROMETER */}
-            <div className="bg-slate-950 border border-purple-950/40 p-3 rounded-2xl flex flex-col items-center justify-center relative shadow-2xl">
-              <span className="absolute top-2 left-3 text-[9px] font-bold uppercase tracking-widest text-purple-400">Pressure</span>
-              
-              <svg className="w-24 h-24 mt-2" viewBox="0 0 200 200">
-                <defs>
-                  <linearGradient id="wunderGradCompact" x1="0%" y1="100%" x2="100%" y2="0%">
-                    <stop offset="0%" stopColor="#a855f7" />
-                    <stop offset="50%" stopColor="#2563eb" />
-                    <stop offset="100%" stopColor="#06b6d4" />
-                  </linearGradient>
-                </defs>
-                <circle 
-                  cx="100" cy="100" r="75" 
-                  stroke="url(#wunderGradCompact)" strokeWidth="12" fill="transparent"
-                  transform="rotate(135 100 100)"
-                  strokeDasharray={`${2 * Math.PI * 75 * 0.75} ${2 * Math.PI * 75 * 0.25}`}
-                  strokeLinecap="round"
-                />
-                
-                {[
-                  { value: 28.94, color: 'stroke-red-500' },
-                  { value: 29.23, color: 'stroke-orange-500' },
-                  { value: 29.53, color: 'stroke-yellow-400' },
-                  { value: 29.71, color: 'stroke-purple-400' },
-                  { value: 29.80, color: 'stroke-slate-400' },
-                  { value: 30.20, color: 'stroke-cyan-400' }
-                ].map((t, idx) => {
-                  const pct = (t.value - 28.0) / (31.0 - 28.0);
-                  const angle = 135 + (pct * 270);
-                  return (
-                    <line key={idx} x1="160" y1="100" x2="177" y2="100" className={`${t.color} shadow-lg`} strokeWidth="4" transform={`rotate(${angle} 100 100)`} />
-                  );
-                })}
-
-                {(() => {
-                  const pVal = parseFloat(weather.pressure_inhg) || 29.92;
-                  const pct = Math.min(Math.max((pVal - 28.0) / (31.0 - 28.0), 0), 1);
-                  const bubbleAngle = 135 + (pct * 270);
-                  const bubbleRad = (bubbleAngle * Math.PI) / 180;
-                  return (
-                    <circle 
-                      cx={100 + 75 * Math.cos(bubbleRad)} 
-                      cy={100 + 75 * Math.sin(bubbleRad)} 
-                      r="9" className="fill-white stroke-slate-950" strokeWidth="3"
-                    />
-                  );
-                })()}
-              </svg>
-
-              <div className="absolute text-center mt-13 flex flex-col items-center">
-                <span className="text-base font-black font-mono tracking-tighter text-slate-100 block leading-tight">
-                  {parseFloat(weather.pressure_inhg).toFixed(2)}
-                </span>
-                
-                <div className="flex justify-center mt-0.5">
-                  <img 
-                    src={getPressureTrendIcon(weather.pressure_trend_api)} 
-                    alt={weather.pressure_trend_api} 
-                    className="w-4 h-4 invert opacity-70"
-                  />
-                </div>
-
-                <span className={`text-[7px] font-black uppercase tracking-wider ${pressDiag.tierColor} mt-0.5`}>
-                  {pressDiag.tier.split(' ')[0]}
-                </span>
               </div>
             </div>
 
@@ -775,7 +677,7 @@ useEffect(() => {
               </div>
               <div className="flex justify-between border-t border-slate-900 pt-2 mt-2 text-[8px] font-semibold uppercase font-mono text-slate-600">
                 <span>Tap cells for diagnostics</span>
-                <span>Matrix v2.2</span>
+                <span>Matrix v2.3</span>
               </div>
             </div>
 
@@ -842,14 +744,13 @@ useEffect(() => {
               </div>
             </div>
 
-            {/* LIGHTNING RADAR */}
+            {/* LIGHTNING & WIND HYBRID RADAR */}
             <div className="col-span-2">
               <LightningRadarWidget weather={weather} />
             </div>
 
           </div>
 
-          {/* DISPLAY BOARD - GOOGLE PHOTOS PORTAL */}
           <div className="flex-1 w-full mt-2 relative">
             <GooglePhotosWidget />
           </div>
@@ -858,61 +759,34 @@ useEffect(() => {
 
         {/* COL 3: RIGHT SIDE COMMAND CHANNELS */}
         <div className="col-span-4 flex flex-col gap-3 h-full min-h-0">
-          
           <CompactChronoHeader />
-
           <div className="flex-1 min-h-0 relative">
             <DashboardCalendarWidget events={events} />
           </div>
-              
-          {/* STACKED AGENDA & SLEEPER WIDGETS */}
           <div className="flex flex-col gap-3 shrink-0 h-[48%]">
             <div className="flex-1 h-full relative">
-              <LowerModuleTasks tasks={dashboardTasksArray} onRefresh={triggerManualSocketPull} />
+              <LowerModuleTasks tasks={dashboardTasksArray} onRefresh={fetchTasks} />
             </div>
             <div className="flex-1 h-full relative">
               <LowerModuleSleeper data={sleeperPayloadState} />
             </div>
           </div>
         </div>
-        
       </div>
 
-      {/* FULL SCRIPTURE MODAL OVERLAY */}
       {isVerseModalOpen && (
-        <div 
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4"
-          onClick={() => setIsVerseModalOpen(false)}
-        >
-          <div 
-            className="bg-slate-950 border border-purple-900/40 w-full max-w-md p-6 rounded-2xl shadow-2xl font-mono text-slate-200"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setIsVerseModalOpen(false)}>
+          <div className="bg-slate-950 border border-purple-900/40 w-full max-w-md p-6 rounded-2xl shadow-2xl font-mono text-slate-200" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-slate-900 pb-3 mb-4">
-              <h4 className="text-sm font-black uppercase tracking-wider text-purple-400 flex items-center gap-2">
-                📖 Daily Scripture • NLT
-              </h4>
+              <h4 className="text-sm font-black uppercase tracking-wider text-purple-400 flex items-center gap-2">📖 Daily Scripture • NLT</h4>
               <button onClick={() => setIsVerseModalOpen(false)} className="text-slate-500 hover:text-slate-300 text-lg">✕</button>
             </div>
-            
-            <p className="text-lg font-serif italic text-slate-300 leading-relaxed mb-4 max-h-[50vh] overflow-y-auto custom-scrollbar pr-2">
-              "{weather.daily_verse?.text}"
-            </p>
-            
-            <p className="text-right text-sm font-bold text-slate-400">
-              — {weather.daily_verse?.reference}
-            </p>
-            
-            <button
-              onClick={() => setIsVerseModalOpen(false)}
-              className="mt-6 w-full py-2.5 bg-slate-900 text-slate-400 font-bold text-xs rounded-xl border border-slate-800 uppercase hover:bg-slate-800 transition-colors tracking-widest"
-            >
-              Close Passage
-            </button>
+            <p className="text-lg font-serif italic text-slate-300 leading-relaxed mb-4 max-h-[50vh] overflow-y-auto custom-scrollbar pr-2">"{weather.daily_verse?.text}"</p>
+            <p className="text-right text-sm font-bold text-slate-400">— {weather.daily_verse?.reference}</p>
+            <button onClick={() => setIsVerseModalOpen(false)} className="mt-6 w-full py-2.5 bg-slate-900 text-slate-400 font-bold text-xs rounded-xl border border-slate-800 uppercase hover:bg-slate-800 transition-colors tracking-widest">Close Passage</button>
           </div>
         </div>
       )}
-
     </div>
   );
 }
@@ -947,16 +821,9 @@ function ForecastStripWidget({ weather }) {
           const isToday = idx === 0;
 
           return (
-            <div 
-              key={idx} 
-              className={`flex flex-col justify-center py-1 border-b border-slate-900/60 last:border-0 ${
-                isToday ? 'bg-blue-950/10 border-l-2 border-blue-500 pl-1' : ''
-              }`}
-            >
+            <div key={idx} className={`flex flex-col justify-center py-1 border-b border-slate-900/60 last:border-0 ${isToday ? 'bg-blue-950/10 border-l-2 border-blue-500 pl-1' : ''}`}>
               <div className="flex items-center gap-1">
-                <span className={`text-[20px] font-black uppercase font-mono ${isToday ? 'text-blue-400' : 'text-slate-200'}`}>
-                  {dayName}
-                </span>
+                <span className={`text-[20px] font-black uppercase font-mono ${isToday ? 'text-blue-400' : 'text-slate-200'}`}>{dayName}</span>
                 <span className="text-[16px] font-bold text-slate-500 font-mono">{dateString}</span>
               </div>
               <div className="flex items-baseline gap-1 font-mono leading-none my-0.5">
@@ -998,7 +865,7 @@ function DashboardCalendarWidget({ events }) {
     const startSunday = new Date(today);
     startSunday.setDate(today.getDate() - today.getDay());
     startSunday.setHours(0, 0, 0, 0);
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 28; i++) {
       const nextDay = new Date(startSunday);
       nextDay.setDate(startSunday.getDate() + i);
       days.push(nextDay);
@@ -1015,7 +882,7 @@ function DashboardCalendarWidget({ events }) {
     <div className="h-full w-full overflow-y-auto custom-scrollbar bg-slate-950 border border-slate-900/60 p-3 rounded-2xl shadow-xl flex flex-col absolute inset-0">
       <div className="flex justify-between items-center border-b border-slate-900 pb-2 mb-2 shrink-0">
         <div>
-          <span className="text-[9px] font-black uppercase tracking-widest text-blue-400">Schedule Horizon</span>
+          <span className="text-[9px] font-black uppercase tracking-widest text-blue-400">Schedule Horizon (28-Day)</span>
         </div>
         <span className="text-[8px] font-mono bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/20 font-bold">
           {activeUpcomingEvents.length} Entries
@@ -1130,10 +997,8 @@ export function LowerModuleTasks({ tasks, onRefresh }) {
     const today = new Date();
     today.setHours(0,0,0,0); localDue.setHours(0,0,0,0);
     const diffDays = Math.round((localDue.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-
     let label = diffDays <= 0 ? "Today" : diffDays === 1 ? "Tomor" : localDue.toLocaleDateString('en-US', { weekday: 'short' });
     let styleClass = diffDays <= 0 ? "bg-sky-950/60 border-sky-500/50 text-sky-400" : "bg-purple-950/60 border-purple-500/50 text-purple-400";
-
     return <span className={`text-[8px] font-mono font-black uppercase px-1 py-0.5 rounded border ${styleClass} shrink-0`}>{label}</span>;
   };
 
@@ -1157,7 +1022,6 @@ export function LowerModuleTasks({ tasks, onRefresh }) {
           ))
         )}
       </div>
-
       {selectedTask && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setSelectedTask(null)}>
           <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl max-w-xs w-full font-mono text-[11px]" onClick={e => e.stopPropagation()}>
@@ -1213,7 +1077,6 @@ export function LowerModuleSleeper({ data }) {
           );
         })}
       </div>
-
       {activeMatchup && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setActiveMatchup(null)}>
           <div className="bg-slate-950 border border-slate-800 p-3 rounded-xl max-w-sm w-full h-[60vh] flex flex-col font-mono text-[10px]" onClick={e => e.stopPropagation()}>
@@ -1258,32 +1121,36 @@ export function ActivityStatusWidget({ name, currentScore, forecastScore, weathe
     return "from-rose-700 to-slate-950 border-rose-600/30";
   };
 
-  // NEW: Gradient logic based on constraint violations
   const getStatusGradient = (status) => {
     if (status === 'optimal') return "bg-gradient-to-r from-emerald-600 to-emerald-900 text-emerald-100 border-emerald-500/50 shadow-inner";
     if (status === 'warning') return "bg-gradient-to-r from-amber-500 to-amber-700 text-amber-50 border-amber-500/50 shadow-inner";
     return "bg-gradient-to-r from-rose-600 to-red-900 text-rose-100 border-rose-500/50 shadow-[0_0_8px_rgba(225,29,72,0.6)]";
   };
 
+  const iconMapping = {
+    'Airbrushing': 'airbrush.svg',
+    'Swimming': 'swimming.svg',
+    'Yard Work': 'yard_work.svg',
+    'Basketball': 'basketball.svg',
+    'Football': 'football.svg',
+    'Walking': 'walking.svg'
+  };
+  
+  const fileName = iconMapping[name] || 'default.svg';
+  const iconPath = `/assets/activities/${fileName}`;
+
   const generateDiagnostics = (mode) => {
     const isFc = mode === 'forecast';
-    
-    // Extract base metrics
     const curTemp = parseFloat(weather.temperature_f) || 72;
     const curWind = parseFloat(weather.wind_speed_mph) || 0;
     const curHum = parseFloat(weather.humidity_pct) || 50;
     const rainAccum = parseFloat(weather.rain_accumulation_day_in) || 0.0;
-    
     const fcDay = weather.forecast_daily_api?.[0] || {};
     const fcTemp = (parseFloat(fcDay.high || curTemp) + parseFloat(fcDay.low || curTemp)) / 2;
     const fcRainPct = parseInt(fcDay.rain_pct) || 0;
-    
-    // Set active variables based on which half was clicked
     const temp = isFc ? fcTemp : curTemp;
     const wind = curWind; 
     const hum = curHum; 
-    
-    // FIX: Calculate time decay so lightning expires after 45 minutes
     const minsSinceStrike = weather.last_strike_time ? Math.floor((Date.now() - weather.last_strike_time) / 60000) : 999;
     const lightningDist = weather.last_strike_distance !== null ? parseFloat(weather.last_strike_distance) : 999;
     const isLightningThreat = lightningDist <= 30 && minsSinceStrike <= 45;
@@ -1291,7 +1158,6 @@ export function ActivityStatusWidget({ name, currentScore, forecastScore, weathe
     let metrics = {};
     const add = (label, val, status) => { metrics[label] = { value: val, status }; };
 
-    // FIX: Activity-specific constraints
     switch (name) {
       case 'Airbrushing':
         add("Temperature", `${temp.toFixed(1)}°F`, temp < 60 || temp > 75 ? "critical" : temp < 64 || temp > 72 ? "warning" : "optimal");
@@ -1329,7 +1195,6 @@ export function ActivityStatusWidget({ name, currentScore, forecastScore, weathe
       default:
         add("Temperature", `${temp.toFixed(1)}°F`, "optimal");
     }
-    
     return metrics;
   };
 
@@ -1338,70 +1203,48 @@ export function ActivityStatusWidget({ name, currentScore, forecastScore, weathe
 
   return (
     <>
-      <div className="h-[52px] grid grid-rows-2 gap-px font-mono tracking-tight border border-slate-900 rounded-lg overflow-hidden shadow-md">
-        {/* FIX: Independent click handlers for Current vs Forecast */}
-        <div 
-          onClick={() => setModalState({ isOpen: true, mode: 'current' })}
-          className={`bg-gradient-to-r ${getGradientClass(currentScore)} px-2 flex items-center justify-between cursor-pointer hover:brightness-110 active:scale-[0.98] transition-all`}
-        >
-          <span className="text-[10px] font-black text-white uppercase truncate max-w-[85px] drop-shadow">{name}</span>
-          <span className="text-xs font-black text-white drop-shadow">{currentScore}</span>
-        </div>
-        <div 
-          onClick={() => setModalState({ isOpen: true, mode: 'forecast' })}
-          className={`bg-gradient-to-r ${getGradientClass(forecastScore)} px-2 flex items-center justify-between cursor-pointer hover:brightness-110 active:scale-[0.98] transition-all`}
-        >
-          <span className="text-[8px] font-bold text-white/70 uppercase">Forecast</span>
-          <span className="text-xs font-black text-white drop-shadow">{forecastScore}</span>
+      <div 
+        onClick={() => setModalState({ isOpen: true, mode: 'current' })}
+        className={`h-[48px] bg-gradient-to-r ${getGradientClass(currentScore)} px-2 flex items-center justify-between cursor-pointer rounded-lg shadow-md hover:brightness-110 active:scale-[0.98] transition-all border`}
+      >
+        <img src={iconPath} alt={name} className="w-7 h-7 drop-shadow-md" />
+        <div className="flex flex-col items-end leading-none">
+          <span className="text-[14px] font-black text-white drop-shadow">{currentScore}</span>
+          <div className="w-6 border-t-2 border-white/30 my-[2px]"></div>
+          <span className="text-[10px] font-bold text-white/80 drop-shadow">{forecastScore}</span>
         </div>
       </div>
 
       {modalState.isOpen && (
-        <div 
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4"
-          onClick={() => setModalState({ isOpen: false, mode: 'current' })}
-        >
-          <div 
-            className="bg-slate-950 border border-slate-800 w-full max-w-xs p-4 rounded-2xl font-mono text-slate-200 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setModalState({ isOpen: false, mode: 'current' })}>
+          <div className="bg-slate-950 border border-slate-800 w-full max-w-xs p-4 rounded-2xl font-mono text-slate-200 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b border-slate-900 pb-2 mb-3">
               <div>
                 <h4 className="text-xs font-black uppercase tracking-wider text-slate-100 flex items-center gap-1.5">
                   📋 {name} 
-                  <span className={`text-[8px] px-1.5 py-0.5 rounded border ${
-                    modalState.mode === 'current' ? 'bg-blue-950/50 text-blue-400 border-blue-900/50' : 'bg-purple-950/50 text-purple-400 border-purple-900/50'
-                  }`}>
+                  <span className={`text-[8px] px-1.5 py-0.5 rounded border ${modalState.mode === 'current' ? 'bg-blue-950/50 text-blue-400 border-blue-900/50' : 'bg-purple-950/50 text-purple-400 border-purple-900/50'}`}>
                     {modalState.mode}
                   </span>
                 </h4>
               </div>
               <button onClick={() => setModalState({ isOpen: false, mode: 'current' })} className="text-slate-500 hover:text-slate-300 text-sm p-1">✕</button>
             </div>
-
             <div className="space-y-2">
               <div className="bg-slate-900/20 border border-slate-900 p-2 rounded-lg flex justify-between items-center">
                 <span className="text-[10px] font-bold text-slate-400">Index Score:</span>
                 <span className="text-sm font-black text-slate-200">{activeScore} / 10</span>
               </div>
-              
               {Object.entries(diagnostics).map(([metric, detail]) => (
                 <div key={metric} className="bg-slate-900/40 border border-slate-900/60 rounded-xl px-3 py-1.5 flex justify-between items-center">
                   <span className="text-[10px] font-medium text-slate-400">{metric}</span>
-                  {/* FIX: Applied the dynamic Red/Yellow/Green gradient background here */}
-                  <span className={`text-[10px] font-black px-2 py-0.5 rounded border ${getStatusGradient(detail.status)}`}>
-                    {detail.value}
-                  </span>
+                  <span className={`text-[10px] font-black px-2 py-0.5 rounded border ${getStatusGradient(detail.status)}`}>{detail.value}</span>
                 </div>
               ))}
             </div>
-
-            <button
-              onClick={() => setModalState({ isOpen: false, mode: 'current' })}
-              className="mt-4 w-full py-1.5 bg-slate-900 text-slate-400 font-bold text-[10px] rounded-xl border border-slate-800 uppercase"
-            >
-              Close
-            </button>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button onClick={() => setModalState({ isOpen: true, mode: 'current' })} className={`py-1.5 font-bold text-[10px] rounded-lg border uppercase ${modalState.mode === 'current' ? 'bg-blue-950/40 text-blue-400 border-blue-900/50' : 'bg-slate-900 text-slate-500 border-slate-800'}`}>Current</button>
+              <button onClick={() => setModalState({ isOpen: true, mode: 'forecast' })} className={`py-1.5 font-bold text-[10px] rounded-lg border uppercase ${modalState.mode === 'forecast' ? 'bg-purple-950/40 text-purple-400 border-purple-900/50' : 'bg-slate-900 text-slate-500 border-slate-800'}`}>Forecast</button>
+            </div>
           </div>
         </div>
       )}
@@ -1441,11 +1284,11 @@ function LightningRadarWidget({ weather }) {
   const activeRing = weather.strike_trigger_ring;
 
   return (
-    <div className="bg-slate-950 border border-slate-900/60 p-4 rounded-3xl shadow-xl flex flex-col items-center justify-between min-h-[220px]">
+    <div className="bg-slate-950 border border-slate-900/60 p-4 rounded-3xl shadow-xl flex flex-col items-center justify-between min-h-[220px] relative overflow-hidden">
       
-      <div className="w-full text-left flex justify-between items-start">
+      <div className="w-full text-left flex justify-between items-start z-10">
         <div>
-          <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 block">Lightning Indicator</span>
+          <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 block">Atmosphere Radar</span>
         </div>
         {activeStorm && (
           <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 uppercase tracking-widest animate-pulse">
@@ -1455,8 +1298,14 @@ function LightningRadarWidget({ weather }) {
       </div>
 
       <div className="relative w-40 h-40 my-2 flex items-center justify-center">
-        <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
-          
+        <svg className="absolute w-full h-full transform -rotate-90 z-20" viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="48" fill="none" className="stroke-slate-900/80 stroke-[2px]" />
+          <g style={{ transform: `rotate(${parseFloat(weather.wind_direction_deg)}deg)`, transformOrigin: '50px 50px' }} className="transition-transform duration-700 ease-out">
+            <polygon points="50,2 53,7 50,6 47,7" className="fill-cyan-400 drop-shadow-[0_0_4px_#22d3ee]" />
+          </g>
+        </svg>
+
+        <svg className="w-full h-full transform -rotate-90 z-10" viewBox="0 0 100 100">
           <circle cx="50" cy="50" r="46" fill="none" className="stroke-slate-900/60 stroke-[0.75px]" />
           <circle cx="50" cy="50" r="39" fill="none" className="stroke-slate-900/50 stroke-[0.75px]" />
           <circle cx="50" cy="50" r="32" fill="none" className="stroke-slate-900/40 stroke-[0.75px]" />
@@ -1475,34 +1324,35 @@ function LightningRadarWidget({ weather }) {
           <line x1="4" y1="50" x2="96" y2="50" className="stroke-slate-900/20 stroke-[0.5px]" strokeDasharray="2 2" />
         </svg>
 
-        <div className={`absolute w-6 h-6 rounded-full flex items-center justify-center transition-all duration-500 ${
-          recentCloseStrike ? 'bg-rose-600/20 border border-rose-500 text-rose-400' : 'bg-slate-900 text-slate-500'
-        }`}>
+        <div className={`absolute w-6 h-6 rounded-full flex items-center justify-center transition-all duration-500 z-30 ${recentCloseStrike ? 'bg-rose-600/20 border border-rose-500 text-rose-400' : 'bg-slate-900 text-slate-500'}`}>
           <span className={`text-[10px] font-black select-none ${recentCloseStrike ? 'text-rose-400 scale-110 animate-pulse' : ''}`}>⚡</span>
         </div>
-
-        <span className="absolute right-0 text-[7px] font-mono font-bold text-slate-700">30m</span>
-        <span className="absolute left-4 text-[7px] font-mono font-bold text-slate-700">15m</span>
       </div>
 
-      <div className="w-full text-center mt-1">
-        {activeStorm ? (
-          <div className="flex flex-col items-center justify-center">
-            <span className="text-[11px] font-black tracking-tight text-amber-400 font-mono">STORM TRACKED</span>
-            <span className="text-[9px] text-slate-500 font-mono mt-0.5">
-              Closest hit: {weather.last_strike_distance} miles ({minutesSince}m ago)
-            </span>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center">
-            <span className="text-[9px] font-bold text-slate-400 uppercase">
-              {minutesSince === null ? 'No Strikes Detected' : 'Time Since Last Strike'}
-            </span>
-            <span className="text-xs font-black font-mono text-slate-200 mt-0.5 tracking-tighter">
-              {minutesSince === null ? '--' : `${minutesSince} MINS`}
-            </span>
-          </div>
-        )}
+      <div className="w-full grid grid-cols-3 items-end text-center mt-1 z-10">
+        <div className="flex flex-col items-center justify-end">
+          <span className="text-[8px] font-bold text-slate-500 uppercase">Wind</span>
+          <span className={`text-xs font-black font-mono tracking-tighter ${getWindColor(weather.wind_speed_mph)}`}>{weather.wind_speed_mph}</span>
+        </div>
+        
+        <div className="flex flex-col items-center justify-end">
+          {activeStorm ? (
+            <div className="flex flex-col items-center justify-center">
+              <span className="text-[11px] font-black tracking-tight text-amber-400 font-mono">TRACKED</span>
+              <span className="text-[8px] text-slate-500 font-mono mt-0.5">{weather.last_strike_distance} mi ({minutesSince}m)</span>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center">
+              <span className="text-[8px] font-bold text-slate-400 uppercase">{minutesSince === null ? 'No Strikes' : 'Last Strike'}</span>
+              <span className="text-xs font-black font-mono text-slate-200 mt-0.5 tracking-tighter">{minutesSince === null ? '--' : `${minutesSince} MIN`}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col items-center justify-end">
+          <span className="text-[8px] font-bold text-slate-500 uppercase">Gust</span>
+          <span className="text-xs font-black font-mono tracking-tighter text-rose-400">{weather.wind_gust_mph}</span>
+        </div>
       </div>
 
     </div>
@@ -1558,13 +1408,9 @@ function WeatherAlertBadge({ alert, config }) {
                     alt="" 
                     className={`h-5 w-5 object-contain ${getFilterClass(config.color)}`} 
                   />
-                  <h3 className="text-sm font-black uppercase tracking-wide text-slate-100">
-                    {alert.event}
-                  </h3>
+                  <h3 className="text-sm font-black uppercase tracking-wide text-slate-100">{alert.event}</h3>
                 </div>
-                <p className="text-[10px] text-slate-500 uppercase font-bold tracking-tight mt-1">
-                  Issued By: {alert.senderName || "National Weather Service"}
-                </p>
+                <p className="text-[10px] text-slate-500 uppercase font-bold tracking-tight mt-1">Issued By: {alert.senderName || "National Weather Service"}</p>
               </div>
               <button onClick={() => setIsOpen(false)} className="text-slate-500 hover:text-slate-300 text-sm p-1 transition-colors">✕</button>
             </div>
@@ -1582,7 +1428,7 @@ function WeatherAlertBadge({ alert, config }) {
 
             <div className="bg-slate-900/30 border border-slate-900 p-4 rounded-xl max-h-[240px] overflow-y-auto text-xs text-slate-400 font-sans leading-relaxed custom-scrollbar">
               <div className="whitespace-pre-line font-mono text-[11px] leading-normal text-slate-300">
-                {alert.description || "No specific narrative text provided in the direct broadcast payload."}
+                {alert.description || "No specific narrative text provided."}
               </div>
             </div>
 
@@ -1591,13 +1437,7 @@ function WeatherAlertBadge({ alert, config }) {
                 Expires: {new Date(alert.ends).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </div>
             )}
-
-            <button
-              onClick={() => setIsOpen(false)}
-              className="mt-4 w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-400 font-bold text-[10px] rounded-xl border border-slate-800/80 transition-colors uppercase tracking-widest"
-            >
-              Close Hazard Readout
-            </button>
+            <button onClick={() => setIsOpen(false)} className="mt-4 w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-400 font-bold text-[10px] rounded-xl border border-slate-800/80 transition-colors uppercase tracking-widest">Close Hazard Readout</button>
           </div>
         </div>
       )}

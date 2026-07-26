@@ -21,11 +21,9 @@ import re
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from googleapiclient.http import MediaIoBaseDownload
-from fastapi.responses import FileResponse
 from google.genai import Client
-from google.genai.errors import APIError # Add this line
+from google.genai.errors import APIError
 
-# --- LOGGING CONFIGURATION (Debian 12 Ready) ---
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -33,22 +31,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger("dashboard")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# --- COMMAND LINE ARGUMENTS ---
+
 parser = argparse.ArgumentParser(description="Tactical Weather Dashboard Backend")
 parser.add_argument('--simulate', action='store_true', help="Run the telemetry simulator instead of live UDP.")
 args, _ = parser.parse_known_args()
-RUN_SIMULATOR = args.simulate
 
-# --- USER CREDENTIALS ---
-# --- USER CREDENTIALS ---
-# Fallback values are provided for the integers/floats, but tokens must be explicitly defined in the environment.
+# UPDATE: Local simulation override
+SIMULATION_MODE = os.getenv("LOCAL_MODE", "false").lower() == "true" or args.simulate
+
 STATION_ID = int(os.getenv("STATION_ID", 222180))
 API_TOKEN = os.getenv("WEATHER_API_TOKEN")
 API_TOKEN_BIBLE = os.getenv("BIBLE_API_TOKEN")
 LATITUDE = float(os.getenv("LATITUDE", 28.66))
 LONGITUDE = float(os.getenv("LONGITUDE", -81.36))
 
-if not API_TOKEN or not API_TOKEN_BIBLE:
+if not SIMULATION_MODE and (not API_TOKEN or not API_TOKEN_BIBLE):
     logger.warning("CRITICAL: API Tokens are missing from the environment configuration.")
 
 rest_cache = {
@@ -76,14 +73,12 @@ TEMPEST_FORECAST_CACHE = {}
 async def fetch_nws_alerts(session: aiohttp.ClientSession) -> list:
     headers = {'User-Agent': '(MyTacticalWeatherDashboard, admin@domain.com)'}
     url = f"https://api.weather.gov/alerts/active?point={LATITUDE},{LONGITUDE}"
-    
     try:
         async with session.get(url, headers=headers, timeout=5) as response:
             if response.status == 200:
                 data = await response.json()
                 features = data.get("features", [])
                 ui_alerts = []
-                
                 for feature in features:
                     props = feature.get("properties", {})
                     ui_alerts.append({
@@ -96,28 +91,19 @@ async def fetch_nws_alerts(session: aiohttp.ClientSession) -> list:
                         "ends": props.get("ends")
                     })
                 return ui_alerts
-            else:
-                logger.warning(f"NWS API Alert Check Rejected: Status {response.status}")
     except Exception as e:
         logger.error(f"Failed to reach NWS active hazard registry: {e}")
     return []
 
 async def get_tempest_hourly_forecast(location_string=None):
     cache_key = "home_station_forecast"
-    
     if cache_key in TEMPEST_FORECAST_CACHE:
         timestamp, cached_periods = TEMPEST_FORECAST_CACHE[cache_key]
         if (datetime.datetime.now() - timestamp).total_seconds() < 1800:
             return cached_periods
 
     url = "https://swd.weatherflow.com/swd/rest/better_forecast"
-    params = {
-        "station_id": STATION_ID,
-        "token": API_TOKEN,
-        "units_temp": "f",
-        "units_precip": "in"
-    }
-    
+    params = {"station_id": STATION_ID, "token": API_TOKEN, "units_temp": "f", "units_precip": "in"}
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, params=params, timeout=6) as response:
@@ -126,21 +112,16 @@ async def get_tempest_hourly_forecast(location_string=None):
                     hourly_periods = data.get("forecast", {}).get("hourly", [])
                     TEMPEST_FORECAST_CACHE[cache_key] = (datetime.datetime.now(), hourly_periods)
                     return hourly_periods
-                else:
-                    logger.error(f"Tempest API Rejected Home Request: Status {response.status}")
     except Exception as e:
         logger.error(f"Tempest Forecast API Fetch Error: {e}")
-    
     return None
 
 def match_tempest_weather(event_start_iso, hourly_periods):
     if not hourly_periods: return None
-        
     try:
         event_dt = datetime.datetime.fromisoformat(event_start_iso.replace('Z', '+00:00'))
         event_ts = int(event_dt.timestamp())
-    except Exception as parse_err:
-        logger.error(f"Timestamp Parse Error: {parse_err}")
+    except Exception:
         return None
 
     for period in hourly_periods:
@@ -159,11 +140,7 @@ def match_tempest_weather(event_start_iso, hourly_periods):
                 continue
     return None
 
-SCOPES = [
-    'https://www.googleapis.com/auth/calendar.readonly',
-    'https://www.googleapis.com/auth/tasks',
-    'https://www.googleapis.com/auth/drive.readonly'
-]
+SCOPES = ['https://www.googleapis.com/auth/calendar.readonly', 'https://www.googleapis.com/auth/tasks', 'https://www.googleapis.com/auth/drive.readonly']
 
 GOOGLE_COLOR_MAP = {
     "1": "#a4bdfc", "2": "#7ae7bf", "3": "#dbadff", "4": "#ff887c",
@@ -199,13 +176,13 @@ async def poll_calendar_events():
         try:
             creds = get_calendar_credentials()
             service = build('calendar', 'v3', credentials=creds, cache_discovery=False)
-            
             now = datetime.datetime.now(datetime.timezone.utc)
             time_min = now.isoformat()
-            time_max = (now + datetime.timedelta(days=12)).isoformat()
+            
+            # UPDATE: Expanded to 28 days
+            time_max = (now + datetime.timedelta(days=28)).isoformat()
             
             aggregated_events = []
-            
             for source_tag, cal_id in CALENDAR_TARGETS.items():
                 events_result = service.events().list(
                     calendarId=cal_id, timeMin=time_min, timeMax=time_max,
@@ -237,154 +214,68 @@ async def poll_calendar_events():
                         "forecast": event_forecast
                     })
             
-            logger.info(f"Broadcasting {len(aggregated_events)} agenda events over WebSocket channel.")
             await manager.broadcast(json.dumps({
                 "update_type": "calendar_sync",
                 "events": aggregated_events
             }))
-            
         except Exception as err:
             logger.error(f"Calendar Thread Error: {err}")
-            
         await asyncio.sleep(300)
 
-def sync_google_drive_photos():
-    """Synchronous background task to download new Drive photos using the official Google SDK"""
-    creds = get_calendar_credentials()
-    service = build('drive', 'v3', credentials=creds, cache_discovery=False)
-    
-    # 1. Find DisplayBoard folder
-    results = service.files().list(
-        q="mimeType='application/vnd.google-apps.folder' and name='DisplayBoard' and trashed=false",
-        fields="files(id, name)"
-    ).execute()
-    folders = results.get('files', [])
-    
-    if not folders:
-        logger.warning("Google Drive folder 'DisplayBoard' not found.")
-        return
-        
-    folder_id = folders[0]['id']
-    
-    # 2. Find images inside the folder
-    results = service.files().list(
-        q=f"'{folder_id}' in parents and mimeType contains 'image/' and trashed=false",
-        fields="files(id, name)"
-    ).execute()
-    images = results.get('files', [])
-    
-    # 3. Download what we don't already have
-    os.makedirs("assets/photos", exist_ok=True)
-    existing = set(os.listdir("assets/photos"))
-    
-    downloaded = 0
-    for img in images:
-        if img['name'] not in existing:
-            logger.info(f"Downloading new photo from Drive: {img['name']}")
-            request = service.files().get_media(fileId=img['id'])
-            fh = io.FileIO(f"assets/photos/{img['name']}", 'wb')
-            downloader = MediaIoBaseDownload(fh, request)
-            done = False
-            while done is False:
-                status, done = downloader.next_chunk()
-            downloaded += 1
-            
-    if downloaded > 0:
-        logger.info(f"Downloaded {downloaded} new images from Drive.")
 async def poll_google_drive_photos():
     logger.info("Google Drive Photo sync worker spawned.")
     photo_dir = os.path.join(BASE_DIR, "assets", "photos")
     os.makedirs(photo_dir, exist_ok=True)
-    
-    # Map Google's MIME types to the correct file extensions
-    MIME_MAP = {
-        'image/jpeg': '.jpg',
-        'image/png': '.png',
-        'image/gif': '.gif',
-        'image/webp': '.webp'
-    }
+    MIME_MAP = {'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp'}
     
     while True:
         try:
             def sync_logic():
                 creds = get_calendar_credentials()
-                
                 if creds and creds.expired and creds.refresh_token:
                     creds.refresh(Request())
                     with open('token.json', 'w') as token:
                         token.write(creds.to_json())
                 
                 service = build('drive', 'v3', credentials=creds, cache_discovery=False)
-                
-                results = service.files().list(
-                    q="mimeType='application/vnd.google-apps.folder' and name='DisplayBoard' and trashed=false",
-                    fields="files(id, name)"
-                ).execute()
+                results = service.files().list(q="mimeType='application/vnd.google-apps.folder' and name='DisplayBoard' and trashed=false", fields="files(id, name)").execute()
                 folders = results.get('files', [])
-                
-                if not folders:
-                    logger.warning("Google Drive folder 'DisplayBoard' not found.")
-                    return
+                if not folders: return
                     
                 folder_id = folders[0]['id']
-                
-                # Fetch images, specifically asking for the mimeType to verify the file type!
-                results = service.files().list(
-                    q=f"'{folder_id}' in parents and mimeType contains 'image/' and trashed=false",
-                    fields="files(id, name, mimeType)"
-                ).execute()
+                results = service.files().list(q=f"'{folder_id}' in parents and mimeType contains 'image/' and trashed=false", fields="files(id, name, mimeType)").execute()
                 cloud_images = results.get('files', [])
                 
-                # Pre-process names to guarantee they have extensions
                 cloud_safe_names = {}
                 for img in cloud_images:
                     original_name = img["name"]
                     ext = os.path.splitext(original_name)[1].lower()
-                    
-                    # If it has no extension, look up the Google MIME type and append it (default to .png)
                     if not ext:
                         inferred_ext = MIME_MAP.get(img.get("mimeType", ""), ".png")
                         safe_name = f"{original_name}{inferred_ext}"
                     else:
                         safe_name = original_name
-                        
                     cloud_safe_names[safe_name] = img
                 
                 local_filenames = set([f for f in os.listdir(photo_dir) if not f.startswith('.')])
-                
-                # DELETE local files that were removed from Google Drive
                 for local_file in local_filenames:
                     if local_file not in cloud_safe_names:
                         os.remove(os.path.join(photo_dir, local_file))
-                        logger.info(f"Deleted removed photo from disk: {local_file}")
                         
-                # DOWNLOAD new files using the newly corrected filenames
-                download_count = 0
                 for safe_name, img in cloud_safe_names.items():
                     if safe_name not in local_filenames:
-                        logger.info(f"Downloading new photo: {safe_name}")
                         request = service.files().get_media(fileId=img['id'])
                         fh = io.FileIO(os.path.join(photo_dir, safe_name), 'wb')
-                        from googleapiclient.http import MediaIoBaseDownload
                         downloader = MediaIoBaseDownload(fh, request)
                         done = False
                         while done is False:
                             status, done = downloader.next_chunk()
-                        download_count += 1
-                        
-                if download_count > 0:
-                    logger.info(f"Drive sync complete. Downloaded {download_count} new images.")
-
             await asyncio.to_thread(sync_logic)
-            
         except Exception as e:
             logger.error(f"Drive Sync error: {e}", exc_info=True)
-            
         await asyncio.sleep(3600)
 
-# --- GOOGLE TASKS LOWER MODULE CONFIGURATION ---
 TASK_LIST_NAME = "Family"
-
 def get_target_tasklist_id(service):
     lists = service.tasklists().list().execute().get('items', [])
     for tl in lists:
@@ -393,11 +284,16 @@ def get_target_tasklist_id(service):
     return '@default'
 
 async def fetch_active_chores():
+    if SIMULATION_MODE:
+        return [
+            {"id": "1", "title": "Mock: Wash car", "notes": "", "due_date_str": datetime.date.today().isoformat(), "is_today": True},
+            {"id": "2", "title": "Mock: Buy groceries", "notes": "", "due_date_str": (datetime.date.today() + datetime.timedelta(days=1)).isoformat(), "is_today": False}
+        ]
+        
     try:
         creds = get_calendar_credentials()
         from googleapiclient.discovery import build as tasks_build
         service = tasks_build('tasks', 'v1', credentials=creds, cache_discovery=False)
-        
         list_id = get_target_tasklist_id(service)
         tasks_result = service.tasks().list(tasklist=list_id, showCompleted=False).execute()
         raw_tasks = tasks_result.get('items', [])
@@ -409,7 +305,6 @@ async def fetch_active_chores():
         for t in raw_tasks:
             due_str = t.get('due')
             due_day = None
-            
             if due_str:
                 due_day = datetime.date.fromisoformat(due_str.split('T')[0])
             
@@ -423,17 +318,17 @@ async def fetch_active_chores():
                     "is_today": due_day == now_date if due_day else False,
                     "is_tomorrow": due_day == (now_date + datetime.timedelta(days=1)) if due_day else False
                 })
-        
         processed_tasks.sort(key=lambda x: x["due_date_str"] if x["due_date_str"] is not None else "9999-12-31")
         return processed_tasks
     except Exception as e:
         logger.error(f"Tasks Module Fetch Error: {e}")
         return []
 
-# --- SLEEPER FANTASY SPORTS LOWER MODULE CONFIGURATION ---
 SLEEPER_LEAGUE_ID = "1360812344053071872"
-
 async def get_sleeper_dashboard_payload():
+    if SIMULATION_MODE:
+        return {"mode": "disabled"}
+
     url_league = f"https://api.sleeper.app/v1/league/{SLEEPER_LEAGUE_ID}"
     async with aiohttp.ClientSession() as session:
         async with session.get(url_league) as resp:
@@ -452,7 +347,6 @@ async def get_sleeper_dashboard_payload():
                     }
 
         current_week = league_data.get("settings", {}).get("leg", 1)
-        
         async with session.get(f"https://api.sleeper.app/v1/league/{SLEEPER_LEAGUE_ID}/users") as u_resp:
             users = await u_resp.json()
             user_map = {u['user_id']: u.get('metadata', {}).get('team_name', u['display_name']) for u in users}
@@ -468,7 +362,6 @@ async def get_sleeper_dashboard_payload():
         for team in matchups_raw:
             m_id = team.get("matchup_id")
             if m_id not in match_groups: match_groups[m_id] = []
-            
             match_groups[m_id].append({
                 "owner_name": roster_to_owner.get(team['roster_id'], "Unknown"),
                 "points": team.get("points", 0.0),
@@ -478,130 +371,79 @@ async def get_sleeper_dashboard_payload():
                 "custom_roster_points_map": team.get("players_points", {})
             })
 
-        return {
-            "mode": "matchups",
-            "week": current_week,
-            "matchups": list(match_groups.values())
-        }
+        return {"mode": "matchups", "week": current_week, "matchups": list(match_groups.values())}
 
 async def poll_daily_bible_verse():
-    logger.info("NLT Bible Verse synchronization worker spawned.")
     while True:
         global rest_cache
         yday = datetime.datetime.now().timetuple().tm_yday
         url_votd = f"https://api.youversion.com/v1/verse_of_the_days/{yday}"
-        headers_yv = {
-            "X-YVP-App-Key": API_TOKEN_BIBLE,
-            "x-youversion-developer-token": API_TOKEN_BIBLE,
-            "Accept": "application/json"
-        }
-        
+        headers_yv = {"X-YVP-App-Key": API_TOKEN_BIBLE, "x-youversion-developer-token": API_TOKEN_BIBLE, "Accept": "application/json"}
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url_votd, headers=headers_yv, timeout=10) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        # Use passage_id instead of human_reference
                         passage_id = data.get("passage_id") 
-                        
                         if passage_id:
                             nlt_url = "https://api.nlt.to/api/passages"
                             nlt_params = {"ref": passage_id, "version": "NLT", "key": "TEST"}
-                            
                             async with session.get(nlt_url, params=nlt_params, timeout=10) as nlt_resp:
                                 if nlt_resp.status == 200:
                                     html_content = await nlt_resp.text()
-                                    
-                                    import re, html
-                                    # Extract the clean human-readable title
                                     title_match = re.search(r'<h2.*?>(.*?)</h2>', html_content)
                                     clean_ref = html.unescape(title_match.group(1)).replace(', NLT', '') if title_match else passage_id
-                                    
-                                    # Remove the header so it doesn't duplicate in the text
                                     html_content = re.sub(r'<h2.*?</h2>', '', html_content)
-                                    # Remove verse numbers (e.g., <span class="vn">34</span>)
                                     html_content = re.sub(r'<span class="vn">.*?</span>', '', html_content)
-                                    # Replace line breaks with spaces
                                     html_content = re.sub(r'<br\s*/?>', ' ', html_content)
-                                    
-                                    # Strip remaining HTML and clean up spaces
                                     clean_text = re.sub(r'<[^>]+>', '', html_content)
                                     clean_text = html.unescape(clean_text).strip()
                                     clean_text = re.sub(r'\s+', ' ', clean_text) 
-                                    # Removes the "NLT API [Reference], NLT " watermark
                                     clean_text = re.sub(r'^NLT API\s*', '', clean_text).strip()
-                                    rest_cache["daily_verse"] = {
-                                        "reference": clean_ref,
-                                        "text": clean_text
-                                    }
-                                    logger.info(f"Successfully synced NLT daily verse: {clean_ref}")
-                                else:
-                                    logger.error(f"NLT API fetch failed: HTTP {nlt_resp.status}")
-                        else:
-                            logger.error(f"YouVersion payload missing 'passage_id'. Raw: {data}")
-                    else:
-                        err_text = await resp.text()
-                        logger.error(f"YouVersion Auth Failed: HTTP {resp.status} - {err_text}")
+                                    rest_cache["daily_verse"] = {"reference": clean_ref, "text": clean_text}
         except Exception as e:
             logger.error(f"Error fetching Daily Verse: {e}", exc_info=True)    
-            
         await asyncio.sleep(14400)
 
 async def poll_tempest_rest_api():
     url = f"https://swd.weatherflow.com/swd/rest/better_forecast"
-    params = {
-        "station_id": STATION_ID,
-        "token": API_TOKEN,
-        "units_temp": "f",
-        "units_wind": "mph",
-        "units_pressure": "inhg",
-        "units_precip": "in"
-    }
-    
-    logger.info("REST API & NWS Alerts polling service initialized (5-minute intervals).")
+    params = {"station_id": STATION_ID, "token": API_TOKEN, "units_temp": "f", "units_wind": "mph", "units_pressure": "inhg", "units_precip": "in"}
     while True:
         try:
             async with aiohttp.ClientSession() as session:
                 nws_alerts = await fetch_nws_alerts(session)
-                
                 async with session.get(url, params=params) as response:
                     if response.status == 200:
                         data = await response.json()
                         current = data.get("current_conditions", {})
-                        
                         global rest_cache
                         rest_cache["alerts"] = nws_alerts
                         rest_cache["pressure_trend"] = current.get("pressure_trend", "Steady")
                         rest_cache["rain_accumulation_day_in"] = float(current.get("precip_accum_local_day", 0.0))
-                        rest_cache["rain_rate_in_hr"] = float(current.get("precip_minutes_local_day_intensity", 0.0))
+                        
+                        # UPDATE: Removed rain_rate assignment here to let UDP handle live intensity
                         rest_cache["icon_api"] = current.get("icon", "clear-day")
                         rest_cache["conditions"] = current.get("conditions", "Clear")
                         
-                        # Hourly Parsing for Accurate Probability Bucketing
                         hourly = data.get("forecast", {}).get("hourly", [])
                         if hourly:
                             rest_cache["rain_chance_current"] = hourly[0].get("precip_probability", 0)
-                            
                             buckets = {"morning": [], "afternoon": [], "evening": [], "overnight": []}
                             now_ts = datetime.datetime.now().timestamp()
-                            
                             for h in hourly:
-                                if h["time"] > now_ts + 86400: continue # Only look at next 24 hours
+                                if h["time"] > now_ts + 86400: continue 
                                 dt = datetime.datetime.fromtimestamp(h["time"])
                                 hr = dt.hour
                                 prob = h.get("precip_probability", 0)
-                                
                                 if 6 <= hr < 12: buckets["morning"].append(prob)
                                 elif 12 <= hr < 18: buckets["afternoon"].append(prob)
                                 elif 18 <= hr <= 23: buckets["evening"].append(prob)
                                 else: buckets["overnight"].append(prob)
-                                
                             rest_cache["rain_chance_morning"] = max(buckets["morning"]) if buckets["morning"] else 0
                             rest_cache["rain_chance_afternoon"] = max(buckets["afternoon"]) if buckets["afternoon"] else 0
                             rest_cache["rain_chance_evening"] = max(buckets["evening"]) if buckets["evening"] else 0
                             rest_cache["rain_chance_overnight"] = max(buckets["overnight"]) if buckets["overnight"] else 0
 
-                        # Daily Forecast Parsing
                         raw_days = data.get("forecast", {}).get("daily", [])
                         parsed_days = []
                         for day in raw_days:
@@ -612,34 +454,24 @@ async def poll_tempest_rest_api():
                                 "low": int(day.get("air_temp_low", 60)),
                                 "rain_pct": int(day.get("precip_probability", 0))
                             })
-                        
                         if parsed_days:
                             rest_cache["forecast_daily_api"] = parsed_days
-                            
-                        logger.info(f"REST API & NWS synced successfully. Alerts: {len(nws_alerts)}. Trend: {rest_cache['pressure_trend']}")
                         await asyncio.sleep(300)
-                        
                     elif response.status == 429:
-                        logger.warning("HTTP 429: Rate limited by WeatherFlow. Backing off for 60 seconds.")
                         await asyncio.sleep(60)
                     else:
-                        logger.error(f"REST API Error: HTTP {response.status}")
                         await asyncio.sleep(60)
         except Exception as e:
-            logger.error(f"Failed to reach REST API endpoint: {e}")
             await asyncio.sleep(10)
 
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
-
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
-
     def disconnect(self, websocket: WebSocket):
         self.active_connections.remove(websocket)
-
     async def broadcast(self, message: str):
         for connection in self.active_connections:
             try:
@@ -691,11 +523,8 @@ def parse_tempest_packet(raw_packet: dict) -> dict | None:
     elif packet_type == "evt_strike":
         evt = raw_packet.get("evt", [])
         if not evt: return None
-        
         distance_km = float(evt[1])
         distance_miles = round(distance_km * 0.621371, 1)
-        logger.info(f"[UDP LIGHTNING HIT] Distance: {distance_miles} mi | Energy: {evt[2]}")
-        
         return {
             "update_type": "lightning_strike",
             "distance_miles": distance_miles,
@@ -708,6 +537,12 @@ def parse_tempest_packet(raw_packet: dict) -> dict | None:
         obs = obs_list[0]
         temp_c = obs[7]
         rh = obs[8]
+        
+        # UPDATE: Rain Rate calculated from active 1-minute accumulation
+        rain_min_mm = obs[12]
+        rain_rate_in_hr = round(mm_to_inches(rain_min_mm) * 60, 2)
+        rest_cache["rain_rate_in_hr"] = rain_rate_in_hr
+
         return {
             "update_type": "sensor_snapshot",
             "wind_lull_mph": mps_to_mph(obs[1]),
@@ -724,7 +559,7 @@ def parse_tempest_packet(raw_packet: dict) -> dict | None:
             
             "pressure_trend_api": rest_cache["pressure_trend"],
             "rain_accumulation_day_in": rest_cache["rain_accumulation_day_in"],
-            "rain_rate_in_hr": rest_cache["rain_rate_in_hr"],
+            "rain_rate_in_hr": rain_rate_in_hr,
             "rain_chance_current": rest_cache.get("rain_chance_current", 0),
             "rain_chance_morning": rest_cache.get("rain_chance_morning", 0),
             "rain_chance_afternoon": rest_cache.get("rain_chance_afternoon", 0),
@@ -738,7 +573,7 @@ def parse_tempest_packet(raw_packet: dict) -> dict | None:
     return None
 
 async def simulate_weather_stream():
-    logger.info("Weather Simulation Matrix Engine online and warming up...")
+    logger.info("Simulation Matrix Engine online: 100% Mock Data Generation Active")
     global rest_cache
     sim_temp = 74.5
     sim_rh = 72.0
@@ -746,62 +581,75 @@ async def simulate_weather_stream():
     sim_pressure = 29.92
     sim_rain_accum = 0.5
     
+    now = datetime.datetime.now()
+    mock_events = [{
+        "id": "mock1", "summary": "Mock: Pathfinder RPG", "start": (now + datetime.timedelta(hours=2)).isoformat(),
+        "location": None, "is_all_day": False, "color": "#a4bdfc", "source": "family", "forecast": {"temp": 75, "icon": "clear-day"}
+    }]
+    
     while True:
         try:
-            sim_temp += random.uniform(-0.2, 0.2)
-            sim_rh += random.uniform(-0.4, 0.4)
-            sim_pressure += random.uniform(-0.005, 0.005)
-            sim_heading = (sim_heading + random.randint(-10, 10)) % 360
+            # Force volatile jumps so the simulation is obvious
+            sim_temp += random.uniform(-1.5, 1.5)
+            # Safely clamp humidity so it never drops below zero and crashes the dew point math
+            sim_rh = max(min(sim_rh + random.uniform(-5.0, 5.0), 99.0), 15.0)
+            sim_pressure += random.uniform(-0.04, 0.04)
+            sim_heading = (sim_heading + random.randint(-40, 40)) % 360
             
-            base_wind = round(random.uniform(4.0, 11.0), 1)
-            gust_wind = round(base_wind * random.uniform(1.2, 1.8), 1)
-            pressure_shift = random.choice(["Falling", "Rising", "Steady", "Steady"])
+            base_wind = round(random.uniform(5.0, 20.0), 1)
+            gust_wind = round(base_wind * random.uniform(1.2, 2.0), 1)
+            pressure_shift = random.choice(["Falling", "Rising", "Steady"])
             
-            if random.random() < 0.15:
-                sim_rain_rate = round(random.uniform(0.05, 0.45), 2)
+            # Dynamic Rain states (50% chance of rain to rapidly test UI changes)
+            if random.random() < 0.25:
+                sim_rain_rate = round(random.uniform(0.3, 2.5), 2)
+            elif random.random() < 0.50:
+                sim_rain_rate = round(random.uniform(0.01, 0.15), 2)
             else:
-                sim_rain_rate = 0.0 if random.random() < 0.60 else round(random.uniform(0.0, 0.08), 2)
+                sim_rain_rate = 0.0
                 
+            # Accumulate the rain dynamically so the UI gauge actually fills up over time
             if sim_rain_rate > 0:
-                if random.random() < 0.40:
-                    icon_api, conditions = "thunderstorm", "Thunderstorms"
-                else:
-                    icon_api, conditions = "rainy", "Heavy Rain"
+                sim_rain_accum += (sim_rain_rate / 3600) * 5.5
+
+            if sim_rain_rate > 0.5:
+                icon_api, conditions = "thunderstorm", "Thunderstorms"
+            elif sim_rain_rate > 0:
+                icon_api, conditions = "rainy", "Raining"
             elif sim_temp > 82.0:
-                icon_api = "clear-day" if random.random() < 0.50 else "partly-cloudy-day"
+                icon_api = random.choice(["clear-day", "partly-cloudy-day"])
                 conditions = "Sunny" if icon_api == "clear-day" else "Partly Cloudy"
-            elif sim_temp < 40.0:
-                icon_api, conditions = "fog", "Dense Haze"
             else:
                 icon_api = random.choice(["clear-day", "partly-cloudy-day", "cloudy"])
                 conditions = "Mostly Clear" if icon_api == "clear-day" else "Overcast"
 
             temp_c_equivalent = (sim_temp - 32) * 5/9
+            
             sim_payload = {
                 "update_type": "sensor_snapshot",
                 "temperature_f": round(sim_temp, 1),
-                "humidity_pct": min(max(round(sim_rh), 10), 100),
+                "humidity_pct": round(sim_rh),
                 "dew_point_f": calculate_dew_point(temp_c_equivalent, sim_rh),
                 "feels_like_f": calculate_feels_like(sim_temp, sim_rh, base_wind),
                 "pressure_inhg": round(sim_pressure, 2),
                 "wind_speed_mph": base_wind,
-                "wind_direction_deg": sim_heading,
+                "wind_direction_deg": int(sim_heading),
                 "wind_gust_mph": gust_wind,
-                "uv_index": 3 if sim_temp > 75 else 1,
-                "lightning_count": 2 if icon_api == "thunderstorm" else 0,
+                "uv_index": 6 if sim_temp > 75 else 2,
+                "lightning_count": random.randint(1, 5) if icon_api == "thunderstorm" else 0,
                 
                 "icon_api": icon_api,
                 "conditions": conditions,
                 "pressure_trend_api": pressure_shift,
                 "rain_accumulation_day_in": round(sim_rain_accum, 2),
                 "rain_rate_in_hr": sim_rain_rate,
-                "rain_chance_current": random.randint(30, 95) if sim_rain_rate > 0 else random.randint(0, 10),
-                "rain_chance_morning": random.randint(40, 80) if sim_rain_rate > 0 else random.randint(0, 20),
-                "rain_chance_afternoon": random.randint(60, 95) if sim_rain_rate > 0 else random.randint(5, 35),
-                "rain_chance_evening": random.randint(50, 90) if sim_rain_rate > 0 else random.randint(0, 25),
-                "rain_chance_overnight": random.randint(20, 50) if sim_rain_rate > 0 else random.randint(0, 10),
-                "alerts": rest_cache["alerts"],
-                "daily_verse": rest_cache.get("daily_verse", {}),
+                "rain_chance_current": random.randint(40, 95) if sim_rain_rate > 0 else random.randint(0, 15),
+                "rain_chance_morning": random.randint(10, 80),
+                "rain_chance_afternoon": random.randint(20, 95),
+                "rain_chance_evening": random.randint(10, 90),
+                "rain_chance_overnight": random.randint(0, 50),
+                "alerts": rest_cache.get("alerts", []),
+                "daily_verse": {"reference": "Simulation 1:1", "text": "This is simulated environment data generating actively."},
                 "forecast_daily_api": [
                     {"day_name": "Mon", "icon": "clear-day", "high": 92, "low": 75, "rain_pct": 10},
                     {"day_name": "Tue", "icon": "partly-cloudy-day", "high": 90, "low": 76, "rain_pct": 25},
@@ -816,90 +664,84 @@ async def simulate_weather_stream():
             rest_cache["pressure_trend"] = sim_payload["pressure_trend_api"]
             rest_cache["rain_accumulation_day_in"] = sim_payload["rain_accumulation_day_in"]
             rest_cache["rain_rate_in_hr"] = sim_payload["rain_rate_in_hr"]
+            rest_cache["icon_api"] = icon_api
+            rest_cache["conditions"] = conditions
 
             sim_wind = {
                 "update_type": "rapid_wind",
-                "wind_speed_mph": round(random.uniform(2.0, 12.0), 1),
-                "wind_direction_deg": random.randint(0, 359),
-                "icon_api": rest_cache.get("icon_api", "partly-cloudy-night"),
-                "conditions": rest_cache.get("conditions", "Partly Cloudy")
+                "wind_speed_mph": base_wind,
+                "wind_direction_deg": int(sim_heading),
+                "icon_api": icon_api,
+                "conditions": conditions
             }
+            
+            await manager.broadcast(json.dumps({"update_type": "calendar_sync", "events": mock_events}))
             await manager.broadcast(json.dumps(sim_wind))
             await asyncio.sleep(3.0)
             
             if random.random() < 0.20:
-                sim_distance = round(random.uniform(2.0, 30.0), 1)
                 sim_strike = {
-                    "update_type": "lightning_strike",
-                    "distance_miles": sim_distance,
-                    "energy": random.randint(1000, 25000),
-                    "timestamp": int(asyncio.get_event_loop().time())
+                    "update_type": "lightning_strike", 
+                    "distance_miles": round(random.uniform(2.0, 25.0), 1), 
+                    "energy": random.randint(1000, 15000), 
+                    "timestamp": int(datetime.datetime.now().timestamp())
                 }
-                logger.info(f"[SIMULATOR BURST] Injecting Mock Strike at {sim_distance} miles!")
                 await manager.broadcast(json.dumps(sim_strike))
 
             await manager.broadcast(json.dumps(sim_payload))
             await asyncio.sleep(2.5)
             
         except Exception as e:
-            logger.error(f"Error inside simulation generator loop: {e}")
-            await asyncio.sleep(1)
+            logger.error(f"Simulator Engine Crash: {e}", exc_info=True)
+            await asyncio.sleep(2)
 
 async def listen_to_tempest_udp():
-    # Linux prefers an empty string over 0.0.0.0 for catching raw broadcasts
     UDP_IP = ""       
     UDP_PORT = 50222         
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    
     sock.bind((UDP_IP, UDP_PORT))
     sock.setblocking(False)
     
-    logger.info(f"Parsing engine actively listening on UDP port {UDP_PORT} with Broadcast enabled...")
     loop = asyncio.get_event_loop()
     while True:
         try:
             data, addr = await loop.sock_recvfrom(sock, 1024)
             raw_str = data.decode('utf-8')
-            
-            # This logs the first 60 characters of every packet so you know Python caught it!
-            # logger.info(f"UDP Caught -> {raw_str[:60]}...")
-            
-            if not RUN_SIMULATOR:
-                raw_json = json.loads(raw_str)
-                clean_data = parse_tempest_packet(raw_json)
-                if clean_data:
-                    clean_data["forecast_daily_api"] = rest_cache["forecast_daily_api"]
-                    await manager.broadcast(json.dumps(clean_data))
-                    
+            raw_json = json.loads(raw_str)
+            clean_data = parse_tempest_packet(raw_json)
+            if clean_data:
+                clean_data["forecast_daily_api"] = rest_cache["forecast_daily_api"]
+                await manager.broadcast(json.dumps(clean_data))
         except Exception as e:
-            # If it breaks, it will print the exact line and error in your terminal
             logger.error(f"UDP Processing Error: {e}", exc_info=True)
             await asyncio.sleep(0.1)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    udp_task = asyncio.create_task(listen_to_tempest_udp())
-    rest_task = asyncio.create_task(poll_tempest_rest_api())
-    cal_task = asyncio.create_task(poll_calendar_events())
-    photo_task = asyncio.create_task(poll_google_drive_photos())
-    verse_task = asyncio.create_task(poll_daily_bible_verse())
-    
+    # UPDATE: Simulation Mode completely stops external API loops and UDP listeners
     sim_task = None
-    if RUN_SIMULATOR:
+    if SIMULATION_MODE:
+        logger.info("Local Simulator Active. External APIs halted.")
         sim_task = asyncio.create_task(simulate_weather_stream())
+    else:
+        udp_task = asyncio.create_task(listen_to_tempest_udp())
+        rest_task = asyncio.create_task(poll_tempest_rest_api())
+        cal_task = asyncio.create_task(poll_calendar_events())
+        photo_task = asyncio.create_task(poll_google_drive_photos())
+        verse_task = asyncio.create_task(poll_daily_bible_verse())
         
     yield
     
-    udp_task.cancel()
-    rest_task.cancel()
-    cal_task.cancel()
-    photo_task.cancel()
-    verse_task.cancel()
-    if sim_task:
+    if SIMULATION_MODE and sim_task:
         sim_task.cancel()
+    elif not SIMULATION_MODE:
+        udp_task.cancel()
+        rest_task.cancel()
+        cal_task.cancel()
+        photo_task.cancel()
+        verse_task.cancel()
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -916,71 +758,21 @@ async def get_sleeper_node_data():
 
 @app.get("/api/photos")
 async def get_photos():
+    if SIMULATION_MODE: return {"urls": []}
     photo_dir = os.path.join(BASE_DIR, "assets", "photos")
-    if not os.path.exists(photo_dir):
-        os.makedirs(photo_dir)
-        
-    # We no longer check for extensions because the Google Drive API 
-    # already guarantees these are images via the mimeType filter.
-    # We just ignore hidden system files (like .DS_Store).
+    if not os.path.exists(photo_dir): os.makedirs(photo_dir)
     files_on_disk = [f for f in os.listdir(photo_dir) if not f.startswith('.')]
-    
     urls = [f"/assets/photos/{f}" for f in files_on_disk]
-            
-    logger.info(f"Photo Endpoint accessed. Found {len(urls)} images on disk.")
     return {"urls": urls}
-@app.get("/api/photos/debug")
-async def debug_google_drive():
-    """Diagnostic endpoint to figure out exactly why photos aren't syncing."""
-    try:
-        # Force absolute pathing to check the physical drive
-        photo_dir = os.path.join(BASE_DIR, "assets", "photos")
-        os.makedirs(photo_dir, exist_ok=True)
-        local_files = os.listdir(photo_dir)
 
-        # Connect to Google
-        creds = get_calendar_credentials()
-        service = build('drive', 'v3', credentials=creds, cache_discovery=False)
-        
-        # 1. Look for the folder
-        folder_results = service.files().list(
-            q="mimeType='application/vnd.google-apps.folder' and name='DisplayBoard' and trashed=false",
-            fields="files(id, name)"
-        ).execute()
-        folders = folder_results.get('files', [])
-        
-        if not folders:
-            return {
-                "error": "Google Drive connected, but the folder 'DisplayBoard' was not found.",
-                "local_files_on_disk": local_files
-            }
-            
-        folder_id = folders[0]['id']
-        
-        # 2. Look for the images inside the folder
-        file_results = service.files().list(
-            q=f"'{folder_id}' in parents and mimeType contains 'image/' and trashed=false",
-            fields="files(id, name)"
-        ).execute()
-        
-        return {
-            "status": "Connection to Google Drive is successful.",
-            "folder_info": folders[0],
-            "images_found_in_cloud": file_results.get('files', []),
-            "local_files_on_disk": local_files
-        }
-        
-    except Exception as e:
-        # If there is an authentication or token error, it will print right to your screen
-        return {"CRITICAL_ERROR": str(e)}
 @app.post("/api/tasks/complete/{task_id}")
 async def complete_and_delete_task(task_id: str):
+    if SIMULATION_MODE: return {"status": "success"}
     try:
         creds = get_calendar_credentials()
         from googleapiclient.discovery import build as tasks_build
         service = tasks_build('tasks', 'v1', credentials=creds, cache_discovery=False)
         list_id = get_target_tasklist_id(service)
-        
         task = service.tasks().get(tasklist=list_id, task=task_id).execute()
         task['status'] = 'completed'
         service.tasks().update(tasklist=list_id, task=task_id, body=task).execute()
@@ -989,50 +781,28 @@ async def complete_and_delete_task(task_id: str):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# ==========================================================
-# FILE SERVING & MOUNTS (DOCKER SAFE)
-# ==========================================================
-# Force absolute paths so Docker never loses track of the folders
 assets_path = os.path.join(BASE_DIR, "assets")
 static_path = os.path.join(BASE_DIR, "static")
-
-# Create the directories if they don't exist so FastAPI doesn't crash
 os.makedirs(assets_path, exist_ok=True)
 os.makedirs(os.path.join(assets_path, "photos"), exist_ok=True)
 os.makedirs(static_path, exist_ok=True)
 
-# 1. WEBSOCKET ROUTE MUST GO FIRST
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
-        while True:
-            await websocket.receive_text()
+        while True: await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-# 2. CATCH-ALL ROUTE GOES LAST
 @app.get("/{full_path:path}")
 async def serve_react_app(full_path: str):
-    # 1. Reject broken API calls gracefully
-    if full_path.startswith("api/"):
-        return {"error": "API Route Not Found"}
-    
-    # 2. Check if the browser wants a React asset (JS/CSS/Weather Icons)
+    if full_path.startswith("api/"): return {"error": "API Route Not Found"}
     static_file = os.path.join(static_path, full_path)
-    if os.path.isfile(static_file):
-        return FileResponse(static_file)
-        
-    # 3. Check if the browser wants a downloaded Google Drive photo
+    if os.path.isfile(static_file): return FileResponse(static_file)
     if full_path.startswith("assets/"):
-        # Strip 'assets/' from the URL to look inside the backend's physical folder
         backend_asset = os.path.join(assets_path, full_path.replace("assets/", "", 1))
-        if os.path.isfile(backend_asset):
-            return FileResponse(backend_asset)
-
-    # 4. If it's none of the above, serve the main React dashboard UI
+        if os.path.isfile(backend_asset): return FileResponse(backend_asset)
     index_file = os.path.join(static_path, "index.html")
-    if os.path.exists(index_file):
-        return FileResponse(index_file)
-        
+    if os.path.exists(index_file): return FileResponse(index_file)
     return {"error": "React build not found. Run deploy.bat to compile."}

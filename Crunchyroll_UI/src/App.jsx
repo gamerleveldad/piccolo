@@ -8,6 +8,8 @@ export default function App() {
   const [newName, setNewName] = useState('');
   const [newStatus, setNewStatus] = useState('Watching');
   const [newRating, setNewRating] = useState('Liked');
+  const [newCurrent, setNewCurrent] = useState(0);
+  const [newTotal, setNewTotal] = useState(0);
 
   const currentDayIndex = new Date().getDay();
   const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -29,7 +31,6 @@ export default function App() {
     fetchData();
   }, []);
 
-  // --- CRUD Handlers ---
   const handleAdd = async (e) => {
     e.preventDefault();
     if (!newName.trim()) return;
@@ -37,17 +38,30 @@ export default function App() {
     await fetch(`${API_BASE}/api/history`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ anime_name: newName, status: newStatus, user_rating: newRating })
+      body: JSON.stringify({ 
+        anime_name: newName, 
+        status: newStatus, 
+        user_rating: newRating,
+        current_episode: parseInt(newCurrent),
+        total_episodes: parseInt(newTotal)
+      })
     });
     setNewName('');
+    setNewCurrent(0);
+    setNewTotal(0);
     fetchData();
   };
 
-  const handleUpdate = async (anime_name, status, user_rating) => {
+  const handleUpdate = async (anime_name, status, user_rating, current_episode, total_episodes) => {
     await fetch(`${API_BASE}/api/history/${encodeURIComponent(anime_name)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, user_rating })
+      body: JSON.stringify({ 
+        status, 
+        user_rating, 
+        current_episode: parseInt(current_episode) || 0, 
+        total_episodes: parseInt(total_episodes) || 0 
+      })
     });
     fetchData();
   };
@@ -102,7 +116,7 @@ export default function App() {
         <h2 className="text-2xl font-bold text-craqua mb-6 border-b border-gray-700 pb-2">Watch History Roster</h2>
         
         {/* Add New Show Form */}
-        <form onSubmit={handleAdd} className="flex gap-4 mb-8 bg-crbase p-4 rounded-lg border border-gray-700">
+        <form onSubmit={handleAdd} className="flex gap-4 mb-8 bg-crbase p-4 rounded-lg border border-gray-700 items-center">
           <input 
             type="text" 
             placeholder="Anime Title..." 
@@ -110,8 +124,15 @@ export default function App() {
             onChange={e => setNewName(e.target.value)}
             className="flex-1 bg-gray-800 text-white px-4 py-2 rounded focus:outline-none focus:ring-1 focus:ring-craqua border border-gray-700"
           />
+          <div className="flex gap-2 items-center bg-gray-800 px-3 py-1.5 rounded border border-gray-700">
+             <span className="text-xs text-gray-400">Ep:</span>
+             <input type="number" min="0" value={newCurrent} onChange={e => setNewCurrent(e.target.value)} className="w-12 bg-transparent text-white text-center focus:outline-none" />
+             <span className="text-xs text-gray-400">/</span>
+             <input type="number" min="0" value={newTotal} onChange={e => setNewTotal(e.target.value)} className="w-12 bg-transparent text-white text-center focus:outline-none" />
+          </div>
           <select value={newStatus} onChange={e => setNewStatus(e.target.value)} className="bg-gray-800 text-white px-4 py-2 rounded border border-gray-700 focus:outline-none focus:ring-1 focus:ring-craqua">
             <option value="Watching">Watching</option>
+            <option value="Pending">Pending</option>
             <option value="Dormant">Dormant</option>
             <option value="Completed">Completed</option>
             <option value="Dropped">Dropped</option>
@@ -127,18 +148,38 @@ export default function App() {
         </form>
 
         {/* History List */}
-        <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
+        <div className="space-y-2 max-h-[600px] overflow-y-auto pr-2">
           {history.map(item => (
             <div key={item.name} className="flex items-center justify-between bg-crbase p-3 rounded border border-gray-800 hover:border-gray-600 transition-colors">
-              <span className="font-semibold text-gray-200 flex-1">{item.name}</span>
+              <span className="font-semibold text-gray-200 flex-1 truncate pr-4">{item.name}</span>
               
               <div className="flex gap-3 items-center">
+                {/* Progress Tracking Inputs */}
+                <div className="flex gap-1 items-center bg-gray-800 px-2 py-1 rounded border border-gray-700">
+                  <input 
+                    type="number" 
+                    min="0"
+                    value={item.current_episode || 0} 
+                    onChange={(e) => handleUpdate(item.name, item.status, item.rating, e.target.value, item.total_episodes)}
+                    className="w-12 bg-transparent text-xs text-craqua text-center font-bold focus:outline-none"
+                  />
+                  <span className="text-xs text-gray-500">/</span>
+                  <input 
+                    type="number" 
+                    min="0"
+                    value={item.total_episodes || 0} 
+                    onChange={(e) => handleUpdate(item.name, item.status, item.rating, item.current_episode, e.target.value)}
+                    className="w-12 bg-transparent text-xs text-gray-300 text-center focus:outline-none"
+                  />
+                </div>
+
                 <select 
                   value={item.status} 
-                  onChange={(e) => handleUpdate(item.name, e.target.value, item.rating)}
+                  onChange={(e) => handleUpdate(item.name, e.target.value, item.rating, item.current_episode, item.total_episodes)}
                   className="bg-gray-800 text-xs text-gray-300 px-3 py-1.5 rounded border border-gray-700 focus:outline-none focus:border-craqua"
                 >
                   <option value="Watching">Watching</option>
+                  <option value="Pending">Pending</option>
                   <option value="Dormant">Dormant</option>
                   <option value="Completed">Completed</option>
                   <option value="Dropped">Dropped</option>
@@ -146,7 +187,7 @@ export default function App() {
 
                 <select 
                   value={item.rating} 
-                  onChange={(e) => handleUpdate(item.name, item.status, e.target.value)}
+                  onChange={(e) => handleUpdate(item.name, item.status, e.target.value, item.current_episode, item.total_episodes)}
                   className="bg-gray-800 text-xs text-gray-300 px-3 py-1.5 rounded border border-gray-700 focus:outline-none focus:border-crorange"
                 >
                   <option value="Liked">Liked</option>
