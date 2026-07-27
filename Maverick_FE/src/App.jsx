@@ -5,27 +5,32 @@ function App() {
   const [flights, setFlights] = useState([]);
   const [error, setError] = useState(null);
 
-  // Dynamically resolve the IP or hostname of the server loading the UI
   const host = window.location.hostname;
   const WEATHER_URL = `http://${host}:8004/api/weather/current`;
   const FLIGHT_URL = `http://${host}:8003/api/flights/active`;
 
   useEffect(() => {
     fetch(WEATHER_URL)
-      .then(res => {
-        if (!res.ok) throw new Error(`Weather API return code ${res.status}`);
+      .then(async res => {
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(`Weather API: ${errData.detail || res.status}`);
+        }
         return res.json();
       })
       .then(data => setWeather(data))
-      .catch(err => setError(prev => (prev ? `${prev} | Weather: ${err.message}` : `Weather: ${err.message}`)));
+      .catch(err => setError(prev => (prev ? `${prev} | ${err.message}` : err.message)));
 
     fetch(FLIGHT_URL)
-      .then(res => {
-        if (!res.ok) throw new Error(`Flight API return code ${res.status}`);
+      .then(async res => {
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(`Flight API: ${errData.detail || res.status}`);
+        }
         return res.json();
       })
       .then(data => setFlights(data))
-      .catch(err => setError(prev => (prev ? `${prev} | Flights: ${err.message}` : `Flights: ${err.message}`)));
+      .catch(err => setError(prev => (prev ? `${prev} | ${err.message}` : err.message)));
   }, [WEATHER_URL, FLIGHT_URL]);
 
   return (
@@ -41,11 +46,19 @@ function App() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* Weather Section */}
         <div className="bg-slate-800 p-6 rounded-lg border border-slate-700">
-          <h2 className="text-xl font-semibold text-purple-400 mb-4">Current Weather (Raw)</h2>
+          <h2 className="text-xl font-semibold text-purple-400 mb-4">Current Weather</h2>
           {weather ? (
-            <pre className="text-xs bg-slate-900 p-4 rounded overflow-auto border border-slate-700">
-              {JSON.stringify(weather, null, 2)}
-            </pre>
+            <ul className="space-y-2 text-sm">
+              <li><strong>Temperature:</strong> {weather.air_temperature ?? 'N/A'}</li>
+              <li><strong>Humidity:</strong> {weather.relative_humidity ?? 'N/A'}%</li>
+              <li><strong>Dew Point:</strong> {weather.dew_point ?? 'N/A'}</li>
+              <li><strong>Heat Index:</strong> {weather.heat_index ?? 'N/A'}</li>
+              <li><strong>Wind Speed:</strong> {weather.wind_avg ?? 'N/A'}</li>
+              <li><strong>Wind Gust:</strong> {weather.wind_gust ?? 'N/A'}</li>
+              <li><strong>Rain Rate:</strong> {weather.precip_total_1h ?? 'N/A'}</li>
+              <li><strong>Lightning (Last 1hr):</strong> {weather.strike_count_1h ?? '0'} strikes</li>
+              <li><strong>Lightning (Last Dist):</strong> {weather.strike_last_dist ?? 'N/A'}</li>
+            </ul>
           ) : (
             <p>Loading weather data...</p>
           )}
