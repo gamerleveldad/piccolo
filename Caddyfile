@@ -1,0 +1,27 @@
+http://calcifer {
+    reverse_proxy family_dashboard:8000
+}
+
+http://zelda {
+    reverse_proxy game_scanner_ui:80
+}
+
+http://natsu {
+    reverse_proxy crunchyroll_ui:5173
+}
+
+http://barad-dur {
+    reverse_proxy uptime_kuma:3001
+}
+
+http://pattern {
+    reverse_proxy grafana:3000
+}
+
+http://dross {
+    reverse_proxy netdata:19999
+}
+
+http://pihole {
+    reverse_proxy pihole:80
+}
