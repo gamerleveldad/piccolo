@@ -55,22 +55,29 @@ async def health_check() -> Dict[str, str]:
         raise HTTPException(status_code=503, detail="Database connection failed")
 
 @app.get("/api/flights/active")
-async def get_active_flights(minutes_ago: int = 5) -> List[Dict[str, Any]]:
+async def get_active_flights(minutes_ago: int = 60) -> List[Dict[str, Any]]:
     """
-    Retrieves flights tracked within the last X minutes to ignore the 24-hour cache.
+    Retrieves active flights tracked within the specified time window.
     """
     cutoff_time = datetime.utcnow() - timedelta(minutes=minutes_ago)
     
     query = """
-        SELECT callsign, altitude_ft AS altitude, ground_speed, heading, aircraft_type, distance
+        SELECT *
         FROM flights_overhead
         WHERE last_seen >= $1
-        ORDER BY distance ASC
     """
     
     try:
         async with db.pool.acquire() as conn:
             rows = await conn.fetch(query, cutoff_time)
-            return [dict(row) for row in rows]
+            results = []
+            for row in rows:
+                item = dict(row)
+                # Convert datetime values to ISO format strings for JSON serialization
+                for k, v in item.items():
+                    if isinstance(v, datetime):
+                        item[k] = v.isoformat()
+                results.append(item)
+            return results
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
