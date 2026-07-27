@@ -64,7 +64,7 @@ async def get_active_flights(minutes_ago: int = 60) -> List[Dict[str, Any]]:
     
     # If your PostgreSQL column is explicitly naive (timestamp without time zone),
     # you may need to strip the timezone info before sending it to the database:
-    # cutoff_time = cutoff_time.replace(tzinfo=None)
+    cutoff_time = cutoff_time.replace(tzinfo=None)
     
     query = """
         SELECT *
