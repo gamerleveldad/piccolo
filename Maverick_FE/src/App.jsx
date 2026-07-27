@@ -71,14 +71,15 @@ function App() {
             <ul className="space-y-3 text-sm">
               {flights.map((flight, index) => (
                 <li key={index} className="border-b border-slate-700 pb-2">
-                  <strong>Callsign:</strong> {flight.callsign} <br />
-                  <strong>Altitude:</strong> {flight.altitude} ft <br />
-                  <strong>Distance:</strong> {flight.distance}
+                  <strong>Callsign:</strong> {flight.callsign || 'N/A'} <span className="text-slate-500">({flight.aircraft_type || 'Unknown'})</span><br />
+                  <strong>Altitude:</strong> {flight.altitude_ft} ft <br />
+                  <strong>Speed:</strong> {flight.ground_speed_kts} kts <br />
+                  <strong>Distance:</strong> {flight.distance_nm} nm
                 </li>
               ))}
             </ul>
           ) : (
-            <p>No active flights found or loading...</p>
+            <p>No active flights found within the time window or loading...</p>
           )}
         </div>
       </div>
