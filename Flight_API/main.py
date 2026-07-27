@@ -1,7 +1,7 @@
 import os
 import asyncpg
 from typing import List, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -59,7 +59,12 @@ async def get_active_flights(minutes_ago: int = 60) -> List[Dict[str, Any]]:
     """
     Retrieves active flights tracked within the specified time window.
     """
-    cutoff_time = datetime.utcnow() - timedelta(minutes=minutes_ago)
+    # Use timezone-aware datetime to prevent PostgreSQL offset errors
+    cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
+    
+    # If your PostgreSQL column is explicitly naive (timestamp without time zone),
+    # you may need to strip the timezone info before sending it to the database:
+    # cutoff_time = cutoff_time.replace(tzinfo=None)
     
     query = """
         SELECT *
