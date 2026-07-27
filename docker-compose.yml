@@ -262,7 +262,7 @@ services:
       - influxdb
     networks:
       - piccolo_net
-      
+
   # --- Weather Data API Bridge ---
   weather_api:
     build:
@@ -345,6 +345,17 @@ services:
       - POSTGRES_HOST=postgres_db
     depends_on:
       - postgres_db
+    networks:
+      - piccolo_net
+  # --- Maverick Front End ---
+  maverick_front_end:
+    build:
+      context: ./Maverick_FE
+      dockerfile: Dockerfile
+    container_name: maverick_front_end
+    restart: unless-stopped
+    ports:
+      - "8084:80"
     networks:
       - piccolo_net
   # --- Reverse Proxy (The Traffic Cop) ---

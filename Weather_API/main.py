@@ -1,14 +1,25 @@
 import os
 from typing import Dict, Any, List
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from influxdb_client import InfluxDBClient
+
+# Initialize the application ONCE
+app = FastAPI(title="Maverick Weather API")
+
+# Attach CORS middleware to the active app instance
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 INFLUXDB_URL = os.environ.get("INFLUXDB_URL", "http://influxdb:8086")
 INFLUXDB_TOKEN = os.environ.get("INFLUXDB_TOKEN", "")
 INFLUXDB_ORG = os.environ.get("INFLUXDB_ORG", "")
 INFLUXDB_BUCKET = os.environ.get("INFLUXDB_BUCKET", "weatherflow")
-
-app = FastAPI(title="Maverick Weather API")
 
 def get_influx_client():
     return InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG)

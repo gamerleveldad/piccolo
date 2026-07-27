@@ -1,9 +1,9 @@
 import os
-from datetime import datetime, timedelta
-from typing import List, Dict, Any
-
 import asyncpg
+from typing import List, Dict, Any
+from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 # Environment configurations
@@ -33,7 +33,17 @@ async def lifespan(app: FastAPI):
     yield
     await db.disconnect()
 
+# Initialize application with lifespan ONCE
 app = FastAPI(lifespan=lifespan, title="Maverick Flight API")
+
+# Attach CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/health")
 async def health_check() -> Dict[str, str]:
