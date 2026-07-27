@@ -262,6 +262,25 @@ services:
       - influxdb
     networks:
       - piccolo_net
+      
+  # --- Weather Data API Bridge ---
+  weather_api:
+    build:
+      context: ./Weather_API
+      dockerfile: Dockerfile
+    container_name: weather_api
+    restart: unless-stopped
+    ports:
+      - "8004:8000"
+    environment:
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      - INFLUXDB_ORG=${INFLUXDB_ORG}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
+    depends_on:
+      - influxdb
+    networks:
+      - piccolo_net
 
   # --- Netdata System Monitoring ---
   netdata:
