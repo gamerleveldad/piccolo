@@ -6,7 +6,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-# Environment configurations
 POSTGRES_USER = os.environ.get("POSTGRES_USER", "postgres")
 POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "postgres")
 POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "postgres_db")
@@ -33,10 +32,8 @@ async def lifespan(app: FastAPI):
     yield
     await db.disconnect()
 
-# Initialize application with lifespan ONCE
 app = FastAPI(lifespan=lifespan, title="Maverick Flight API")
 
-# Attach CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -65,7 +62,7 @@ async def get_active_flights(minutes_ago: int = 5) -> List[Dict[str, Any]]:
     cutoff_time = datetime.utcnow() - timedelta(minutes=minutes_ago)
     
     query = """
-        SELECT callsign, altitude, ground_speed, heading, aircraft_type, distance
+        SELECT callsign, altitude_ft AS altitude, ground_speed, heading, aircraft_type, distance
         FROM flights_overhead
         WHERE last_seen >= $1
         ORDER BY distance ASC
