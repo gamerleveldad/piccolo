@@ -41,13 +41,11 @@ function App() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* Weather Section */}
         <div className="bg-slate-800 p-6 rounded-lg border border-slate-700">
-          <h2 className="text-xl font-semibold text-purple-400 mb-4">Current Weather</h2>
+          <h2 className="text-xl font-semibold text-purple-400 mb-4">Current Weather (Raw)</h2>
           {weather ? (
-            <ul className="space-y-2 text-sm">
-              <li><strong>Temperature:</strong> {weather.temperature ?? 'N/A'}</li>
-              <li><strong>Wind Speed:</strong> {weather.wind_speed ?? 'N/A'}</li>
-              <li><strong>Wind Gust:</strong> {weather.wind_gust ?? 'N/A'}</li>
-            </ul>
+            <pre className="text-xs bg-slate-900 p-4 rounded overflow-auto border border-slate-700">
+              {JSON.stringify(weather, null, 2)}
+            </pre>
           ) : (
             <p>Loading weather data...</p>
           )}
