@@ -91,11 +91,11 @@ def evaluate_game_batch(batch_data, scan_type):
     # Give the AI an anchor for time so it can calculate "this week" or "this month"
     today_date = datetime.now().strftime("%B %d, %Y")
     
-    # Dynamically change the AI's objective based on the cron schedule
+    # Dynamically change the AI's objective based on the hierarchical schedule
     if scan_type == "monthly":
-        cadence_rules = "MONTHLY REPORT: Your primary goal is to check the 'released' date. If the game is releasing in the upcoming month, explicitly highlight it! Summarize any major overarching news from the past 30 days."
+        cadence_rules = "MONTHLY REPORT: Your primary goal is to check the 'released' date. If the game is releasing in the upcoming month, explicitly highlight it! Summarize any major overarching news from the past 30 days. YOU MUST ALSO INCLUDE ANY BREAKING NEWS OR VIDEOS FROM THE LAST 24 HOURS."
     elif scan_type == "weekly":
-        cadence_rules = "WEEKLY REPORT: Your primary goal is to check the 'released' date. If the game is releasing within the next 7 days, explicitly highlight it! Summarize major news or patch notes from the past week."
+        cadence_rules = "WEEKLY REPORT: Your primary goal is to check the 'released' date. If the game is releasing within the next 7 days, explicitly highlight it! Summarize major news or patch notes from the past week. YOU MUST ALSO INCLUDE ANY BREAKING NEWS OR VIDEOS FROM THE LAST 24 HOURS."
     else:
         cadence_rules = "DAILY REPORT: Focus STRICTLY on breaking news for the target game. For YouTube, ONLY include videos if their 'published_at' timestamp is within the last 24 hours AND the video is explicitly about the targeted game."
 
@@ -194,21 +194,28 @@ if __name__ == "__main__":
     else:
         run_scan(scan_type)
 
-def run_monthly_if_first():
+def execute_daily_routing():
     from datetime import datetime
-    # Only execute the monthly scan if it is the 1st of the month
-    if datetime.now().day == 1:
+    now = datetime.now()
+    
+    # Priority 1: Monthly Scan (1st day of the month)
+    if now.day == 1:
+        print("Executing Monthly Consolidated Scan...")
         run_scan(scan_type="monthly")
+        
+    # Priority 2: Weekly Scan (Monday, where weekday() == 0)
+    elif now.weekday() == 0:
+        print("Executing Weekly Consolidated Scan...")
+        run_scan(scan_type="weekly")
+        
+    # Priority 3: Standard Daily Scan (All other days)
+    else:
+        print("Executing Standard Daily Scan...")
+        run_scan(scan_type="daily")
 
 def schedule_worker():
-    # Execute daily logic exactly at 7:00 AM
-    schedule.every().day.at("07:00").do(run_scan, scan_type="daily")
-    
-    # Execute weekly summary slightly offset to avoid API collisions
-    schedule.every().monday.at("07:05").do(run_scan, scan_type="weekly")
-    
-    # Execute daily at 7:10 AM, but the wrapper function checks if it's the 1st of the month
-    schedule.every().day.at("07:10").do(run_monthly_if_first)
+    # Only one trigger event occurs per day
+    schedule.every().day.at("07:00").do(execute_daily_routing)
     
     print("Video Game Scanner Daemon online. Awaiting 07:00 AM window...")
     while True:
