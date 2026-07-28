@@ -10,6 +10,7 @@ ENV VITE_HOME_LONGITUDE=$VITE_HOME_LONGITUDE
 COPY package*.json ./
 RUN npm install
 COPY . .
+RUN ls -la src/ && ls -la src/components/
 RUN npm run build
 
 # Stage 2: Serve static files via Nginx
