@@ -11,8 +11,12 @@ export default function App() {
   const [newCurrent, setNewCurrent] = useState(0);
   const [newTotal, setNewTotal] = useState(0);
 
-  const currentDayIndex = new Date().getDay();
-  const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  // Map JavaScript's Sunday-start to Python's Monday-start indexing
+  const jsDay = new Date().getDay(); 
+  const currentDayIndex = jsDay === 0 ? 6 : jsDay - 1; 
+  
+  // Align the header array to match the 0-6 Python index
+  const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
   const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
   const fetchData = () => {

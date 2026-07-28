@@ -50,8 +50,9 @@ def get_schedule():
 def get_history():
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT anime_name, status, user_rating FROM watch_history ORDER BY anime_name")
-    history = [{"name": row[0], "status": row[1], "rating": row[2]} for row in cursor.fetchall()]
+    # Updated SQL to grab the episode counts
+    cursor.execute("SELECT anime_name, status, user_rating, current_episode, total_episodes FROM watch_history ORDER BY anime_name")
+    history = [{"name": row[0], "status": row[1], "rating": row[2], "current_episode": row[3], "total_episodes": row[4]} for row in cursor.fetchall()]
     conn.close()
     return history
 
