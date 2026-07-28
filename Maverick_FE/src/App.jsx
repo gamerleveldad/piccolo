@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Activity, CloudRain, Gamepad2, Tv, Map as MapIcon } from 'lucide-react';
+import MapWidget from './components/MapWidget';
 
 function App() {
   // Data state variables
@@ -48,17 +49,17 @@ function App() {
       {/* Main Grid Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 xl:grid-cols-12 gap-6">
         
-        {/* CENTER COLUMN: Map & Flights (Prioritized in Mobile Stack) */}
-        {/* Mobile: 1 col | Tablet: 8 cols | Desktop: 6 cols */}
+        {/* CENTER COLUMN: Map & Flights */}
         <div className="lg:col-span-8 xl:col-span-6 order-1 xl:order-2 flex flex-col gap-6">
-          <div className="bg-cardBg border border-borderSlate rounded-xl shadow-lg flex-1 min-h-[400px] lg:min-h-[600px] flex flex-col overflow-hidden">
+          <div className="bg-cardBg border border-borderSlate rounded-xl shadow-lg flex-1 min-h-[450px] lg:min-h-[600px] flex flex-col overflow-hidden">
             <div className="bg-[#161f33] p-4 border-b border-borderSlate flex items-center gap-2">
               <MapIcon className="text-accentBlue w-5 h-5" />
               <h2 className="text-lg font-semibold text-textSilver">Airspace & Radar</h2>
             </div>
-            {/* Future Deck.gl / Mapbox container goes here */}
-            <div className="flex-1 flex items-center justify-center bg-[#0d1320] text-slate-500">
-              <p>Mapbox / Deck.gl rendering pending hardware SDR</p>
+            
+            {/* MapLibre Base Map */}
+            <div className="flex-1 relative">
+              <MapWidget />
             </div>
           </div>
         </div>

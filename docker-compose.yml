@@ -350,8 +350,11 @@ services:
   # --- Maverick Front End ---
   maverick_front_end:
     build:
-      context: ./Maverick_FE
+      context: ./maverick_front_end
       dockerfile: Dockerfile
+      args:
+        - VITE_HOME_LATITUDE=${HOME_LATITUDE}
+        - VITE_HOME_LONGITUDE=${HOME_LONGITUDE}
     container_name: maverick_front_end
     restart: unless-stopped
     ports:
