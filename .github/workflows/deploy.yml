@@ -1,0 +1,14 @@
+name: Deploy to Piccolo
+
+on:
+  push:
+    branches:
+      - main # Or 'master'
+
+jobs:
+  deploy:
+    runs-on: self-hosted # This targets the runner you just built
+    steps:
+      - name: Trigger Deployment Script
+        run: |
+          /home/howl/Piccolo/deploy.sh ${{ github.event.before }} ${{ github.sha }}
