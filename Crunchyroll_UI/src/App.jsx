@@ -120,7 +120,41 @@ export default function App() {
           );
         })}
       </div>
-
+      {/* --- ACTIVE PROGRESS WIDGET --- */}
+      {history.filter(item => item.status === 'Watching').length > 0 && (
+        <div className="bg-crpanel p-4 lg:p-6 rounded-lg border border-gray-800 shadow-xl mb-12 lg:mb-16">
+          <h2 className="text-xl lg:text-2xl font-bold text-craqua mb-6 border-b border-gray-700 pb-2">Active Watch Progress</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {history
+              .filter(item => item.status === 'Watching')
+              .map(item => {
+                const current = item.current_episode || 0;
+                const total = item.total_episodes || 0;
+                // Calculate percentage, preventing division by zero if total isn't set yet
+                const percent = total > 0 ? Math.min(Math.round((current / total) * 100), 100) : 0;
+                
+                return (
+                  <div key={item.name} className="bg-crbase p-4 rounded border border-gray-700 hover:border-gray-500 transition-colors">
+                    <div className="flex justify-between items-end mb-2">
+                      <span className="font-bold text-gray-200 truncate pr-2">{item.name}</span>
+                      <span className="text-xs font-mono text-crorange whitespace-nowrap">
+                        {current} / {total > 0 ? total : '?'}
+                      </span>
+                    </div>
+                    
+                    {/* The Progress Bar */}
+                    <div className="w-full bg-gray-900 rounded-full h-2 mt-2 overflow-hidden border border-gray-800">
+                      <div 
+                        className="bg-gradient-to-r from-craqua to-cyan-400 h-2 rounded-full transition-all duration-500 ease-out shadow-[0_0_10px_rgba(0,142,151,0.5)]" 
+                        style={{ width: `${percent}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                );
+            })}
+          </div>
+        </div>
+      )}
       {/* --- WATCH HISTORY MANAGEMENT --- */}
       <div className="bg-crpanel p-4 lg:p-6 rounded-lg border border-gray-800 shadow-xl">
         <h2 className="text-xl lg:text-2xl font-bold text-craqua mb-6 border-b border-gray-700 pb-2">Watch History Roster</h2>

@@ -40,7 +40,15 @@ class HistoryUpdate(BaseModel):
 def get_schedule():
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT anime_name, expected_weekday, last_seen_date FROM watchlist_schedule")
+    
+    # JOIN the schedule and history tables so only 'Watching' shows appear on the calendar
+    cursor.execute('''
+        SELECT s.anime_name, s.expected_weekday, s.last_seen_date 
+        FROM watchlist_schedule s
+        JOIN watch_history h ON s.anime_name = h.anime_name
+        WHERE h.status = 'Watching'
+    ''')
+    
     schedule = [{"name": row[0], "weekday": row[1], "last_seen": row[2]} for row in cursor.fetchall()]
     conn.close()
     return schedule

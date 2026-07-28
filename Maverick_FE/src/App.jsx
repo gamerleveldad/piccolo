@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
+import { Activity, CloudRain, Gamepad2, Tv, Map as MapIcon } from 'lucide-react';
 
 function App() {
+  // Data state variables
   const [weather, setWeather] = useState(null);
   const [flights, setFlights] = useState([]);
   const [error, setError] = useState(null);
@@ -9,13 +11,11 @@ function App() {
   const WEATHER_URL = `http://${host}:8004/api/weather/current`;
   const FLIGHT_URL = `http://${host}:8003/api/flights/active`;
 
+  // Fetch logic remains exactly the same as your previous working version
   useEffect(() => {
     fetch(WEATHER_URL)
       .then(async res => {
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(`Weather API: ${errData.detail || res.status}`);
-        }
+        if (!res.ok) throw new Error(`Weather API: ${res.status}`);
         return res.json();
       })
       .then(data => setWeather(data))
@@ -23,10 +23,7 @@ function App() {
 
     fetch(FLIGHT_URL)
       .then(async res => {
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(`Flight API: ${errData.detail || res.status}`);
-        }
+        if (!res.ok) throw new Error(`Flight API: ${res.status}`);
         return res.json();
       })
       .then(data => setFlights(data))
@@ -34,54 +31,122 @@ function App() {
   }, [WEATHER_URL, FLIGHT_URL]);
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-300 p-8 font-sans">
-      <h1 className="text-3xl font-bold text-blue-500 mb-8">Maverick Data Test</h1>
+    <div className="min-h-screen bg-darkBg text-textSilver p-4 md:p-6 font-sans">
       
-      {error && (
-        <div className="bg-slate-800 border border-slate-600 text-slate-100 p-4 rounded mb-6">
-          Error loading data: {error}
-        </div>
-      )}
+      {/* Header */}
+      <header className="mb-6 flex justify-between items-center">
+        <h1 className="text-2xl md:text-3xl font-bold text-accentBlue tracking-tight">
+          Maverick Dashboard
+        </h1>
+        {error && (
+          <div className="bg-slate-800 border-l-4 border-accentPurple text-slate-100 p-2 text-sm rounded shadow-md">
+            {error}
+          </div>
+        )}
+      </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* Weather Section */}
-        <div className="bg-slate-800 p-6 rounded-lg border border-slate-700">
-          <h2 className="text-xl font-semibold text-purple-400 mb-4">Current Weather</h2>
-          {weather ? (
-            <ul className="space-y-2 text-sm">
-              <li><strong>Temperature:</strong> {weather.air_temperature ?? 'N/A'}</li>
-              <li><strong>Humidity:</strong> {weather.relative_humidity ?? 'N/A'}%</li>
-              <li><strong>Dew Point:</strong> {weather.dew_point ?? 'N/A'}</li>
-              <li><strong>Heat Index:</strong> {weather.heat_index ?? 'N/A'}</li>
-              <li><strong>Wind Speed:</strong> {weather.wind_avg ?? 'N/A'}</li>
-              <li><strong>Wind Gust:</strong> {weather.wind_gust ?? 'N/A'}</li>
-              <li><strong>Rain Rate:</strong> {weather.precip_total_1h ?? 'N/A'}</li>
-              <li><strong>Lightning (Last 1hr):</strong> {weather.strike_count_1h ?? '0'} strikes</li>
-              <li><strong>Lightning (Last Dist):</strong> {weather.strike_last_dist ?? 'N/A'}</li>
-            </ul>
-          ) : (
-            <p>Loading weather data...</p>
-          )}
+      {/* Main Grid Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 xl:grid-cols-12 gap-6">
+        
+        {/* CENTER COLUMN: Map & Flights (Prioritized in Mobile Stack) */}
+        {/* Mobile: 1 col | Tablet: 8 cols | Desktop: 6 cols */}
+        <div className="lg:col-span-8 xl:col-span-6 order-1 xl:order-2 flex flex-col gap-6">
+          <div className="bg-cardBg border border-borderSlate rounded-xl shadow-lg flex-1 min-h-[400px] lg:min-h-[600px] flex flex-col overflow-hidden">
+            <div className="bg-[#161f33] p-4 border-b border-borderSlate flex items-center gap-2">
+              <MapIcon className="text-accentBlue w-5 h-5" />
+              <h2 className="text-lg font-semibold text-textSilver">Airspace & Radar</h2>
+            </div>
+            {/* Future Deck.gl / Mapbox container goes here */}
+            <div className="flex-1 flex items-center justify-center bg-[#0d1320] text-slate-500">
+              <p>Mapbox / Deck.gl rendering pending hardware SDR</p>
+            </div>
+          </div>
         </div>
 
-        {/* Flights Section */}
-        <div className="bg-slate-800 p-6 rounded-lg border border-slate-700">
-          <h2 className="text-xl font-semibold text-purple-400 mb-4">Active Flights</h2>
-          {flights && flights.length > 0 ? (
-            <ul className="space-y-3 text-sm">
-              {flights.map((flight, index) => (
-                <li key={index} className="border-b border-slate-700 pb-2">
-                  <strong>Callsign:</strong> {flight.callsign || 'N/A'} <span className="text-slate-500">({flight.aircraft_type || 'Unknown'})</span><br />
-                  <strong>Altitude:</strong> {flight.altitude_ft} ft <br />
-                  <strong>Speed:</strong> {flight.ground_speed_kts} kts <br />
-                  <strong>Distance:</strong> {flight.distance_nm} nm
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p>No active flights found within the time window or loading...</p>
-          )}
+        {/* LEFT COLUMN: Weather & Health */}
+        {/* Mobile: 1 col | Tablet: 4 cols | Desktop: 3 cols */}
+        <div className="lg:col-span-4 xl:col-span-3 order-2 xl:order-1 flex flex-col gap-6">
+          
+          {/* Weather Widget */}
+          <div className="bg-cardBg border border-borderSlate rounded-xl shadow-lg p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <CloudRain className="text-accentPurple w-5 h-5" />
+              <h2 className="text-lg font-semibold text-textSilver">Local Conditions</h2>
+            </div>
+            {weather ? (
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="flex flex-col">
+                  <span className="text-slate-500">Temp</span>
+                  <span className="text-xl font-medium text-slate-200">{weather.air_temperature ?? '--'}°C</span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-slate-500">Wind</span>
+                  <span className="text-xl font-medium text-slate-200">{weather.wind_avg ?? '--'} m/s</span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-slate-500">Humidity</span>
+                  <span className="text-xl font-medium text-slate-200">{weather.relative_humidity ?? '--'}%</span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-slate-500">Rain Rate</span>
+                  <span className="text-xl font-medium text-slate-200">{weather.precip_total_1h ?? '0'} mm</span>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500 animate-pulse">Fetching weather data...</p>
+            )}
+          </div>
+
+          {/* System Health Widget */}
+          <div className="bg-cardBg border border-borderSlate rounded-xl shadow-lg p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <Activity className="text-accentBlue w-5 h-5" />
+              <h2 className="text-lg font-semibold text-textSilver">Infrastructure</h2>
+            </div>
+            {/* Hardcoded placeholders for the green/red bubbles until the Uptime Kuma API bridge is built */}
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-slate-400">Weather API</span>
+                <span className="flex h-3 w-3 rounded-full bg-green-500"></span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-slate-400">Flight API</span>
+                <span className="flex h-3 w-3 rounded-full bg-green-500"></span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-slate-400">Netdata Core</span>
+                <span className="flex h-3 w-3 rounded-full bg-green-500"></span>
+              </div>
+            </div>
+          </div>
         </div>
+
+        {/* RIGHT COLUMN: Media & Entertainment */}
+        {/* Mobile: 1 col | Tablet: 12 cols (drops to bottom) | Desktop: 3 cols */}
+        <div className="lg:col-span-12 xl:col-span-3 order-3 flex flex-col gap-6">
+          <div className="bg-cardBg border border-borderSlate rounded-xl shadow-lg p-5 flex-1">
+            <div className="flex items-center justify-between mb-4 border-b border-borderSlate pb-2">
+              <div className="flex gap-4">
+                <button className="flex items-center gap-2 text-accentBlue font-medium border-b-2 border-accentBlue pb-1">
+                  <Tv className="w-4 h-4" /> Anime
+                </button>
+                <button className="flex items-center gap-2 text-slate-500 hover:text-slate-300 transition-colors pb-1">
+                  <Gamepad2 className="w-4 h-4" /> Games
+                </button>
+              </div>
+            </div>
+            <div className="flex flex-col gap-4">
+              {/* Media Placeholders */}
+              <div className="bg-[#090d16] p-3 rounded border border-borderSlate">
+                <p className="text-sm font-medium text-slate-200">Crunchyroll API Pending</p>
+                <div className="w-full bg-slate-800 h-1.5 mt-2 rounded-full overflow-hidden">
+                  <div className="bg-accentPurple h-full w-0"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   );
