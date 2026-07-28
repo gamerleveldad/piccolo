@@ -350,7 +350,7 @@ services:
   # --- Maverick Front End ---
   maverick_front_end:
     build:
-      context: ./maverick_front_end
+      context: ./Maverick_FE
       dockerfile: Dockerfile
       args:
         - VITE_HOME_LATITUDE=${HOME_LATITUDE}
