@@ -9,7 +9,7 @@ function App() {
 
   const fetchGames = async () => {
     try {
-      const response = await fetch('http://127.0.0.1:8001/games');
+      const response = await fetch('http://192.168.4.55:8001/games');
       const data = await response.json();
       setGames(data);
     } catch (error) {
@@ -27,7 +27,7 @@ function App() {
     setMessage('ESTABLISHING UPLINK TO RAWG DATABANKS...');
 
     try {
-      const response = await fetch('http://127.0.0.1:8001/games/add', {
+        const response = await fetch('http://192.168.4.55:8001/games/add', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: newGameTitle, platform: newGamePlatform }),
@@ -48,7 +48,7 @@ function App() {
     if (!window.confirm(`WARNING: Terminate tracking protocol for ${title}?`)) return;
     
     try {
-      await fetch(`http://127.0.0.1:8001/games/${id}`, {
+      await fetch(`http://192.168.4.55:8001/games/${id}`, {
         method: 'DELETE',
       });
       fetchGames();
