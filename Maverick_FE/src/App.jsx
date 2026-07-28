@@ -12,6 +12,11 @@ function App() {
   const WEATHER_URL = `http://${host}:8004/api/weather/current`;
   const FLIGHT_URL = `http://${host}:8003/api/flights/active`;
 
+  // Unit Conversion Helpers
+  const toFahrenheit = (c) => c != null ? ((c * 9/5) + 32).toFixed(1) : '--';
+  const toMPH = (ms) => ms != null ? (ms * 2.23694).toFixed(1) : '--';
+  const toInches = (mm) => mm != null ? (mm / 25.4).toFixed(2) : '0.00';
+
   // Fetch logic remains exactly the same as your previous working version
   useEffect(() => {
     fetch(WEATHER_URL)
@@ -78,11 +83,11 @@ function App() {
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div className="flex flex-col">
                   <span className="text-slate-500">Temp</span>
-                  <span className="text-xl font-medium text-slate-200">{weather.air_temperature ?? '--'}°C</span>
+                  <span className="text-xl font-medium text-slate-200">{toFahrenheit(weather.air_temperature)}°F</span>
                 </div>
                 <div className="flex flex-col">
                   <span className="text-slate-500">Wind</span>
-                  <span className="text-xl font-medium text-slate-200">{weather.wind_avg ?? '--'} m/s</span>
+                  <span className="text-xl font-medium text-slate-200">{toMPH(weather.wind_avg)} mph</span>
                 </div>
                 <div className="flex flex-col">
                   <span className="text-slate-500">Humidity</span>
@@ -90,7 +95,7 @@ function App() {
                 </div>
                 <div className="flex flex-col">
                   <span className="text-slate-500">Rain Rate</span>
-                  <span className="text-xl font-medium text-slate-200">{weather.precip_total_1h ?? '0'} mm</span>
+                  <span className="text-xl font-medium text-slate-200">{toInches(weather.precip_total_1h)} in/hr</span>
                 </div>
               </div>
             ) : (

@@ -19,7 +19,30 @@ export default function MapWidget() {
 
     map.current = new maplibregl.Map({
       container: mapContainer.current,
-      style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+      style: {
+        version: 8,
+        sources: {
+          'carto-dark': {
+            type: 'raster',
+            tiles: [
+              'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+              'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+              'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+              'https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
+            ],
+            tileSize: 256,
+          }
+        },
+        layers: [
+          {
+            id: 'carto-dark-layer',
+            type: 'raster',
+            source: 'carto-dark',
+            minzoom: 0,
+            maxzoom: 22
+          }
+        ]
+      },
       center: DEFAULT_CENTER,
       zoom: DEFAULT_ZOOM,
       attributionControl: false
@@ -37,7 +60,7 @@ export default function MapWidget() {
       }
     };
   }, []);
-
+  
   return (
     <div className="w-full h-full min-h-[400px] lg:min-h-[500px] relative rounded-b-xl overflow-hidden">
       <div ref={mapContainer} className="absolute inset-0 w-full h-full" />
