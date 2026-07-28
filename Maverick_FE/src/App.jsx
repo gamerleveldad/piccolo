@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Activity, CloudRain, Gamepad2, Tv, Map as MapIcon } from 'lucide-react';
-import MapWidget from './components/MapWidget';
+import MapWidget from './components/ui/MapWidget';
 
 function App() {
   // Data state variables
