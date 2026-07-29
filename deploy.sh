@@ -8,8 +8,14 @@ NEW_SHA=$2
 # Pull latest code from GitLab
 git pull
 
-# Detect changed directories
-CHANGED_DIRS=$(git diff --name-only $OLD_SHA $NEW_SHA | cut -d/ -f1 | sort -u)
+# Handle the "First Push" (All Zeros) Scenario
+if [ "$OLD_SHA" == "0000000000000000000000000000000000000000" ]; then
+    echo "First push detected or previous SHA missing. Falling back to build ALL."
+    CHANGED_DIRS="docker-compose.yml"
+else
+    # Detect changed directories normally
+    CHANGED_DIRS=$(git diff --name-only $OLD_SHA $NEW_SHA | cut -d/ -f1 | sort -u)
+fi
 
 DEPLOYED_PROJECTS=""
 SERVICES_TO_BUILD=""
