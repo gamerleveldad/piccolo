@@ -128,29 +128,11 @@ function App() {
           </div>
         </div>
 
-        {/* RIGHT COLUMN: Media & Entertainment */}
-        {/* Mobile: 1 col | Tablet: 12 cols (drops to bottom) | Desktop: 3 cols */}
-        <div className="lg:col-span-12 xl:col-span-3 order-3 flex flex-col gap-6">
-          <div className="bg-cardBg border border-borderSlate rounded-xl shadow-lg p-5 flex-1">
-            <div className="flex items-center justify-between mb-4 border-b border-borderSlate pb-2">
-              <div className="flex gap-4">
-                <button className="flex items-center gap-2 text-accentBlue font-medium border-b-2 border-accentBlue pb-1">
-                  <Tv className="w-4 h-4" /> Anime
-                </button>
-                <button className="flex items-center gap-2 text-slate-500 hover:text-slate-300 transition-colors pb-1">
-                  <Gamepad2 className="w-4 h-4" /> Games
-                </button>
-              </div>
-            </div>
-            <div className="flex flex-col gap-4">
-              {/* Media Placeholders */}
-              {/* RIGHT COLUMN: Media & Tasks */}
-              <div className="lg:col-span-4 xl:col-span-3 order-3 flex flex-col gap-6">
-                {/* Active Media & Gaming Backlog */}
-                <MediaWidget />
-              </div>
-            </div>
-          </div>
+        {/* RIGHT COLUMN: Media & Tasks */}
+        <div className="lg:col-span-4 xl:col-span-3 order-3 flex flex-col gap-6">
+          
+          <MediaWidget />
+          
         </div>
 
       </div>
