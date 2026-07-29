@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import requests
 import json
+from datetime import datetime, timedelta
 import psycopg2
 from psycopg2 import errors
 import os
@@ -29,7 +30,8 @@ client = Client()
 class NewGameRequest(BaseModel):
     title: str
     platform: str
-
+class UpdateDateRequest(BaseModel):
+    release_date: str
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
@@ -157,3 +159,52 @@ def add_game(request: NewGameRequest):
         return {"status": "error", "message": f"'{request.title}' is already active."}
     finally:
         conn.close()
+
+@app.get("/games/upcoming")
+def get_upcoming_games():
+    """
+    Returns a list of tracked games releasing within the next 7 days.
+    Accessible internally by other microservices on the Docker network.
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    # Calculate today and exactly 7 days from now
+    today = datetime.now().strftime("%Y-%m-%d")
+    next_week = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+    
+    # Query logic: 
+    # 1. length(release_date) = 10 ensures we only check valid YYYY-MM-DD strings 
+    #    (ignoring "Upcoming / TBD").
+    # 2. String comparison efficiently filters the timeframe.
+    query = """
+        SELECT id, title, rawg_id, release_date 
+        FROM games 
+        WHERE length(release_date) = 10 
+          AND release_date >= %s 
+          AND release_date <= %s
+        ORDER BY release_date ASC
+    """
+    
+    c.execute(query, (today, next_week))
+    
+    games = [
+        {"id": row[0], "title": row[1], "rawg_id": row[2], "release_date": row[3]} 
+        for row in c.fetchall()
+    ]
+    
+    conn.close()
+    return games
+
+@app.put("/games/{game_id}/date")
+def update_game_date(game_id: int, request: UpdateDateRequest):
+    """Allows manual updating of the release date for off-grid games."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute(
+        "UPDATE games SET release_date = %s WHERE id = %s", 
+        (request.release_date, game_id)
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "success", "message": "Date manually overridden."}

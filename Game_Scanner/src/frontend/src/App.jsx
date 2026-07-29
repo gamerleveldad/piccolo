@@ -6,7 +6,8 @@ function App() {
   const [newGamePlatform, setNewGamePlatform] = useState('PC');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
-
+  const [editingId, setEditingId] = useState(null);
+  const [editDateValue, setEditDateValue] = useState('');
   const fetchGames = async () => {
     try {
       const response = await fetch('http://192.168.4.55:8001/games');
@@ -57,7 +58,26 @@ function App() {
       console.error("Error deleting game:", error);
     }
   };
+  const handleEditClick = (game) => {
+    setEditingId(game.id);
+    setEditDateValue(game.release_date);
+  };
 
+  const handleSaveDate = async (id) => {
+    try {
+      await fetch(`${API_URL}/games/${id}/date`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ release_date: editDateValue }),
+      });
+      setEditingId(null);
+      fetchGames();
+      setMessage('TARGET DATE MANUALLY OVERRIDDEN.');
+    } catch (error) {
+      console.error("Error updating date:", error);
+      setMessage('SYSTEM ERROR. OVERRIDE FAILED.');
+    }
+  };
   return (
     <div className="min-h-screen bg-black text-cyan-400 font-mono relative overflow-hidden selection:bg-cyan-900">
       {/* Background Tron Grid Effect */}
@@ -167,7 +187,41 @@ function App() {
                         {game.rawg_id === 'custom_search' ? '[OFF-GRID]' : game.rawg_id}
                       </td>
                       <td className="px-6 py-4 text-sm text-cyan-500">
-                        {game.release_date || 'UNKNOWN_CYCLE'}
+                        {editingId === game.id ? (
+                          <div className="flex gap-2 items-center">
+                            <input 
+                              type="text" 
+                              value={editDateValue} 
+                              onChange={(e) => setEditDateValue(e.target.value)}
+                              className="bg-cyan-950/60 border border-cyan-700 text-cyan-300 px-2 py-1 text-xs outline-none focus:border-cyan-400 w-32 uppercase"
+                            />
+                            <button 
+                              onClick={() => handleSaveDate(game.id)} 
+                              className="text-green-500 hover:text-green-300 font-bold uppercase tracking-widest text-xs transition-colors"
+                            >
+                              SAVE
+                            </button>
+                            <button 
+                              onClick={() => setEditingId(null)} 
+                              className="text-red-500 hover:text-red-400 font-bold uppercase tracking-widest text-xs transition-colors"
+                            >
+                              CANCEL
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-3 group/edit">
+                            <span>{game.release_date || 'UNKNOWN_CYCLE'}</span>
+                            {/* Only show the edit button if the game is off-grid */}
+                            {game.rawg_id === 'custom_search' && (
+                              <button 
+                                onClick={() => handleEditClick(game)} 
+                                className="opacity-0 group-hover/edit:opacity-100 text-cyan-700 hover:text-cyan-400 text-[10px] uppercase tracking-widest transition-opacity border border-cyan-800/50 px-2 py-0.5 rounded-sm"
+                              >
+                                Override
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4 text-right">
                         <button 

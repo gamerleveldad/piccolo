@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Activity, CloudRain, Gamepad2, Tv, Map as MapIcon } from 'lucide-react';
 import MapWidget from '@/components/MapWidget';
+import MediaWidget from './components/MediaWidget';
 
 function App() {
   // Data state variables
@@ -143,11 +144,10 @@ function App() {
             </div>
             <div className="flex flex-col gap-4">
               {/* Media Placeholders */}
-              <div className="bg-[#090d16] p-3 rounded border border-borderSlate">
-                <p className="text-sm font-medium text-slate-200">Crunchyroll API Pending</p>
-                <div className="w-full bg-slate-800 h-1.5 mt-2 rounded-full overflow-hidden">
-                  <div className="bg-accentPurple h-full w-0"></div>
-                </div>
+              {/* RIGHT COLUMN: Media & Tasks */}
+              <div className="lg:col-span-4 xl:col-span-3 order-3 flex flex-col gap-6">
+                {/* Active Media & Gaming Backlog */}
+                <MediaWidget />
               </div>
             </div>
           </div>

@@ -130,8 +130,66 @@ def evaluate_game_batch(batch_data, scan_type):
     except json.JSONDecodeError:
         print("Failed to parse Gemini batch response. Ensure prompt rules are strict.")
         return []
+def recheck_unknown_games():
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT id, title FROM games WHERE rawg_id = 'custom_search'")
+    unknown_games = c.fetchall()
+    
+    if not unknown_games:
+        conn.close()
+        return
 
+    api_key = os.getenv("RAWG_API_KEY")
+    updates_found = []
+    
+    for game_id, title in unknown_games:
+        url = "https://api.rawg.io/api/games"
+        response = requests.get(url, params={"search": title, "key": api_key})
+        
+        if response.status_code == 200:
+            results = response.json().get("results", [])[:3]
+            if not results:
+                continue
+            
+            prompt = f"""
+            You are a data evaluation agent looking for the video game "{title}".
+            Here are the top RAWG search results:
+            {json.dumps(results, indent=2)}
+            
+            If one of these is a definitive match for the unreleased/upcoming game "{title}", extract it.
+            Output strictly a JSON object:
+            {{
+               "matched": true or false,
+               "rawg_id": integer ID or null,
+               "release_date": "YYYY-MM-DD or string if matched, else null"
+            }}
+            """
+            try:
+                ai_resp = call_gemini_with_retry(contents=prompt)
+                clean_text = ai_resp.text.replace("```json", "").replace("```", "").strip()
+                metadata = json.loads(clean_text)
+                
+                if metadata.get("matched") and metadata.get("rawg_id"):
+                    new_date = metadata.get("release_date") or "TBD"
+                    c.execute(
+                        "UPDATE games SET rawg_id = %s, release_date = %s WHERE id = %s",
+                        (str(metadata["rawg_id"]), new_date, game_id)
+                    )
+                    conn.commit()
+                    updates_found.append(f"**{title}** is now tracked! (Release: {new_date})")
+            except Exception as e:
+                print(f"Failed to process unknown game {title}: {e}")
+                
+    conn.close()
+    
+    if updates_found and DISCORD_WEBHOOK_URL:
+        message = "**WEEKLY SYSTEM UPDATE - NEW RAWG MATCHES FOUND**\n" + "\n".join(f"- {u}" for u in updates_found)
+        requests.post(DISCORD_WEBHOOK_URL, json={"content": message})
 def run_scan(scan_type="daily"):
+    if scan_type == "weekly":
+        print("Checking for RAWG database updates on unknown games...")
+        recheck_unknown_games()
     conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT title, igdb_id, rawg_id, youtube_channel_id FROM games")
