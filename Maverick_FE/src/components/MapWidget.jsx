@@ -2,13 +2,12 @@ import { useEffect, useRef } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
-// Read coordinates from environment variables with fallbacks
 const homeLat = parseFloat(import.meta.env.VITE_HOME_LATITUDE || '28.6611');
 const homeLng = parseFloat(import.meta.env.VITE_HOME_LONGITUDE || '-81.3884');
 
-// MapLibre GL uses [longitude, latitude] format
 const DEFAULT_CENTER = [homeLng, homeLat];
-const DEFAULT_ZOOM = 10;
+// Zoomed out to 10.  To see the entire state of FL by default set to 6.5
+const DEFAULT_ZOOM = 10; 
 
 export default function MapWidget() {
   const mapContainer = useRef(null);
@@ -53,6 +52,36 @@ export default function MapWidget() {
       'top-right'
     );
 
+    // Fetch and apply live RainViewer Radar when the map finishes loading
+    map.current.on('load', async () => {
+      try {
+        const rvResponse = await fetch('https://api.rainviewer.com/public/weather-maps.json');
+        const rvData = await rvResponse.json();
+        
+        // Grab the most recent radar sweep timestamp
+        const latestPast = rvData.radar.past;
+        const latestTimestamp = latestPast[latestPast.length - 1].time;
+
+        map.current.addSource('rainviewer', {
+          type: 'raster',
+          // Color scheme 2 is the standard universal radar colors (green/yellow/red/purple)
+          tiles: [`https://tilecache.rainviewer.com/v2/radar/${latestTimestamp}/256/{z}/{x}/{y}/2/1_1.png`],
+          tileSize: 256
+        });
+
+        map.current.addLayer({
+          id: 'rainviewer-layer',
+          type: 'raster',
+          source: 'rainviewer',
+          paint: {
+            'raster-opacity': 0.65 // Slightly transparent so city names show through
+          }
+        });
+      } catch (err) {
+        console.error("Failed to load RainViewer radar data:", err);
+      }
+    });
+
     return () => {
       if (map.current) {
         map.current.remove();
@@ -60,7 +89,7 @@ export default function MapWidget() {
       }
     };
   }, []);
-  
+
   return (
     <div className="w-full h-full min-h-[400px] lg:min-h-[500px] relative rounded-b-xl overflow-hidden">
       <div ref={mapContainer} className="absolute inset-0 w-full h-full" />
