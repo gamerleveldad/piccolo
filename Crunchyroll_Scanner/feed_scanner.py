@@ -135,17 +135,55 @@ def get_active_watching_list():
     conn.close()
     return active_shows
 
-def update_show_schedule(anime_name, weekday_idx, date_str):
-    """Saves or updates a show's expected release day index in the database."""
+def process_episode_drop(anime_name, weekday_idx, episode_string):
+    """
+    Updates the schedule, promotes Dormant shows to Watching, 
+    and safely increments the total_episodes counter using idempotency.
+    """
     conn = get_db_connection()
     cursor = conn.cursor()
+    
+    # 1. Use an absolute date string to protect against manual redeploy double-counting
+    today_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    
+    cursor.execute("SELECT last_seen_date FROM watchlist_schedule WHERE anime_name = %s", (anime_name,))
+    row = cursor.fetchone()
+    
+    # The Date Gate: If we already processed a drop for this show today, skip the math!
+    if row and row[0] == today_str:
+        conn.close()
+        return
+
+    # Record today as the last seen date
     cursor.execute('''
         INSERT INTO watchlist_schedule (anime_name, expected_weekday, last_seen_date)
         VALUES (%s, %s, %s)
         ON CONFLICT(anime_name) DO UPDATE SET
             expected_weekday = excluded.expected_weekday,
             last_seen_date = excluded.last_seen_date
-    ''', (anime_name, weekday_idx, date_str))
+    ''', (anime_name, weekday_idx, today_str))
+    
+    # 2. Extract Episode Number and Promote Status
+    nums = [int(n) for n in re.findall(r'\d+', episode_string)]
+    
+    if nums:
+        ep_max = max(nums)
+        # Idempotent approach: Set total to the exact episode number explicitly
+        cursor.execute('''
+            UPDATE watch_history 
+            SET status = 'Watching', 
+                total_episodes = GREATEST(total_episodes, %s)
+            WHERE anime_name = %s
+        ''', (ep_max, anime_name))
+    else:
+        # Fallback approach: Increment by 1 (Safe because of the Date Gate above)
+        cursor.execute('''
+            UPDATE watch_history 
+            SET status = 'Watching', 
+                total_episodes = total_episodes + 1
+            WHERE anime_name = %s
+        ''', (anime_name,))
+        
     conn.commit()
     conn.close()
 
@@ -358,7 +396,7 @@ def scan_live_calendar():
                     episode_string = extract_episode_details(episode)
                     
                     # Update or learn schedule parameters
-                    update_show_schedule(matched_watchlist_name, weekday_idx, day_text)
+                    process_episode_drop(matched_watchlist_name, weekday_idx, episode_string)
                     
                     # Log finding only if the show is actively in your 'Watching' list
                     if weekday_idx == now_local.weekday() and matched_watchlist_name in active_watching:
