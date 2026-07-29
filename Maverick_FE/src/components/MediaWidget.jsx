@@ -9,7 +9,7 @@ export default function MediaWidget() {
 
   // Use the host IP to ensure the browser routes to the Pi, matching port 8000
   const host = window.location.hostname;
-  const ANIME_API_URL = `http://${host}:8000/api/active-shows`;
+  const ANIME_API_URL = `http://${host}:8002/api/active-shows`;
 
   useEffect(() => {
     const fetchAnime = async () => {
@@ -18,7 +18,14 @@ export default function MediaWidget() {
         if (!res.ok) throw new Error(`API Error: ${res.status}`);
 
         const data = await res.json();
-        setAnimeList(data);
+        if (Array.isArray(data)) {
+          setAnimeList(data);
+        } else if (data && Array.isArray(data.data)) {
+          // In case your backend wrapped it like {"data": [...]}
+          setAnimeList(data.data); 
+        } else {
+          throw new Error("API did not return a valid array");
+        }
       } catch (err) {
         setError(err.message);
       } finally {
@@ -57,7 +64,7 @@ export default function MediaWidget() {
             </div>
           ) : (
             <div className="flex flex-col gap-3">
-              {animeList.map((anime, index) => (
+              {Array.isArray(animeList) && animeList.map((anime, index) => (
                 <div key={index} className="bg-[#111827] p-3 rounded-lg border border-borderSlate flex justify-between items-center group">
                   <div className="flex flex-col">
                     <span className="font-medium text-slate-200">{anime.name}</span>
