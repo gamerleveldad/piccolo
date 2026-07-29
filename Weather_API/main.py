@@ -87,7 +87,7 @@ async def get_hourly_forecast() -> List[Dict[str, Any]]:
         for table in tables:
             for record in table.records:
                 forecast_data.append({
-                    "time": record.get_time(),
+                    "time": record.get_time().isoformat(),
                     "field": record.get_field(),
                     "value": record.get_value()
                 })
