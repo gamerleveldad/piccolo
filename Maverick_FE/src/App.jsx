@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Activity, CloudRain, Gamepad2, Tv, Map as MapIcon } from 'lucide-react';
 import MapWidget from '@/components/MapWidget';
 import MediaWidget from './components/MediaWidget';
+import WeatherWidget from './components/WeatherWidget'; 
 
 function App() {
   // Data state variables
@@ -76,32 +77,7 @@ function App() {
           
           {/* Weather Widget */}
           <div className="bg-cardBg border border-borderSlate rounded-xl shadow-lg p-5">
-            <div className="flex items-center gap-2 mb-4">
-              <CloudRain className="text-accentPurple w-5 h-5" />
-              <h2 className="text-lg font-semibold text-textSilver">Local Conditions</h2>
-            </div>
-            {weather ? (
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div className="flex flex-col">
-                  <span className="text-slate-500">Temp</span>
-                  <span className="text-xl font-medium text-slate-200">{toFahrenheit(weather.air_temperature)}°F</span>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-slate-500">Wind</span>
-                  <span className="text-xl font-medium text-slate-200">{toMPH(weather.wind_avg)} mph</span>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-slate-500">Humidity</span>
-                  <span className="text-xl font-medium text-slate-200">{weather.relative_humidity ?? '--'}%</span>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-slate-500">Rain Rate</span>
-                  <span className="text-xl font-medium text-slate-200">{toInches(weather.precip_total_1h)} in/hr</span>
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-slate-500 animate-pulse">Fetching weather data...</p>
-            )}
+            <WeatherWidget/>
           </div>
 
           {/* System Health Widget */}
