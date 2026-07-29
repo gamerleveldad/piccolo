@@ -1,5 +1,6 @@
 import os
-from typing import Dict, Any, List
+from datetime import datetime, timedelta
+from typing import List, Dict, Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from influxdb_client import InfluxDBClient
@@ -70,13 +71,21 @@ async def get_hourly_forecast() -> List[Dict[str, Any]]:
     """
     Retrieves the next 6 hours of forecast data from weatherflow_forecast_hourly.
     """
+    
+    # Calculate the future time window in Python
+    now = datetime.utcnow()
+    # Snap to the top of the current hour
+    start_time = now.replace(minute=0, second=0, microsecond=0)
+    # Look ahead 7 hours to safely capture the next 6 hourly blocks
+    stop_time = start_time + timedelta(hours=7)
+
+    # Note: 'Z' is required at the end of the isoformat to denote UTC for InfluxDB
     query = f'''
     from(bucket: "{INFLUXDB_BUCKET}")
-      |> range(start: -1h)
+      |> range(start: {start_time.isoformat()}Z, stop: {stop_time.isoformat()}Z)
       |> filter(fn: (r) => r["_measurement"] == "weatherflow_forecast_hourly")
-      |> last()
-      |> limit(n: 6)
     '''
+    
     try:
         client = get_influx_client()
         query_api = client.query_api()
