@@ -52,20 +52,19 @@ export default function MapWidget() {
       'top-right'
     );
 
-    // Fetch and apply live RainViewer Radar when the map finishes loading
     map.current.on('load', async () => {
       try {
         const rvResponse = await fetch('https://api.rainviewer.com/public/weather-maps.json');
         const rvData = await rvResponse.json();
         
-        // Grab the most recent radar sweep timestamp
+        // Extract the new 'path' variable instead of the 'time' variable
         const latestPast = rvData.radar.past;
-        const latestTimestamp = latestPast[latestPast.length - 1].time;
+        const latestPath = latestPast[latestPast.length - 1].path;
 
         map.current.addSource('rainviewer', {
           type: 'raster',
-          // Color scheme 2 is the standard universal radar colors (green/yellow/red/purple)
-          tiles: [`https://tilecache.rainviewer.com/v2/radar/${latestTimestamp}/256/{z}/{x}/{y}/2/1_1.png`],
+          // Inject the path hash directly into the tile URL
+          tiles: [`https://tilecache.rainviewer.com${latestPath}/256/{z}/{x}/{y}/2/1_1.png`],
           tileSize: 256,
           maxzoom: 7
         });
@@ -75,7 +74,7 @@ export default function MapWidget() {
           type: 'raster',
           source: 'rainviewer',
           paint: {
-            'raster-opacity': 0.65 // Slightly transparent so city names show through
+            'raster-opacity': 0.65 
           }
         });
       } catch (err) {
