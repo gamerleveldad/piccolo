@@ -87,18 +87,22 @@ export default function MediaWidget() {
         setGameList(data);
 
         // Check if any game releases within the next 7 days
+        // Strip the time component so we only compare the calendar days
         const today = new Date();
-        const nextWeek = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const nextWeek = new Date(today);
         nextWeek.setDate(today.getDate() + 7);
 
         const releasingSoon = data.some(game => {
           if (!game.release_date) return false;
           const releaseDate = new Date(game.release_date);
+          releaseDate.setHours(0, 0, 0, 0); // Strip time from database date
+          
           return releaseDate >= today && releaseDate <= nextWeek;
         });
 
         setHasUpcomingGame(releasingSoon);
-
       } catch (err) {
         setGamesError(err.message);
       } finally {
@@ -123,9 +127,9 @@ export default function MediaWidget() {
             <Tv className="w-4 h-4 mr-2" />
             Anime Queue
           </TabsTrigger>
-          <TabsTrigger value="games" className="data-[state=active]:bg-[#161f33] data-[state=active]:text-accentPurple">
+          <TabsTrigger value="games" className="data-[state=active]:bg-[#161f33] data-[state=active]:text-purple-400">
             {/* Pulsing purple icon if a game drops this week */}
-            <Gamepad2 className={`w-4 h-4 mr-2 ${hasUpcomingGame ? 'text-accentPurple animate-pulse' : ''}`} />
+            <Gamepad2 className={`w-4 h-4 mr-2 ${hasUpcomingGame ? 'text-purple-400 animate-pulse' : ''}`} />
             Game Tracker
           </TabsTrigger>
         </TabsList>

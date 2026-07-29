@@ -66,7 +66,8 @@ export default function MapWidget() {
           type: 'raster',
           // Color scheme 2 is the standard universal radar colors (green/yellow/red/purple)
           tiles: [`https://tilecache.rainviewer.com/v2/radar/${latestTimestamp}/256/{z}/{x}/{y}/2/1_1.png`],
-          tileSize: 256
+          tileSize: 256,
+          maxzoom: 8
         });
 
         map.current.addLayer({
