@@ -102,7 +102,33 @@ def delete_history(anime_name: str):
     conn.commit()
     conn.close()
     return {"message": "Deleted successfully"}
-
+# --- External Integrations ---
+@app.get("/api/active-shows")
+def get_active_shows():
+    """Lightweight endpoint for external dashboards to track watch progress."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Query only shows actively being watched
+    cursor.execute('''
+        SELECT anime_name, current_episode, total_episodes 
+        FROM watch_history 
+        WHERE status = 'Watching' 
+        ORDER BY anime_name
+    ''')
+    
+    # Format the payload for external consumers
+    active_shows = [
+        {
+            "name": row[0], 
+            "current_episode": row[1], 
+            "total_episodes": row[2]
+        } 
+        for row in cursor.fetchall()
+    ]
+    
+    conn.close()
+    return active_shows
 @app.get("/api/progress")
 def get_progress():
     """Dedicated endpoint for rendering dashboard progress bars."""
