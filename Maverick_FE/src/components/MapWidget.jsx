@@ -3,14 +3,13 @@ import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { LocateFixed, Map as MapIcon } from 'lucide-react';
 
-// Comment out the .env lines for a moment
-// const rawLng = import.meta.env.VITE_HOME_LONGITUDE || '-81.3884';
-// const rawLat = import.meta.env.VITE_HOME_LATITUDE || '28.6611';
-// const homeLng = parseFloat(rawLng.toString().replace(/['"]/g, ''));
-// const homeLat = parseFloat(rawLat.toString().replace(/['"]/g, ''));
+// Safely parse coordinates by stripping any accidental .env string quotes
+const rawLng = import.meta.env.VITE_HOME_LONGITUDE || '-81.3884';
+const rawLat = import.meta.env.VITE_HOME_LATITUDE || '28.6611';
 
-// Hardcode the coordinates directly:
-const HOME_COORDS = [-81.3884, 28.6611];
+const homeLng = parseFloat(rawLng.toString().replace(/['"]/g, ''));
+const homeLat = parseFloat(rawLat.toString().replace(/['"]/g, ''));
+const HOME_COORDS = [homeLng, homeLat];
 const DEFAULT_ZOOM = 10;
 
 export default function MapWidget() {
@@ -32,9 +31,32 @@ export default function MapWidget() {
 
     map.current = new maplibregl.Map({
       container: mapContainer.current,
-      style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
       center: HOME_COORDS,
-      zoom: DEFAULT_ZOOM
+      zoom: DEFAULT_ZOOM,
+      style: {
+        version: 8,
+        sources: {
+          'carto-dark': {
+            type: 'raster',
+            tiles: [
+              'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+              'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+              'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+              'https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'
+            ],
+            tileSize: 256,
+            attribution: '&copy; OpenStreetMap &copy; CARTO'
+          }
+        },
+        layers: [
+          {
+            id: 'carto-dark-layer',
+            type: 'raster',
+            source: 'carto-dark',
+            paint: { 'raster-opacity': 1 }
+          }
+        ]
+      }
     });
 
     // Force map to recalculate its dimensions to fix the Flexbox blank render bug
