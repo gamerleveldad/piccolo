@@ -16,7 +16,6 @@ const ICON_MAP = {
   'windy': 'wi wi-strong-wind'
 };
 
-// Helper to color-code misery dots (0 = Green -> 10 = Red)
 const getMiseryDotColor = (val) => {
   if (val == null) return 'bg-slate-700';
   if (val <= 2) return 'bg-emerald-400 shadow-[0_0_6px_#34d399]';
@@ -28,37 +27,43 @@ const getMiseryDotColor = (val) => {
 export default function WeatherWidget() {
   const [current, setCurrent] = useState(null);
   const [hourlyForecast, setHourlyForecast] = useState([]);
+  const [dailyForecast, setDailyForecast] = useState([]);
   const [localAlert, setLocalAlert] = useState(null);
   const [loading, setLoading] = useState(true);
+  
+  // Tab state for the forecast section
+  const [forecastTab, setForecastTab] = useState('hourly'); // 'hourly' | 'daily'
 
   const host = window.location.hostname;
   const CURRENT_URL = `http://${host}:8004/api/weather/current`;
   const HOURLY_URL = `http://${host}:8004/api/weather/forecast/hourly`;
   const ADVANCED_HOURLY_URL = `http://${host}:8004/api/weather/advanced/hourly`;
+  const DAILY_URL = `http://${host}:8004/api/weather/forecast/daily`;
+  const ACCURACY_URL = `http://${host}:8004/api/weather/forecast/accuracy`;
   const NWS_ALERTS_URL = `https://api.weather.gov/alerts/active?point=28.6611,-81.3884`;
 
   const fetchWeatherData = async () => {
     try {
-      // 1. Fetch Current Telemetry
+      // 1. Fetch Current
       const curRes = await fetch(CURRENT_URL);
       if (curRes.ok) setCurrent(await curRes.json());
 
-      // 2. Fetch Main Hourly & Advanced Hourly concurrently
-      const [hourRes, advHourRes] = await Promise.all([
+      // 2. Fetch Hourly & Daily concurrently
+      const [hourRes, advHourRes, dailyRes, accRes] = await Promise.all([
         fetch(HOURLY_URL),
-        fetch(ADVANCED_HOURLY_URL)
+        fetch(ADVANCED_HOURLY_URL),
+        fetch(DAILY_URL),
+        fetch(ACCURACY_URL)
       ]);
 
+      // Parse Hourly
       if (hourRes.ok) {
         const data = await hourRes.json();
         let advData = [];
         if (advHourRes.ok) advData = await advHourRes.json();
 
-        // Merge forecast data with matching misery indices
         const parsedHours = data.slice(0, 6).map((item) => {
-          // Find matching timestamp row in advanced hourly
           const match = advData.find((a) => a.time === item.time) || {};
-
           return {
             time: new Date(item.time).toLocaleTimeString([], { hour: 'numeric', hour12: true }),
             temp: Math.round(item.temp_f),
@@ -69,16 +74,43 @@ export default function WeatherWidget() {
             humidityMisery: match.humidity_misery_index ?? 0
           };
         });
-
         setHourlyForecast(parsedHours);
+      }
+
+      // Parse Daily + Accuracy
+      if (dailyRes.ok) {
+        const dailyData = await dailyRes.json();
+        let accData = [];
+        if (accRes.ok) accData = await accRes.json();
+
+        // Slice first 10 days for a perfect 2x5 grid
+        const parsedDaily = dailyData.slice(0, 10).map((day, idx) => {
+          // idx aligns with lead_days (0 to 9)
+          const accuracy = accData.find((a) => a.lead_days === idx);
+          return {
+            ...day,
+            dateObj: new Date(day.date),
+            iconClass: ICON_MAP[day.icon] || 'wi wi-day-sunny',
+            tempMae: accuracy ? accuracy.temp_mae_f : null
+          };
+        });
+        setDailyForecast(parsedDaily);
       }
 
       // 3. Fetch NWS Alerts
       const alertsRes = await fetch(NWS_ALERTS_URL);
       if (alertsRes.ok) {
         const alertData = await alertsRes.json();
-        if (alertData.features && alertData.features.length > 0) {
-          const activeEvent = alertData.features[0].properties.event;
+        const severeFeatures = alertData.features?.filter(feature => {
+          const event = feature.properties.event;
+          return event === 'Severe Thunderstorm Warning' || 
+                 event === 'Tornado Warning' || 
+                 event === 'Flash Flood Warning' ||
+                 event === 'Special Weather Statement';
+        }) || [];
+
+        if (severeFeatures.length > 0) {
+          const activeEvent = severeFeatures[0].properties.event;
           const isWarning = activeEvent.toLowerCase().includes('warning');
           setLocalAlert({ event: activeEvent, isWarning });
         } else {
@@ -125,7 +157,6 @@ export default function WeatherWidget() {
             <div className="flex items-center gap-3 mt-1">
               <span className="text-4xl font-bold text-slate-100">{Math.round(current.temp_f)}°F</span>
               
-              {/* FIXED: Current Weather Icon & Conditions */}
               <div className="flex items-center gap-2 pl-2 border-l border-slate-700">
                 <i className={`${currentIconClass} text-3xl text-amber-400`} />
                 <div className="flex flex-col">
@@ -183,38 +214,99 @@ export default function WeatherWidget() {
         </div>
       </div>
 
-      {/* --- 6-HOUR HOURLY FORECAST BAR WITH MISERY LIGHTS --- */}
+      {/* --- FORECAST TABS & GRID --- */}
       <div className="border-t border-borderSlate pt-4">
-        <div className="flex justify-between items-center mb-3">
-          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">6-Hour Outlook</h3>
-          <div className="flex items-center gap-3 text-[10px] text-slate-500">
-            <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Heat</span>
-            <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-400" /> Humidity</span>
+        <div className="flex justify-between items-center mb-4">
+          
+          {/* Tab Switcher */}
+          <div className="flex bg-[#111827] p-1 rounded-lg border border-borderSlate gap-1 text-xs">
+            <button
+              onClick={() => setForecastTab('hourly')}
+              className={`px-3 py-1 rounded-md transition-all ${
+                forecastTab === 'hourly' ? 'bg-slate-700 text-slate-100 font-medium' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              6-Hour
+            </button>
+            <button
+              onClick={() => setForecastTab('daily')}
+              className={`px-3 py-1 rounded-md transition-all ${
+                forecastTab === 'daily' ? 'bg-slate-700 text-slate-100 font-medium' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              10-Day
+            </button>
           </div>
-        </div>
 
-        <div className="grid grid-cols-6 gap-2 text-center">
-          {hourlyForecast.map((hour, idx) => (
-            <div key={idx} className="bg-[#111827] p-2 rounded-lg border border-borderSlate flex flex-col items-center justify-between relative min-h-[110px]">
-              <span className="text-[11px] text-slate-400">{hour.time}</span>
-              <i className={`${hour.iconClass} text-xl my-1 text-amber-400`} />
-              <span className="text-sm font-bold text-slate-100">{hour.temp}°</span>
-              <div className="text-[10px] text-cyan-400 font-medium mb-2">
-                {hour.pop > 0 ? `${hour.pop}%` : '0%'}
-              </div>
-
-              {/* MISERY LIGHTS (Bottom-Left = Heat, Bottom-Right = Humidity) */}
-              <div 
-                title={`Heat Misery: ${hour.heatMisery}/10`} 
-                className={`absolute bottom-1.5 left-1.5 w-2 h-2 rounded-full ${getMiseryDotColor(hour.heatMisery)}`} 
-              />
-              <div 
-                title={`Humidity Misery: ${hour.humidityMisery}/10`} 
-                className={`absolute bottom-1.5 right-1.5 w-2 h-2 rounded-full ${getMiseryDotColor(hour.humidityMisery)}`} 
-              />
+          {/* Misery legend (Only visible on hourly tab) */}
+          {forecastTab === 'hourly' && (
+            <div className="flex items-center gap-3 text-[10px] text-slate-500">
+              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Heat</span>
+              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-400" /> Humidity</span>
             </div>
-          ))}
+          )}
         </div>
+
+        {/* 6-HOUR GRID */}
+        {forecastTab === 'hourly' && (
+          <div className="grid grid-cols-6 gap-2 text-center">
+            {hourlyForecast.map((hour, idx) => (
+              <div key={idx} className="bg-[#111827] p-2 rounded-lg border border-borderSlate flex flex-col items-center justify-between relative min-h-[110px]">
+                <span className="text-[11px] text-slate-400">{hour.time}</span>
+                <i className={`${hour.iconClass} text-xl my-1 text-amber-400`} />
+                <span className="text-sm font-bold text-slate-100">{hour.temp}°</span>
+                <div className="text-[10px] text-cyan-400 font-medium mb-2">
+                  {hour.pop > 0 ? `${hour.pop}%` : '0%'}
+                </div>
+                <div 
+                  title={`Heat Misery: ${hour.heatMisery}/10`} 
+                  className={`absolute bottom-1.5 left-1.5 w-2 h-2 rounded-full ${getMiseryDotColor(hour.heatMisery)}`} 
+                />
+                <div 
+                  title={`Humidity Misery: ${hour.humidityMisery}/10`} 
+                  className={`absolute bottom-1.5 right-1.5 w-2 h-2 rounded-full ${getMiseryDotColor(hour.humidityMisery)}`} 
+                />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 10-DAY GRID */}
+        {forecastTab === 'daily' && (
+          <div className="grid grid-cols-5 gap-2 text-center">
+            {dailyForecast.map((day, idx) => (
+              <div key={idx} className="bg-[#111827] p-2 rounded-lg border border-borderSlate flex flex-col items-center justify-between min-h-[120px]">
+                <div className="flex flex-col mb-1">
+                  <span className="text-xs font-bold text-slate-200">{day.day_name}</span>
+                  <span className="text-[9px] text-slate-400">
+                    {day.dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </span>
+                </div>
+                
+                <i className={`${day.iconClass} text-xl my-1 text-amber-400`} />
+                
+                <div className="flex flex-col items-center leading-tight w-full">
+                  <div className="flex items-center justify-center gap-0.5">
+                    <span className="text-sm font-bold text-slate-100">{Math.round(day.temp_max_f)}°</span>
+                    {day.tempMae != null && (
+                      <span className="text-[9px] text-slate-400" title={`Model Error: ±${day.tempMae}°F`}>±{day.tempMae}</span>
+                    )}
+                  </div>
+                  <span className="text-xs text-slate-400">{Math.round(day.temp_min_f)}°</span>
+                </div>
+
+                <div className="mt-1.5 flex flex-col text-[9px] text-slate-400 leading-tight w-full">
+                  {day.precip_probability > 0 ? (
+                    <span className="text-cyan-400 font-medium">{day.precip_probability}% • {day.precip_accum_in}"</span>
+                  ) : (
+                    <span>0% Rain</span>
+                  )}
+                  <span>{day.max_wind_speed_mph} mph</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
     </div>
