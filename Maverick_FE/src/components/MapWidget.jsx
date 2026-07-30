@@ -93,6 +93,7 @@ export default function MapWidget() {
               const event = feature.properties.event;
               return event === 'Severe Thunderstorm Warning' || 
                      event === 'Tornado Warning' || 
+                     event === 'Special Weather Statement' ||
                      event === 'Flash Flood Warning';
             });
             

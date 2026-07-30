@@ -62,10 +62,10 @@ async def get_daily_forecast() -> List[Dict[str, Any]]:
     from(bucket: "{INFLUXDB_BUCKET}")
       |> range(start: -1d, stop: 10d)
       |> filter(fn: (r) => r["_measurement"] == "weatherflow_forecast_daily")
+      |> keep(columns: ["_time", "_field", "_value"])
       |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
       |> sort(columns: ["_time"])
     '''
-    
     hourly_summary_query = f'''
     from(bucket: "{INFLUXDB_BUCKET}")
       |> range(start: -1d, stop: 10d)
@@ -139,6 +139,7 @@ async def get_hourly_forecast() -> List[Dict[str, Any]]:
     from(bucket: "{INFLUXDB_BUCKET}")
       |> range(start: {start_time.isoformat()}Z, stop: {stop_time.isoformat()}Z)
       |> filter(fn: (r) => r["_measurement"] == "weatherflow_forecast_hourly")
+      |> keep(columns: ["_time", "_field", "_value"])
       |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
       |> sort(columns: ["_time"])
     '''
