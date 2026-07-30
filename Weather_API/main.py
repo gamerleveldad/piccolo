@@ -165,14 +165,21 @@ async def get_daily_forecast() -> List[Dict[str, Any]]:
 @app.get("/api/weather/current")
 async def get_current_weather() -> Dict[str, Any]:
     """
-    Retrieves the latest observation and the current forecast conditions,
-    merges them into a single object, and converts to Imperial units.
+    Retrieves the latest observation and the current forecast conditions
+    using separate queries to avoid schema collisions, then merges them.
     """
-    # Query both measurements, drop the time column, and return raw key/value pairs
-    query = f'''
+    obs_query = f'''
     from(bucket: "{INFLUXDB_BUCKET}")
       |> range(start: -1h)
-      |> filter(fn: (r) => r["_measurement"] == "weatherflow_obs" or r["_measurement"] == "weatherflow_forecast_current")
+      |> filter(fn: (r) => r["_measurement"] == "weatherflow_obs")
+      |> last()
+      |> keep(columns: ["_field", "_value"])
+    '''
+    
+    forecast_query = f'''
+    from(bucket: "{INFLUXDB_BUCKET}")
+      |> range(start: -1h)
+      |> filter(fn: (r) => r["_measurement"] == "weatherflow_forecast_current")
       |> last()
       |> keep(columns: ["_field", "_value"])
     '''
@@ -180,17 +187,24 @@ async def get_current_weather() -> Dict[str, Any]:
     try:
         async with get_async_influx_client() as client:
             query_api = client.query_api()
-            tables = await query_api.query(query)
+            # Await both queries
+            obs_tables = await query_api.query(obs_query)
+            forecast_tables = await query_api.query(forecast_query)
 
-        # Merge all fields into a single dictionary dynamically in Python
         raw_data = {}
-        for table in tables:
+        
+        # Merge observation metrics (floats/ints)
+        for table in obs_tables:
+            for record in table.records:
+                raw_data[record.get_field()] = record.get_value()
+                
+        # Merge forecast conditions (strings)
+        for table in forecast_tables:
             for record in table.records:
                 raw_data[record.get_field()] = record.get_value()
 
-        # Build the final payload, applying conversions and default fallbacks
         return {
-            "time": datetime.now(timezone.utc).isoformat() + "Z",
+            "time": datetime.now(timezone.utc).isoformat(),
             "temp_f": c_to_f(raw_data.get("air_temperature")),
             "feels_like_f": c_to_f(raw_data.get("feels_like")),
             "dew_point_f": c_to_f(raw_data.get("dew_point")),
@@ -204,7 +218,6 @@ async def get_current_weather() -> Dict[str, Any]:
             "solar_radiation": raw_data.get("solar_radiation"),
             "lightning_strike_count": raw_data.get("lightning_strike_count"),
             "lightning_strike_last_distance": raw_data.get("lightning_strike_last_distance"),
-            # New fields pulled from weatherflow_forecast_current
             "conditions": raw_data.get("conditions", "Unknown"),
             "icon": raw_data.get("icon", "unknown")
         }
@@ -220,10 +233,13 @@ async def get_hourly_forecast() -> List[Dict[str, Any]]:
     now = datetime.now(timezone.utc)
     start_time = now.replace(minute=0, second=0, microsecond=0)
     stop_time = start_time + timedelta(hours=7)
+    
+    start_str = start_time.strftime('%Y-%m-%dT%H:%M:%SZ')
+    stop_str = stop_time.strftime('%Y-%m-%dT%H:%M:%SZ')
 
     query = f'''
     from(bucket: "{INFLUXDB_BUCKET}")
-      |> range(start: {start_time.isoformat()}Z, stop: {stop_time.isoformat()}Z)
+      |> range(start: {start_str}, stop: {stop_str})
       |> filter(fn: (r) => r["_measurement"] == "weatherflow_forecast_hourly")
       |> keep(columns: ["_time", "_field", "_value"])
       |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
@@ -383,11 +399,13 @@ async def get_hourly_advanced() -> List[Dict[str, Any]]:
     now = datetime.now(timezone.utc)
     start_time = now.replace(minute=0, second=0, microsecond=0)
     stop_time = start_time + timedelta(hours=7)
+    
+    start_str = start_time.strftime('%Y-%m-%dT%H:%M:%SZ')
+    stop_str = stop_time.strftime('%Y-%m-%dT%H:%M:%SZ')
 
-    # Note: Using weatherflow_forecast_hourly
     query = f'''
     from(bucket: "{INFLUXDB_BUCKET}")
-      |> range(start: {start_time.isoformat()}Z, stop: {stop_time.isoformat()}Z)
+      |> range(start: {start_str}, stop: {stop_str})
       |> filter(fn: (r) => r["_measurement"] == "weatherflow_forecast_hourly")
       |> keep(columns: ["_time", "_field", "_value"])
       |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")

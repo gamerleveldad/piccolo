@@ -110,9 +110,15 @@ export default function MapWidget() {
             // Filter to only show severe convective weather polygons
             const severeFeatures = data.features.filter(feature => {
               const event = feature.properties.event;
-              return event === 'Severe Thunderstorm Warning' || 
-                     event === 'Tornado Warning' || 
-                     event === 'Flash Flood Warning';
+              const hasGeometry = feature.geometry !== null; // MUST check for this
+              
+              const isTargetEvent = event === 'Severe Thunderstorm Warning' || 
+                                    event === 'Tornado Warning' || 
+                                    event === 'Flash Flood Warning' ||
+                                    event === 'Special Weather Statement'; // Added
+
+              // Only return true if it is the right event AND has a polygon to draw
+              return isTargetEvent && hasGeometry; 
             });
             
             data.features = severeFeatures;
@@ -137,6 +143,7 @@ export default function MapWidget() {
                     'Tornado Warning', '#ef4444', 
                     'Severe Thunderstorm Warning', '#eab308', 
                     'Flash Flood Warning', '#22c55e', 
+                    'Special Weather Statement', '#94a3b8', // Slate gray
                     '#ffffff'
                   ],
                   'fill-opacity': 0.2
