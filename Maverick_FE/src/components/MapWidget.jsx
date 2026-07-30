@@ -3,13 +3,14 @@ import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { LocateFixed, Map as MapIcon } from 'lucide-react';
 
-// Safely parse coordinates by stripping any accidental .env string quotes
-const rawLng = import.meta.env.VITE_HOME_LONGITUDE || '-81.3884';
-const rawLat = import.meta.env.VITE_HOME_LATITUDE || '28.6611';
+// Comment out the .env lines for a moment
+// const rawLng = import.meta.env.VITE_HOME_LONGITUDE || '-81.3884';
+// const rawLat = import.meta.env.VITE_HOME_LATITUDE || '28.6611';
+// const homeLng = parseFloat(rawLng.toString().replace(/['"]/g, ''));
+// const homeLat = parseFloat(rawLat.toString().replace(/['"]/g, ''));
 
-const homeLng = parseFloat(rawLng.toString().replace(/['"]/g, ''));
-const homeLat = parseFloat(rawLat.toString().replace(/['"]/g, ''));
-const HOME_COORDS = [homeLng, homeLat];
+// Hardcode the coordinates directly:
+const HOME_COORDS = [-81.368495, 28.679885];
 const DEFAULT_ZOOM = 10;
 
 export default function MapWidget() {
