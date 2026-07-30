@@ -1,19 +1,19 @@
 import { useEffect, useRef } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { LocateFixed } from 'lucide-react';
+import { LocateFixed, Map as MapIcon } from 'lucide-react';
 
-
-const homeLat = parseFloat(import.meta.env.VITE_HOME_LATITUDE || '28.6611');
+// MapLibre ALWAYS expects [Longitude, Latitude]
+// Florida Longitude is Negative (-81...), Latitude is Positive (28...)
 const homeLng = parseFloat(import.meta.env.VITE_HOME_LONGITUDE || '-81.3884');
-const HOME_COORDS = [homeLng, homeLat]; // Altamonte Springs
+const homeLat = parseFloat(import.meta.env.VITE_HOME_LATITUDE || '28.6611');
+const HOME_COORDS = [homeLng, homeLat];
 const DEFAULT_ZOOM = 10;
 
 export default function MapWidget() {
   const mapContainer = useRef(null);
   const map = useRef(null);
 
-  // Recenter Handler
   const handleRecenter = () => {
     if (map.current) {
       map.current.flyTo({
@@ -158,16 +158,18 @@ export default function MapWidget() {
   }, []);
 
   return (
-    <div className="bg-cardBg border border-borderSlate rounded-xl p-4 shadow-lg flex flex-col h-full min-h-[450px]">
-      <div className="flex justify-between items-center mb-3">
-        <h2 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
-          <span>Airspace & Radar</span>
-        </h2>
+    <div className="bg-cardBg border border-borderSlate rounded-xl shadow-lg flex-1 min-h-[450px] lg:min-h-[600px] flex flex-col overflow-hidden">
+      
+      {/* Restyled Header merging the original App.jsx design with the Recenter button */}
+      <div className="bg-[#161f33] p-4 border-b border-borderSlate flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <MapIcon className="text-accentBlue w-5 h-5" />
+          <h2 className="text-lg font-semibold text-textSilver">Airspace & Radar</h2>
+        </div>
         
-        {/* Recenter Map Button */}
         <button
           onClick={handleRecenter}
-          className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-[#111827] hover:bg-slate-800 text-slate-300 border border-borderSlate rounded-lg transition-all shadow"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[#0b0f19] hover:bg-slate-800 text-slate-300 border border-borderSlate rounded-lg transition-all shadow"
           title="Recenter to Home"
         >
           <LocateFixed className="w-3.5 h-3.5 text-blue-400" />
@@ -175,7 +177,7 @@ export default function MapWidget() {
         </button>
       </div>
 
-      <div ref={mapContainer} className="w-full flex-1 rounded-lg overflow-hidden border border-borderSlate" />
+      <div ref={mapContainer} className="w-full flex-1 relative bg-[#0b0f19]" />
     </div>
   );
 }

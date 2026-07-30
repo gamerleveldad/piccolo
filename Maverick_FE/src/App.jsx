@@ -57,17 +57,7 @@ function App() {
         
         {/* CENTER COLUMN: Map & Flights (Shifts to Right on Tablet) */}
         <div className="lg:col-span-7 xl:col-span-8 2xl:col-span-6 order-1 lg:order-2 flex flex-col gap-6">
-          <div className="bg-cardBg border border-borderSlate rounded-xl shadow-lg flex-1 min-h-[450px] lg:min-h-[600px] flex flex-col overflow-hidden">
-            <div className="bg-[#161f33] p-4 border-b border-borderSlate flex items-center gap-2">
-              <MapIcon className="text-accentBlue w-5 h-5" />
-              <h2 className="text-lg font-semibold text-textSilver">Airspace & Radar</h2>
-            </div>
-            
-            {/* MapLibre Base Map */}
-            <div className="flex-1 relative">
-              <MapWidget />
-            </div>
-          </div>
+          <MapWidget />
         </div>
 
         {/* LEFT COLUMN: Weather & Health (Shifts to Left on Tablet) */}
