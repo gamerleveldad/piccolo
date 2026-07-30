@@ -439,7 +439,7 @@ services:
     container_name: map_preview
     restart: unless-stopped
     ports:
-      - "8086:80"
+      - "8087:80"
     volumes:
       - ./Map_Preview/html:/usr/share/nginx/html:ro
     networks:
