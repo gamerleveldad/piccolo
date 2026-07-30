@@ -3,6 +3,7 @@ import { Activity, CloudRain, Gamepad2, Tv, Map as MapIcon } from 'lucide-react'
 import MapWidget from '@/components/MapWidget';
 import MediaWidget from './components/MediaWidget';
 import WeatherWidget from './components/WeatherWidget'; 
+import AdvancedWeatherWidget from './components/AdvancedWeatherWidget'; 
 
 function App() {
   // Data state variables
@@ -78,6 +79,7 @@ function App() {
           {/* Weather Widget */}
           <div className="bg-cardBg border border-borderSlate rounded-xl shadow-lg p-5">
             <WeatherWidget/>
+            <AdvancedWeatherWidget/>
           </div>
 
           {/* System Health Widget */}
