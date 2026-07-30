@@ -124,6 +124,50 @@ async def get_daily_forecast() -> List[Dict[str, Any]]:
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+@app.get("/api/weather/current")
+async def get_current_weather() -> Dict[str, Any]:
+    """
+    Retrieves the latest observation from weatherflow_obs, pivots it into a single JSON object,
+    and converts standard metrics to Imperial units.
+    """
+    query = f'''
+    from(bucket: "{INFLUXDB_BUCKET}")
+      |> range(start: -1h)
+      |> filter(fn: (r) => r["_measurement"] == "weatherflow_obs")
+      |> last()
+      |> keep(columns: ["_time", "_field", "_value"])
+      |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+    '''
+    
+    try:
+        async with get_async_influx_client() as client:
+            query_api = client.query_api()
+            tables = await query_api.query(query)
+
+        result = {}
+        for table in tables:
+            for record in table.records:
+                result = {
+                    "time": record.get_time().isoformat(),
+                    "temp_f": c_to_f(record.values.get("air_temperature")),
+                    "feels_like_f": c_to_f(record.values.get("feels_like")),
+                    "dew_point_f": c_to_f(record.values.get("dew_point")),
+                    "relative_humidity": record.values.get("relative_humidity"),
+                    "wind_avg_mph": ms_to_mph(record.values.get("wind_avg")),
+                    "wind_gust_mph": ms_to_mph(record.values.get("wind_gust")),
+                    "wind_direction": record.values.get("wind_direction_cardinal", ""),
+                    "precip_in": mm_to_inches(record.values.get("precip_accum_local_day")),
+                    "sea_level_pressure_inhg": hpa_to_inhg(record.values.get("calculated_sea_level_pressure")),
+                    "uv_index": record.values.get("uv"),
+                    "solar_radiation": record.values.get("solar_radiation"),
+                    "lightning_strike_count": record.values.get("lightning_strike_count"),
+                    "lightning_strike_last_distance": record.values.get("lightning_strike_last_distance")
+                }
+                break # Only process the single most recent record
+
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/weather/forecast/hourly")
 async def get_hourly_forecast() -> List[Dict[str, Any]]:
