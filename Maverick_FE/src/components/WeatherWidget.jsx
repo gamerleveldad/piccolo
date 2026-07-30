@@ -26,12 +26,7 @@ export default function WeatherWidget() {
   const CURRENT_URL = `http://${host}:8004/api/weather/current`;
   const HOURLY_URL = `http://${host}:8004/api/weather/forecast/hourly`;
 
-  // Helper conversions for current live telemetry
-  const toF = (c) => (c != null ? Math.round((c * 9) / 5 + 32) : '--');
-  const toMph = (ms) => (ms != null ? (ms * 2.23694).toFixed(1) : '--');
-  const toInches = (mm) => (mm != null ? (mm / 25.4).toFixed(2) : '0.00');
-  const toMiles = (km) => (km != null ? Math.round(km * 0.621371) : '--');
-
+  
   const fetchWeatherData = async () => {
     try {
       // 1. Fetch Live Current Telemetry
@@ -89,9 +84,9 @@ export default function WeatherWidget() {
           <div>
             <h2 className="text-sm font-medium text-slate-400">Local Telemetry</h2>
             <div className="flex items-baseline gap-2 mt-1">
-              <span className="text-4xl font-bold text-slate-100">{toF(current.temp_f)}°F</span>
+              <span className="text-4xl font-bold text-slate-100">{current.temp_f}°F</span>
               <span className="text-xs text-slate-400">
-                Feels like {toF(current.feels_like_f || current.heat_index)}°F
+                Feels like {current.feels_like_f || current.heat_index}°F
               </span>
             </div>
           </div>
@@ -109,7 +104,7 @@ export default function WeatherWidget() {
             <div>
               <p className="text-slate-500">Humidity / Dew</p>
               <p className="font-semibold text-slate-200">
-                {current.relative_humidity}% / {toF(current.dew_point_f)}°F
+                {current.relative_humidity}% / {current.dew_point_f}°F
               </p>
             </div>
           </div>
@@ -119,7 +114,7 @@ export default function WeatherWidget() {
             <div>
               <p className="text-slate-500">Wind / Gust</p>
               <p className="font-semibold text-slate-200">
-                {toMph(current.wind_avg_mph)} <span className="text-slate-400">({toMph(current.wind_gust_mph)})</span> mph
+                {current.wind_avg_mph} <span className="text-slate-400">(current.wind_gust_mph)</span> mph
               </p>
             </div>
           </div>
@@ -128,7 +123,7 @@ export default function WeatherWidget() {
             <CloudRain className="w-4 h-4 text-cyan-400 shrink-0" />
             <div>
               <p className="text-slate-500">Rain Rate</p>
-              <p className="font-semibold text-slate-200">{toInches(current.precip_in)} in/hr</p>
+              <p className="font-semibold text-slate-200">{current.precip_in} in/hr</p>
             </div>
           </div>
 
@@ -137,7 +132,7 @@ export default function WeatherWidget() {
             <div>
               <p className="text-slate-500">Lightning (1h)</p>
               <p className="font-semibold text-slate-200">
-                {current.lightning_strike_count > 0 ? `${current.lightning_strike_count} strikes (${toMiles(current.lightning_strike_last_distance)} mi)` : 'None'}
+                {current.lightning_strike_count > 0 ? `${current.lightning_strike_count} strikes (${current.lightning_strike_last_distance} mi)` : 'None'}
               </p>
             </div>
           </div>
