@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Wind, Droplets, CloudRain, Zap, TriangleAlert, Info } from 'lucide-react';
-import '../public/assets/weather/weather-icons/css/weather-icons.min.css';
+
 
 const ICON_MAP = {
   'clear-day': 'wi wi-day-sunny',
