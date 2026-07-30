@@ -69,6 +69,7 @@ export default function MapWidget() {
           maxzoom: 7
         });
 
+
         map.current.addLayer({
           id: 'rainviewer-layer',
           type: 'raster',
@@ -77,6 +78,82 @@ export default function MapWidget() {
             'raster-opacity': 0.65 
           }
         });
+
+        // --- LIVE NWS STORM TRACKS & WARNINGS ---
+        
+        // Function to fetch and update NWS alerts
+        const updateNWSAlerts = async () => {
+          try {
+            // Fetch active alerts for Florida
+            const response = await fetch('https://api.weather.gov/alerts/active?area=FL');
+            const data = await response.json();
+            
+            // Filter to only show severe convective weather
+            const severeFeatures = data.features.filter(feature => {
+              const event = feature.properties.event;
+              return event === 'Severe Thunderstorm Warning' || 
+                     event === 'Tornado Warning' || 
+                     event === 'Flash Flood Warning';
+            });
+            
+            data.features = severeFeatures;
+
+            // If the source already exists, just update the data. Otherwise, create it.
+            if (map.current.getSource('nws-alerts')) {
+              map.current.getSource('nws-alerts').setData(data);
+            } else {
+              map.current.addSource('nws-alerts', {
+                type: 'geojson',
+                data: data
+              });
+
+              // The translucent fill
+              map.current.addLayer({
+                id: 'nws-alerts-fill',
+                type: 'fill',
+                source: 'nws-alerts',
+                paint: {
+                  'fill-color': [
+                    'match',
+                    ['get', 'event'],
+                    'Tornado Warning', '#ef4444', // Red
+                    'Severe Thunderstorm Warning', '#eab308', // Yellow
+                    'Flash Flood Warning', '#22c55e', // Green
+                    '#ffffff' // Default fallback
+                  ],
+                  'fill-opacity': 0.2
+                }
+              });
+
+              // The sharp outline
+              map.current.addLayer({
+                id: 'nws-alerts-outline',
+                type: 'line',
+                source: 'nws-alerts',
+                paint: {
+                  'line-color': [
+                    'match',
+                    ['get', 'event'],
+                    'Tornado Warning', '#ef4444',
+                    'Severe Thunderstorm Warning', '#eab308',
+                    'Flash Flood Warning', '#22c55e',
+                    '#ffffff'
+                  ],
+                  'line-width': 2,
+                  'line-dasharray': [2, 2]
+                }
+              });
+            }
+          } catch (err) {
+            console.error("Failed to load NWS alerts:", err);
+          }
+        };
+
+        // Initial fetch
+        updateNWSAlerts();
+        
+        // Refresh the warnings every 2 minutes
+        setInterval(updateNWSAlerts, 120000);
       } catch (err) {
         console.error("Failed to load RainViewer radar data:", err);
       }
