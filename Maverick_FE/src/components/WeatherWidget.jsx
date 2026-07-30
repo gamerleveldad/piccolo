@@ -89,9 +89,9 @@ export default function WeatherWidget() {
           <div>
             <h2 className="text-sm font-medium text-slate-400">Local Telemetry</h2>
             <div className="flex items-baseline gap-2 mt-1">
-              <span className="text-4xl font-bold text-slate-100">{toF(current.air_temperature)}°F</span>
+              <span className="text-4xl font-bold text-slate-100">{toF(current.temp_f)}°F</span>
               <span className="text-xs text-slate-400">
-                Feels like {toF(current.feels_like || current.heat_index)}°F
+                Feels like {toF(current.feels_like_f || current.heat_index)}°F
               </span>
             </div>
           </div>
@@ -109,7 +109,7 @@ export default function WeatherWidget() {
             <div>
               <p className="text-slate-500">Humidity / Dew</p>
               <p className="font-semibold text-slate-200">
-                {current.relative_humidity}% / {toF(current.dew_point)}°F
+                {current.relative_humidity}% / {toF(current.dew_point_f)}°F
               </p>
             </div>
           </div>
@@ -119,7 +119,7 @@ export default function WeatherWidget() {
             <div>
               <p className="text-slate-500">Wind / Gust</p>
               <p className="font-semibold text-slate-200">
-                {toMph(current.wind_avg)} <span className="text-slate-400">({toMph(current.wind_gust)})</span> mph
+                {toMph(current.wind_avg_mph)} <span className="text-slate-400">({toMph(current.wind_gust_mph)})</span> mph
               </p>
             </div>
           </div>
@@ -128,16 +128,16 @@ export default function WeatherWidget() {
             <CloudRain className="w-4 h-4 text-cyan-400 shrink-0" />
             <div>
               <p className="text-slate-500">Rain Rate</p>
-              <p className="font-semibold text-slate-200">{toInches(current.precip_total_1h)} in/hr</p>
+              <p className="font-semibold text-slate-200">{toInches(current.precip_in)} in/hr</p>
             </div>
           </div>
 
           <div className="bg-[#111827] p-2.5 rounded-lg border border-borderSlate flex items-center gap-2">
-            <Zap className={`w-4 h-4 shrink-0 ${current.strike_count_1h > 0 ? 'text-yellow-400 animate-pulse' : 'text-slate-600'}`} />
+            <Zap className={`w-4 h-4 shrink-0 ${current.lightning_strike_count > 0 ? 'text-yellow-400 animate-pulse' : 'text-slate-600'}`} />
             <div>
               <p className="text-slate-500">Lightning (1h)</p>
               <p className="font-semibold text-slate-200">
-                {current.strike_count_1h > 0 ? `${current.strike_count_1h} strikes (${toMiles(current.strike_last_dist)} mi)` : 'None'}
+                {current.lightning_strike_count > 0 ? `${current.lightning_strike_count} strikes (${toMiles(current.lightning_strike_last_distance)} mi)` : 'None'}
               </p>
             </div>
           </div>
