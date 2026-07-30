@@ -393,3 +393,54 @@ services:
       - ./data/dnsmasq.d:/etc/dnsmasq.d
     networks:
       - piccolo_net
+# --- ADS-B / SDR Decoder Hub ---
+  ultrafeeder:
+    image: ghcr.io/sdr-enthusiasts/docker-adsb-ultrafeeder
+    container_name: ultrafeeder
+    hostname: ultrafeeder
+    restart: unless-stopped
+    device_cgroup_rules:
+      - 'c 189:* rwm'
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+      - ./data/ultrafeeder:/var/globe_history
+    ports:
+      - "8085:80"  # Tar1090 map & aircraft.json endpoint
+    environment:
+      - TZ=${TZ:-America/New_York}
+      - LAT=${HOME_LATITUDE}
+      - LONG=${HOME_LONGITUDE}
+      - ALT=85ft
+      - READSB_DEVICE_TYPE=rtlsdr
+      - READSB_RTLSDR_DEVICE=0
+      - MLAT_USER=${MLAT_USER:-piccolo_feeder}
+    networks:
+      - piccolo_net
+
+  # --- FlightAware Feeder ---
+  piaware:
+    image: ghcr.io/sdr-enthusiasts/docker-piaware
+    container_name: piaware
+    restart: unless-stopped
+    depends_on:
+      - ultrafeeder
+    environment:
+      - TZ=${TZ:-America/New_York}
+      - BEASTHOST=ultrafeeder
+      - LAT=${HOME_LATITUDE}
+      - LONG=${HOME_LONGITUDE}
+      - FEEDER_ID=${PIAWARE_FEEDER_ID}
+    networks:
+      - piccolo_net
+
+# --- Simple Map Preview ---
+  map_preview:
+    image: nginx:alpine
+    container_name: map_preview
+    restart: unless-stopped
+    ports:
+      - "8086:80"
+    volumes:
+      - ./Map_Preview/html:/usr/share/nginx/html:ro
+    networks:
+      - piccolo_net

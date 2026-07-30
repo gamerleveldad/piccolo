@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SDR Flight Preview</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Load Leaflet CSS and JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { height: 100vh; width: 100vw; }
+        .plane-icon {
+            font-size: 24px;
+            text-align: center;
+            line-height: 24px;
+            transform-origin: center;
+        }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<script>
+    // Initialize the map centered on Altamonte Springs
+    const map = L.map('map').setView([28.6611, -81.3814], 10);
+
+    // Add a basic OpenStreetMap tile layer
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    // Object to keep track of plane markers
+    const planeMarkers = {};
+
+    // Function to fetch and update planes
+    async function fetchPlanes() {
+        try {
+            // Fetching from the ultrafeeder container port we exposed
+            const response = await fetch('http://192.168.4.55:8085/data/aircraft.json'); 
+            const data = await response.json();
+            
+            // Track which planes we've seen this cycle to remove old ones
+            const seenThisCycle = new Set();
+
+            data.aircraft.forEach(plane => {
+                // Only process planes with coordinates
+                if (plane.lat && plane.lon) {
+                    seenThisCycle.add(plane.hex);
+
+                    // If we already have a marker, update its position
+                    if (planeMarkers[plane.hex]) {
+                        planeMarkers[plane.hex].setLatLng([plane.lat, plane.lon]);
+                        
+                        // Update the popup with latest altitude and speed
+                        planeMarkers[plane.hex].getPopup().setContent(`
+                            <b>Flight:</b> ${plane.flight ? plane.flight.trim() : 'N/A'}<br>
+                            <b>Alt:</b> ${plane.alt_baro || 0} ft<br>
+                            <b>Speed:</b> ${plane.gs || 0} kts
+                        `);
+                    } else {
+                        // Create a new marker for a new plane
+                        const marker = L.marker([plane.lat, plane.lon]).addTo(map);
+                        
+                        // Add a popup with flight info
+                        marker.bindPopup(`
+                            <b>Flight:</b> ${plane.flight ? plane.flight.trim() : 'N/A'}<br>
+                            <b>Alt:</b> ${plane.alt_baro || 0} ft<br>
+                            <b>Speed:</b> ${plane.gs || 0} kts
+                        `);
+                        
+                        planeMarkers[plane.hex] = marker;
+                    }
+                }
+            });
+
+            // Remove markers for planes that dropped off the radar
+            Object.keys(planeMarkers).forEach(hex => {
+                if (!seenThisCycle.has(hex)) {
+                    map.removeLayer(planeMarkers[hex]);
+                    delete planeMarkers[hex];
+                }
+            });
+
+        } catch (error) {
+            console.error("Error fetching aircraft data:", error);
+        }
+    }
+
+    // Fetch immediately, then loop every 1.5 seconds
+    fetchPlanes();
+    setInterval(fetchPlanes, 1500);
+
+</script>
+</body>
+</html>
