@@ -1,5 +1,21 @@
 import { useState, useEffect } from 'react';
-import { Thermometer, Wind, Droplets, CloudRain, Zap, Sun } from 'lucide-react';
+import { Thermometer, Wind, Droplets, CloudRain, Zap } from 'lucide-react';
+
+// Map WeatherFlow API icon strings to Erik Flowers Weather Icons CSS classes
+const ICON_MAP = {
+  'clear-day': 'wi wi-day-sunny',
+  'clear-night': 'wi wi-night-clear',
+  'partly-cloudy-day': 'wi wi-day-cloudy',
+  'partly-cloudy-night': 'wi wi-night-alt-cloudy',
+  'cloudy': 'wi wi-cloudy',
+  'possibly-thunderstorm-day': 'wi wi-day-thunderstorm',
+  'possibly-thunderstorm-night': 'wi wi-night-alt-thunderstorm',
+  'thunderstorm': 'wi wi-thunderstorm',
+  'rain': 'wi wi-rain',
+  'chance-rain': 'wi wi-day-rain',
+  'foggy': 'wi wi-fog',
+  'windy': 'wi wi-strong-wind'
+};
 
 export default function WeatherWidget() {
   const [current, setCurrent] = useState(null);
@@ -10,7 +26,7 @@ export default function WeatherWidget() {
   const CURRENT_URL = `http://${host}:8004/api/weather/current`;
   const HOURLY_URL = `http://${host}:8004/api/weather/forecast/hourly`;
 
-  // Helper conversions
+  // Helper conversions for current live telemetry
   const toF = (c) => (c != null ? Math.round((c * 9) / 5 + 32) : '--');
   const toMph = (ms) => (ms != null ? (ms * 2.23694).toFixed(1) : '--');
   const toInches = (mm) => (mm != null ? (mm / 25.4).toFixed(2) : '0.00');
@@ -18,35 +34,26 @@ export default function WeatherWidget() {
 
   const fetchWeatherData = async () => {
     try {
-      // 1. Fetch Live Telemetry
+      // 1. Fetch Live Current Telemetry
       const curRes = await fetch(CURRENT_URL);
       if (curRes.ok) {
         const curData = await curRes.json();
         setCurrent(curData);
       }
 
-      // 2. Fetch Hourly Forecast
+      // 2. Fetch Hourly Forecast (using new simplified schema)
       const hourRes = await fetch(HOURLY_URL);
       if (hourRes.ok) {
-        const rawArray = await hourRes.json();
+        const data = await hourRes.json();
 
-        // Group the flat array by timestamp
-        const grouped = {};
-        rawArray.forEach((item) => {
-          if (!grouped[item.time]) grouped[item.time] = {};
-          grouped[item.time][item.field] = item.value;
-        });
-
-        // Convert grouped object to array and take next 6 hours
-        const parsedHours = Object.entries(grouped)
-          .slice(0, 6)
-          .map(([timeStr, fields]) => ({
-            time: new Date(timeStr).toLocaleTimeString([], { hour: 'numeric', hour12: true }),
-            temp: toF(fields.air_temperature),
-            condition: fields.conditions || 'Clear',
-            pop: fields.precip_probability ?? 0,
-            icon: fields.icon || 'clear-day'
-          }));
+        // Process directly without complex grouping loops
+        const parsedHours = data.slice(0, 6).map((item) => ({
+          time: new Date(item.time).toLocaleTimeString([], { hour: 'numeric', hour12: true }),
+          temp: Math.round(item.temp_f),
+          condition: item.conditions,
+          pop: item.precip_probability ?? 0,
+          iconClass: ICON_MAP[item.icon] || 'wi wi-day-sunny'
+        }));
 
         setHourlyForecast(parsedHours);
       }
@@ -60,11 +67,8 @@ export default function WeatherWidget() {
   useEffect(() => {
     fetchWeatherData();
 
-    // Live refresh every 30 seconds
-    const interval = setInterval(() => {
-      fetchWeatherData();
-    }, 30000);
-
+    // Auto-refresh every 30 seconds
+    const interval = setInterval(fetchWeatherData, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -91,7 +95,7 @@ export default function WeatherWidget() {
               </span>
             </div>
           </div>
-          <div className="text-right">
+          <div className="text-right flex flex-col items-end gap-1">
             <span className="text-xs px-2 py-1 bg-slate-800 text-slate-300 rounded-md border border-slate-700">
               Live (30s)
             </span>
@@ -145,10 +149,14 @@ export default function WeatherWidget() {
         <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">6-Hour Outlook</h3>
         <div className="grid grid-cols-6 gap-2 text-center">
           {hourlyForecast.map((hour, idx) => (
-            <div key={idx} className="bg-[#111827] p-2 rounded-lg border border-borderSlate flex flex-col items-center">
+            <div key={idx} className="bg-[#111827] p-2 rounded-lg border border-borderSlate flex flex-col items-center justify-between">
               <span className="text-[11px] text-slate-400">{hour.time}</span>
-              <span className="text-sm font-bold text-slate-100 my-1">{hour.temp}°</span>
-              <div className="text-[10px] text-cyan-400 font-medium">
+              
+              {/* Weather Icon Render */}
+              <i className={`${hour.iconClass} text-xl my-2 text-amber-400`} />
+
+              <span className="text-sm font-bold text-slate-100">{hour.temp}°</span>
+              <div className="text-[10px] text-cyan-400 font-medium mt-1">
                 {hour.pop > 0 ? `${hour.pop}%` : '0%'}
               </div>
             </div>
