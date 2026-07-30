@@ -79,27 +79,44 @@ export default function MapWidget() {
           }
         });
 
-        // --- LIVE NWS STORM TRACKS & WARNINGS ---
-        
-        // Function to fetch and update NWS alerts
+        // --- 1. TOMORROW.IO LIGHTNING LAYER ---
+        const tomorrowKey = import.meta.env.VITE_TOMORROW_API_KEY;
+        if (tomorrowKey) {
+          map.current.addSource('tomorrow-lightning', {
+            type: 'raster',
+            tiles: [
+              `https://api.tomorrow.io/v4/map/tile/{z}/{x}/{y}/lightning/now.png?apikey=${tomorrowKey}`
+            ],
+            tileSize: 256
+          });
+
+          map.current.addLayer({
+            id: 'tomorrow-lightning-layer',
+            type: 'raster',
+            source: 'tomorrow-lightning',
+            paint: {
+              'raster-opacity': 0.8
+            }
+          });
+        }
+
+        // --- 2. NWS STORM TRACKS & WARNINGS (FLORIDA) ---
         const updateNWSAlerts = async () => {
           try {
-            // Fetch active alerts for Florida
+            // Fetch active alerts for the entire state of FL to draw the polygons
             const response = await fetch('https://api.weather.gov/alerts/active?area=FL');
             const data = await response.json();
             
-            // Filter to only show severe convective weather
+            // Filter to only show severe convective weather polygons
             const severeFeatures = data.features.filter(feature => {
               const event = feature.properties.event;
               return event === 'Severe Thunderstorm Warning' || 
                      event === 'Tornado Warning' || 
-                     event === 'Special Weather Statement' ||
                      event === 'Flash Flood Warning';
             });
             
             data.features = severeFeatures;
 
-            // If the source already exists, just update the data. Otherwise, create it.
             if (map.current.getSource('nws-alerts')) {
               map.current.getSource('nws-alerts').setData(data);
             } else {
@@ -108,7 +125,7 @@ export default function MapWidget() {
                 data: data
               });
 
-              // The translucent fill
+              // Translucent polygon fill
               map.current.addLayer({
                 id: 'nws-alerts-fill',
                 type: 'fill',
@@ -117,16 +134,16 @@ export default function MapWidget() {
                   'fill-color': [
                     'match',
                     ['get', 'event'],
-                    'Tornado Warning', '#ef4444', // Red
-                    'Severe Thunderstorm Warning', '#eab308', // Yellow
-                    'Flash Flood Warning', '#22c55e', // Green
-                    '#ffffff' // Default fallback
+                    'Tornado Warning', '#ef4444', 
+                    'Severe Thunderstorm Warning', '#eab308', 
+                    'Flash Flood Warning', '#22c55e', 
+                    '#ffffff'
                   ],
                   'fill-opacity': 0.2
                 }
               });
 
-              // The sharp outline
+              // Dashed track outline
               map.current.addLayer({
                 id: 'nws-alerts-outline',
                 type: 'line',
@@ -150,11 +167,8 @@ export default function MapWidget() {
           }
         };
 
-        // Initial fetch
         updateNWSAlerts();
-        
-        // Refresh the warnings every 2 minutes
-        setInterval(updateNWSAlerts, 120000);
+        setInterval(updateNWSAlerts, 120000); // Check for new polygons every 2 mins
       } catch (err) {
         console.error("Failed to load RainViewer radar data:", err);
       }
