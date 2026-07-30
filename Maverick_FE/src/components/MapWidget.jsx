@@ -3,10 +3,12 @@ import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { LocateFixed, Map as MapIcon } from 'lucide-react';
 
-// MapLibre ALWAYS expects [Longitude, Latitude]
-// Florida Longitude is Negative (-81...), Latitude is Positive (28...)
-const homeLng = parseFloat(import.meta.env.VITE_HOME_LONGITUDE || '-81.3884');
-const homeLat = parseFloat(import.meta.env.VITE_HOME_LATITUDE || '28.6611');
+// Safely parse coordinates by stripping any accidental .env string quotes
+const rawLng = import.meta.env.VITE_HOME_LONGITUDE || '-81.3884';
+const rawLat = import.meta.env.VITE_HOME_LATITUDE || '28.6611';
+
+const homeLng = parseFloat(rawLng.toString().replace(/['"]/g, ''));
+const homeLat = parseFloat(rawLat.toString().replace(/['"]/g, ''));
 const HOME_COORDS = [homeLng, homeLat];
 const DEFAULT_ZOOM = 10;
 
@@ -33,6 +35,13 @@ export default function MapWidget() {
       center: HOME_COORDS,
       zoom: DEFAULT_ZOOM
     });
+
+    // Force map to recalculate its dimensions to fix the Flexbox blank render bug
+    setTimeout(() => {
+      if (map.current) {
+        map.current.resize();
+      }
+    }, 250);
 
     map.current.addControl(new maplibregl.NavigationControl(), 'top-right');
 
@@ -160,8 +169,7 @@ export default function MapWidget() {
   return (
     <div className="bg-cardBg border border-borderSlate rounded-xl shadow-lg flex-1 min-h-[450px] lg:min-h-[600px] flex flex-col overflow-hidden">
       
-      {/* Restyled Header merging the original App.jsx design with the Recenter button */}
-      <div className="bg-[#161f33] p-4 border-b border-borderSlate flex items-center justify-between">
+      <div className="bg-[#161f33] p-4 border-b border-borderSlate flex items-center justify-between z-10">
         <div className="flex items-center gap-2">
           <MapIcon className="text-accentBlue w-5 h-5" />
           <h2 className="text-lg font-semibold text-textSilver">Airspace & Radar</h2>
