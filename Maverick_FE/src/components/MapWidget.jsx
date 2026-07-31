@@ -73,7 +73,7 @@ export default function MapWidget() {
       homeEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;
       new maplibregl.Marker({ element: homeEl }).setLngLat(HOME_COORDS).addTo(map.current);
 
-      // --- 2. WEATHER RADAR ---
+      // --- 2. WEATHER RADAR & LIGHTNING ---
       fetch('https://api.rainviewer.com/public/weather-maps.json')
         .then(res => res.json())
         .then(rvData => {
@@ -92,27 +92,36 @@ export default function MapWidget() {
           });
         }).catch(err => console.error("RainViewer failed:", err));
 
+      const tomorrowKey = import.meta.env.VITE_TOMORROW_API_KEY;
+      if (tomorrowKey) {
+        map.current.addSource('tomorrow-lightning', { 
+          type: 'raster', 
+          tiles: [`https://api.tomorrow.io/v4/map/tile/{z}/{x}/{y}/lightning/now.png?apikey=${tomorrowKey}`], 
+          tileSize: 256 
+        });
+        map.current.addLayer({ 
+          id: 'tomorrow-lightning-layer', 
+          type: 'raster', 
+          source: 'tomorrow-lightning', 
+          paint: { 'raster-opacity': 0.8 } 
+        });
+      }
+
       // --- 3. HTML DOM METAR DOTS ---
       const fetchMETARs = async () => {
         try {
           const airports = 'KSFB,KMCO,KORL,KLEE,KISM,KDAB,KTIX,KDED';
           const targetUrl = encodeURIComponent(`https://aviationweather.gov/api/data/metar?ids=${airports}&format=json`);
           
-          // Using AllOrigins to safely bypass Pi-hole blocklists
           const res = await fetch(`https://api.allorigins.win/raw?url=${targetUrl}`);
-          if (!res.ok) {
-            console.error("METAR Proxy failed with status:", res.status);
-            return;
-          }
+          if (!res.ok) return;
           
           const data = await res.json();
-          console.log(`Parsed ${data.length} METAR reports.`);
           
           data.forEach(obs => {
             if (obs.lat != null && obs.lon != null) {
               const cat = obs.fltCat || 'VFR';
               
-              // Map NOAA categories to FAA colors
               let color = '#64748b'; // Slate (Missing)
               if (cat === 'VFR') color = '#22c55e'; // Green
               else if (cat === 'MVFR') color = '#3b82f6'; // Blue
@@ -120,13 +129,12 @@ export default function MapWidget() {
               else if (cat === 'LIFR') color = '#d946ef'; // Magenta
 
               if (!metarMarkers.current[obs.icaoId]) {
-                // Create New DOM Marker
                 const el = document.createElement('div');
                 el.className = 'flex items-center justify-center pointer-events-none relative z-10';
 
                 const dot = document.createElement('div');
                 dot.id = `metar-dot-${obs.icaoId}`;
-                dot.className = 'w-3.5 h-3.5 rounded-full border-[1.5px] border-slate-900 shadow-md';
+                dot.className = 'w-3.5 h-3.5 rounded-full border-[1.5px] border-slate-900 shadow-md transition-colors duration-500';
                 dot.style.backgroundColor = color;
 
                 const label = document.createElement('div');
@@ -141,7 +149,6 @@ export default function MapWidget() {
                   .addTo(map.current);
                   
               } else {
-                // Update Existing Marker Color
                 const el = metarMarkers.current[obs.icaoId].getElement();
                 const dot = el.querySelector(`#metar-dot-${obs.icaoId}`);
                 if (dot) dot.style.backgroundColor = color;
@@ -154,7 +161,7 @@ export default function MapWidget() {
       };
 
       fetchMETARs();
-      metarInterval = setInterval(fetchMETARs, 300000); // 5 minutes
+      metarInterval = setInterval(fetchMETARs, 300000); 
 
       // --- 4. HTML DOM AIRCRAFT & SMOOTH ANIMATION ---
       const animatePlanes = (timestamp) => {
