@@ -11,9 +11,9 @@ const HOME_COORDS = [homeLng, homeLat];
 const DEFAULT_ZOOM = 10;
 
 export default function MapWidget() {
-  // All React Hooks MUST live inside the component function
   const mapContainer = useRef(null);
   const map = useRef(null);
+  
   const planeMarkers = useRef({});
   const activeFlights = useRef({});
   const animationFrame = useRef(null);
@@ -33,6 +33,7 @@ export default function MapWidget() {
       zoom: DEFAULT_ZOOM,
       style: {
         version: 8,
+        glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
         sources: {
           'carto-dark': {
             type: 'raster',
@@ -61,6 +62,7 @@ export default function MapWidget() {
     map.current.addControl(new maplibregl.NavigationControl(), 'top-right');
 
     let flightInterval;
+    let metarInterval;
 
     map.current.on('load', () => {
       
@@ -89,18 +91,83 @@ export default function MapWidget() {
           });
         }).catch(err => console.error("RainViewer failed:", err));
 
-      // --- 3. HTML DOM AIRCRAFT & SMOOTH ANIMATION ---
+      // --- 3. LOCAL METAR FLIGHT CATEGORIES ---
+      map.current.addSource('metars', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+
+      map.current.addLayer({
+        id: 'metars-dots',
+        type: 'circle',
+        source: 'metars',
+        paint: {
+          'circle-radius': 5,
+          'circle-color': [
+            'match', ['get', 'fltcat'],
+            'VFR', '#22c55e', // Green
+            'MVFR', '#3b82f6', // Blue
+            'IFR', '#ef4444', // Red
+            'LIFR', '#d946ef', // Magenta
+            '#64748b' // Default Slate (Missing Data)
+          ],
+          'circle-stroke-width': 1.5,
+          'circle-stroke-color': '#0f172a'
+        }
+      });
+
+      map.current.addLayer({
+        id: 'metars-labels',
+        type: 'symbol',
+        source: 'metars',
+        layout: {
+          'text-field': ['get', 'icaoId'],
+          'text-font': ['Open Sans Regular'],
+          'text-size': 11,
+          'text-offset': [0.8, 0],
+          'text-anchor': 'left'
+        },
+        paint: {
+          'text-color': '#f8fafc',
+          'text-halo-color': '#0f172a',
+          'text-halo-width': 2
+        }
+      });
+
+      const fetchMETARs = async () => {
+        try {
+          const airports = 'KSFB,KMCO,KORL,KLEE,KISM,KDAB,KTIX,KDED';
+          const res = await fetch(`https://aviationweather.gov/api/data/metar?ids=${airports}&format=json`);
+          if (!res.ok) return;
+          const data = await res.json();
+          
+          const features = data.map(obs => ({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [obs.lon, obs.lat] },
+            properties: {
+              icaoId: obs.icaoId,
+              fltcat: obs.fltcat || 'VFR' // Fallback to VFR if the API omits the category
+            }
+          }));
+
+          if (map.current.getSource('metars')) {
+            map.current.getSource('metars').setData({ type: 'FeatureCollection', features });
+          }
+        } catch (err) {
+          console.error("METAR fetch failed:", err);
+        }
+      };
+
+      fetchMETARs();
+      metarInterval = setInterval(fetchMETARs, 300000); // Update every 5 minutes
+
+      // --- 4. HTML DOM AIRCRAFT & SMOOTH ANIMATION ---
       const animatePlanes = (timestamp) => {
         Object.keys(activeFlights.current).forEach(hex => {
           const flight = activeFlights.current[hex];
           const marker = planeMarkers.current[hex];
           
           if (marker && flight.isAnimating) {
-            // Calculate how much of the 1000ms polling interval has passed
             const elapsed = timestamp - flight.lastUpdate;
             const progress = Math.min(elapsed / 1000, 1.0); 
             
-            // Linear interpolation (Lerp)
             const currentLng = flight.startLng + (flight.targetLng - flight.startLng) * progress;
             const currentLat = flight.startLat + (flight.targetLat - flight.startLat) * progress;
             
@@ -134,7 +201,6 @@ export default function MapWidget() {
               const scale = speed > 300 ? 1.1 : speed > 150 ? 0.9 : 0.75;
 
               if (!planeMarkers.current[ac.hex]) {
-                // CREATE NEW AIRCRAFT
                 const el = document.createElement('div');
                 el.className = 'relative flex items-center justify-center pointer-events-none';
                 
@@ -158,7 +224,6 @@ export default function MapWidget() {
                 
                 planeMarkers.current[ac.hex] = marker;
                 
-                // Initialize animation state
                 activeFlights.current[ac.hex] = {
                   startLng: ac.lon,
                   startLat: ac.lat,
@@ -169,7 +234,6 @@ export default function MapWidget() {
                 };
 
               } else {
-                // UPDATE EXISTING AIRCRAFT
                 const flight = activeFlights.current[ac.hex];
                 const marker = planeMarkers.current[ac.hex];
                 const currentPos = marker.getLngLat();
@@ -191,7 +255,6 @@ export default function MapWidget() {
             }
           });
 
-          // Cleanup aircraft that flew out of SDR range
           Object.keys(planeMarkers.current).forEach(hex => {
             if (!currentHexes.has(hex)) {
               planeMarkers.current[hex].remove();
@@ -205,15 +268,14 @@ export default function MapWidget() {
         }
       };
 
-      // Start the loops
       updateFlights();
       flightInterval = setInterval(updateFlights, 1000);
       animationFrame.current = requestAnimationFrame(animatePlanes);
     });
 
-    // React unmount cleanup
     return () => {
       if (flightInterval) clearInterval(flightInterval);
+      if (metarInterval) clearInterval(metarInterval);
       if (animationFrame.current) cancelAnimationFrame(animationFrame.current);
       if (map.current) {
         map.current.remove();
