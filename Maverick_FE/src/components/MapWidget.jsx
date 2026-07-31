@@ -10,17 +10,27 @@ const homeLat = parseFloat(rawLat.toString().replace(/['"]/g, ''));
 const HOME_COORDS = [homeLng, homeLat];
 const DEFAULT_ZOOM = 10;
 
+// HELPER: Calculates a future GPS coordinate based on heading and speed
+const getProjectedCoordinate = (lon, lat, track, gsKts, minutes = 1.5) => {
+  const distanceKm = (gsKts * 1.852) * (minutes / 60);
+  const R = 6371; // Earth's radius in km
+  const brng = track * (Math.PI / 180);
+  const lat1 = lat * (Math.PI / 180);
+  const lon1 = lon * (Math.PI / 180);
+
+  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(distanceKm / R) + Math.cos(lat1) * Math.sin(distanceKm / R) * Math.cos(brng));
+  const lon2 = lon1 + Math.atan2(Math.sin(brng) * Math.sin(distanceKm / R) * Math.cos(lat1), Math.cos(distanceKm / R) - Math.sin(lat1) * Math.sin(lat2));
+
+  return [lon2 * (180 / Math.PI), lat2 * (180 / Math.PI)];
+};
+
 export default function MapWidget() {
   const mapContainer = useRef(null);
   const map = useRef(null);
   
-  // Marker State Tracking
+  // State Tracking
   const planeMarkers = useRef({});
-  const activeFlights = useRef({});
   const metarMarkers = useRef({});
-  const animationFrame = useRef(null);
-  
-  // Re-introducing the historical flight trails
   const flightTrails = useRef({});
 
   const handleRecenter = () => {
@@ -113,7 +123,9 @@ export default function MapWidget() {
         });
       }
 
-      // --- 3. FLIGHT TRAILS GEOJSON LAYER ---
+      // --- 3. FLIGHT TRAILS & VECTORS GEOJSON LAYERS ---
+      
+      // Historical Trails
       map.current.addSource('flight-trails', { 
         type: 'geojson', 
         data: { type: 'FeatureCollection', features: [] } 
@@ -124,9 +136,24 @@ export default function MapWidget() {
         source: 'flight-trails', 
         paint: { 
           'line-color': '#38bdf8', 
+          'line-width': 1.5, 
+          'line-opacity': 0.35 // Faded history
+        } 
+      });
+
+      // Predictive Speed Vectors
+      map.current.addSource('flight-vectors', { 
+        type: 'geojson', 
+        data: { type: 'FeatureCollection', features: [] } 
+      });
+      map.current.addLayer({ 
+        id: 'flight-vectors-layer', 
+        type: 'line', 
+        source: 'flight-vectors', 
+        paint: { 
+          'line-color': '#38bdf8', 
           'line-width': 2, 
-          'line-opacity': 0.5,
-          'line-dasharray': [1, 2] // Dashed look to emulate radar vector trails
+          'line-opacity': 0.85 // Bright predictive path
         } 
       });
 
@@ -186,38 +213,16 @@ export default function MapWidget() {
       fetchMETARs();
       metarInterval = setInterval(fetchMETARs, 300000); 
 
-      // --- 5. HTML DOM AIRCRAFT & SMOOTH ANIMATION ---
-      const animatePlanes = (timestamp) => {
-        Object.keys(activeFlights.current).forEach(hex => {
-          const flight = activeFlights.current[hex];
-          const marker = planeMarkers.current[hex];
-          
-          if (marker && flight.isAnimating) {
-            const elapsed = timestamp - flight.lastUpdate;
-            const progress = Math.min(elapsed / 1000, 1.0); 
-            
-            const currentLng = flight.startLng + (flight.targetLng - flight.startLng) * progress;
-            const currentLat = flight.startLat + (flight.targetLat - flight.startLat) * progress;
-            
-            marker.setLngLat([currentLng, currentLat]);
-
-            if (progress === 1.0) {
-              flight.isAnimating = false;
-            }
-          }
-        });
-        
-        animationFrame.current = requestAnimationFrame(animatePlanes);
-      };
-
+      // --- 5. AIRCRAFT POLLING (NO ANIMATION) ---
       const updateFlights = async () => {
         try {
           const res = await fetch(`http://${window.location.hostname}:8085/data/aircraft.json`);
           if (!res.ok) return;
           const data = await res.json();
           const currentHexes = new Set();
-          const now = performance.now();
+          
           const trailFeatures = [];
+          const vectorFeatures = [];
 
           data.aircraft.forEach(ac => {
             if (ac.lat != null && ac.lon != null) {
@@ -229,7 +234,7 @@ export default function MapWidget() {
               const speed = ac.gs || 0;
               const scale = speed > 300 ? 1.1 : speed > 150 ? 0.9 : 0.75;
 
-              // --- Process GeoJSON Trails ---
+              // --- Process Historical Trails ---
               if (!flightTrails.current[ac.hex]) flightTrails.current[ac.hex] = [];
               const trail = flightTrails.current[ac.hex];
               
@@ -237,6 +242,7 @@ export default function MapWidget() {
                 trail.push([ac.lon, ac.lat]);
               } else {
                 const lastPos = trail[trail.length - 1];
+                // Only log a new breadcrumb if the plane physically moved
                 if (lastPos[0] !== ac.lon || lastPos[1] !== ac.lat) {
                   trail.push([ac.lon, ac.lat]);
                 }
@@ -251,7 +257,16 @@ export default function MapWidget() {
                 });
               }
 
-              // --- Process HTML DOM Markers ---
+              // --- Process Predictive Vectors ---
+              if (speed > 10) { // Only draw vector if the aircraft is actually moving
+                const projected = getProjectedCoordinate(ac.lon, ac.lat, heading, speed, 1.5); // 1.5 minutes ahead
+                vectorFeatures.push({
+                  type: 'Feature',
+                  geometry: { type: 'LineString', coordinates: [[ac.lon, ac.lat], projected] }
+                });
+              }
+
+              // --- Process HTML DOM Markers (Instant Snap) ---
               if (!planeMarkers.current[ac.hex]) {
                 const el = document.createElement('div');
                 el.className = 'relative flex items-center justify-center pointer-events-none z-30';
@@ -260,6 +275,7 @@ export default function MapWidget() {
                 icon.id = `icon-${ac.hex}`;
                 icon.innerHTML = `<svg width="28" height="28" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path d="M16 2 L26 28 L16 22 L6 28 Z" fill="#38bdf8" stroke="#0f172a" stroke-width="1.5"/></svg>`;
                 icon.style.transform = `rotate(${heading}deg) scale(${scale})`;
+                // We keep the CSS transition ONLY for rotation, so it spins smoothly when turning
                 icon.style.transition = 'transform 0.5s ease-out';
 
                 const label = document.createElement('div');
@@ -270,28 +286,16 @@ export default function MapWidget() {
                 el.appendChild(icon);
                 el.appendChild(label);
 
-                const marker = new maplibregl.Marker({ element: el })
+                planeMarkers.current[ac.hex] = new maplibregl.Marker({ element: el })
                   .setLngLat([ac.lon, ac.lat])
                   .addTo(map.current);
-                
-                planeMarkers.current[ac.hex] = marker;
-                
-                activeFlights.current[ac.hex] = {
-                  startLng: ac.lon,
-                  startLat: ac.lat,
-                  targetLng: ac.lon,
-                  targetLat: ac.lat,
-                  lastUpdate: now,
-                  isAnimating: false
-                };
 
               } else {
                 const marker = planeMarkers.current[ac.hex];
                 
-                // 1. Force the marker to snap instantly to the new coordinates
+                // Instantly snap to new coordinates
                 marker.setLngLat([ac.lon, ac.lat]);
 
-                // 2. Update rotation and labels
                 const el = marker.getElement();
                 const icon = el.querySelector(`#icon-${ac.hex}`);
                 if (icon) icon.style.transform = `rotate(${heading}deg) scale(${scale})`;
@@ -302,22 +306,21 @@ export default function MapWidget() {
             }
           });
 
-          // Cleanup stale DOM markers and GeoJSON trails
+          // Cleanup stale DOM markers and GeoJSON arrays
           Object.keys(planeMarkers.current).forEach(hex => {
             if (!currentHexes.has(hex)) {
               planeMarkers.current[hex].remove();
               delete planeMarkers.current[hex];
-              delete activeFlights.current[hex];
               delete flightTrails.current[hex];
             }
           });
 
-          // Push updated trail arrays to MapLibre WebGL canvas
+          // Push updated trail and vector arrays to MapLibre WebGL canvas
           if (map.current.getSource('flight-trails')) {
-            map.current.getSource('flight-trails').setData({ 
-              type: 'FeatureCollection', 
-              features: trailFeatures 
-            });
+            map.current.getSource('flight-trails').setData({ type: 'FeatureCollection', features: trailFeatures });
+          }
+          if (map.current.getSource('flight-vectors')) {
+            map.current.getSource('flight-vectors').setData({ type: 'FeatureCollection', features: vectorFeatures });
           }
 
         } catch (err) { 
@@ -327,13 +330,11 @@ export default function MapWidget() {
 
       updateFlights();
       flightInterval = setInterval(updateFlights, 1000);
-      //animationFrame.current = requestAnimationFrame(animatePlanes);
     });
 
     return () => {
       if (flightInterval) clearInterval(flightInterval);
       if (metarInterval) clearInterval(metarInterval);
-      if (animationFrame.current) cancelAnimationFrame(animationFrame.current);
       if (map.current) {
         map.current.remove();
         map.current = null;
