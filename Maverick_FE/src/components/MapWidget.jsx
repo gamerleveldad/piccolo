@@ -80,15 +80,21 @@ export default function MapWidget() {
           const latestPath = rvData.radar.past[rvData.radar.past.length - 1].path;
           map.current.addSource('rainviewer', { 
             type: 'raster', 
-            tiles: [`https://tilecache.rainviewer.com${latestPath}/256/{z}/{x}/{y}/2/1_1.png`], 
-            tileSize: 256,
-            maxzoom: 7 
+            // 1. Upgraded to 512px HD tiles
+            // 2. Changed the /2/ to a /4/ to use the Green/Yellow/Red Wunderground color scheme
+            tiles: [`https://tilecache.rainviewer.com${latestPath}/512/{z}/{x}/{y}/4/1_1.png`], 
+            tileSize: 512,
+            // 3. Unlocked high-resolution zoom levels
+            maxzoom: 12 
           });
           map.current.addLayer({ 
             id: 'rainviewer-layer', 
             type: 'raster', 
             source: 'rainviewer', 
-            paint: { 'raster-opacity': 0.65 } 
+            paint: { 
+              'raster-opacity': 0.65,
+              'raster-resampling': 'linear' // Forces smooth rendering across zoom levels
+            } 
           });
         }).catch(err => console.error("RainViewer failed:", err));
 
