@@ -10,17 +10,18 @@ const homeLat = parseFloat(rawLat.toString().replace(/['"]/g, ''));
 const HOME_COORDS = [homeLng, homeLat];
 const DEFAULT_ZOOM = 10;
 
-// HELPER: Simplified, bulletproof math for projecting a short visual coordinate
+// HELPER: Strictly parses all inputs to floats to prevent GeoJSON corruption
 const getProjectedCoordinate = (lon, lat, track, gsKts, minutes = 1.5) => {
-  // Speed is in knots (nautical miles/hour). We convert this to approximate degrees.
-  const distDegrees = (gsKts / 60) * (minutes / 60);
-  const brngRad = track * (Math.PI / 180);
-  const latRad = lat * (Math.PI / 180);
+  const l = parseFloat(lon);
+  const t = parseFloat(lat);
+  const distDegrees = (parseFloat(gsKts) / 60) * (minutes / 60);
+  const brngRad = parseFloat(track) * (Math.PI / 180);
+  const latRad = t * (Math.PI / 180);
 
   const deltaLat = distDegrees * Math.cos(brngRad);
   const deltaLon = (distDegrees * Math.sin(brngRad)) / Math.cos(latRad);
 
-  return [lon + deltaLon, lat + deltaLat];
+  return [l + deltaLon, t + deltaLat];
 };
 
 export default function MapWidget() {
@@ -113,9 +114,7 @@ export default function MapWidget() {
             maxzoom: 7 
           });
           
-          // Force the async radar to render beneath the trails!
           const beforeLayer = map.current.getLayer('flight-trails-layer') ? 'flight-trails-layer' : undefined;
-          
           map.current.addLayer({ 
             id: 'rainviewer-layer', 
             type: 'raster', 
@@ -146,10 +145,9 @@ export default function MapWidget() {
         try {
           const airports = 'KSFB,KMCO,KORL,KLEE,KISM,KDAB,KTIX,KDED';
           const targetUrl = encodeURIComponent(`https://aviationweather.gov/api/data/metar?ids=${airports}&format=json`);
-          
           const res = await fetch(`https://api.allorigins.win/raw?url=${targetUrl}`);
-          if (!res.ok) return;
           
+          if (!res.ok) return;
           const data = await res.json();
           
           data.forEach(obs => {
@@ -197,7 +195,7 @@ export default function MapWidget() {
       fetchMETARs();
       metarInterval = setInterval(fetchMETARs, 300000); 
 
-      // --- 5. AIRCRAFT POLLING (NO ANIMATION) ---
+      // --- 5. AIRCRAFT POLLING ---
       const updateFlights = async () => {
         try {
           const res = await fetch(`http://${window.location.hostname}:8085/data/aircraft.json`);
@@ -212,18 +210,22 @@ export default function MapWidget() {
             if (ac.lat != null && ac.lon != null) {
               currentHexes.add(ac.hex);
 
+              // STRICT PARSING FOR GEOMETRY ENGINE
+              const currentLon = parseFloat(ac.lon);
+              const currentLat = parseFloat(ac.lat);
+              const heading = parseFloat(ac.track) || 0;
+              const speed = parseFloat(ac.gs) || 0;
+              
               const flightName = ac.flight ? ac.flight.trim() : ac.r || ac.hex;
               const altitude = ac.alt_baro || 0;
-              const heading = ac.track || 0;
-              const speed = ac.gs || 0;
               const scale = speed > 300 ? 1.1 : speed > 150 ? 0.9 : 0.75;
 
               // --- Process Predictive Vectors ---
               if (speed > 10) { 
-                const projected = getProjectedCoordinate(ac.lon, ac.lat, heading, speed, 1.5);
+                const projected = getProjectedCoordinate(currentLon, currentLat, heading, speed, 1.5);
                 vectorFeatures.push({
                   type: 'Feature',
-                  geometry: { type: 'LineString', coordinates: [[ac.lon, ac.lat], projected] },
+                  geometry: { type: 'LineString', coordinates: [[currentLon, currentLat], projected] },
                   properties: {}
                 });
               }
@@ -233,11 +235,11 @@ export default function MapWidget() {
               const trail = flightTrails.current[ac.hex];
               
               if (trail.length === 0) {
-                trail.push([ac.lon, ac.lat]);
+                trail.push([currentLon, currentLat]);
               } else {
                 const lastPos = trail[trail.length - 1];
-                if (lastPos[0] !== ac.lon || lastPos[1] !== ac.lat) {
-                  trail.push([ac.lon, ac.lat]);
+                if (lastPos[0] !== currentLon || lastPos[1] !== currentLat) {
+                  trail.push([currentLon, currentLat]);
                 }
               }
 
@@ -271,13 +273,13 @@ export default function MapWidget() {
                 el.appendChild(label);
 
                 planeMarkers.current[ac.hex] = new maplibregl.Marker({ element: el })
-                  .setLngLat([ac.lon, ac.lat])
+                  .setLngLat([currentLon, currentLat])
                   .addTo(map.current);
 
               } else {
                 const marker = planeMarkers.current[ac.hex];
                 
-                marker.setLngLat([ac.lon, ac.lat]);
+                marker.setLngLat([currentLon, currentLat]);
 
                 const el = marker.getElement();
                 const icon = el.querySelector(`#icon-${ac.hex}`);
