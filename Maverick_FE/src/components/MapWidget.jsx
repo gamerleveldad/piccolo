@@ -85,7 +85,7 @@ export default function MapWidget() {
             tiles: [`https://tilecache.rainviewer.com${latestPath}/512/{z}/{x}/{y}/4/1_1.png`], 
             tileSize: 512,
             // 3. Unlocked high-resolution zoom levels
-            maxzoom: 12 
+            maxzoom: 8 
           });
           map.current.addLayer({ 
             id: 'rainviewer-layer', 
