@@ -405,7 +405,9 @@ services:
       - /dev/bus/usb:/dev/bus/usb
       - ./data/ultrafeeder:/var/globe_history
     ports:
-      - "8085:80"  # Tar1090 map & aircraft.json endpoint
+      - "8085:80"       # Tar1090 web UI & JSON endpoints
+      - "30005:30005"   # Beast format output (optional: for direct TCP streams)
+      - "30003:30003"   # SBS BaseStation format (optional: human-readable ASCII feed)
     environment:
       - TZ=${TZ:-America/New_York}
       - LAT=${HOME_LATITUDE}
@@ -413,6 +415,9 @@ services:
       - ALT=85ft
       - READSB_DEVICE_TYPE=rtlsdr
       - READSB_RTLSDR_DEVICE=0
+      - READSB_RTLSDR_GAIN=autogain  # Automatically measures noise floor and adjusts gain
+      - TAR1090_DEFAULTCENTERLAT=${HOME_LATITUDE}
+      - TAR1090_DEFAULTCENTERLON=${HOME_LONGITUDE}
       - MLAT_USER=${MLAT_USER:-piccolo_feeder}
     networks:
       - piccolo_net
