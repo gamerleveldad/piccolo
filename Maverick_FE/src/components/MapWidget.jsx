@@ -10,25 +10,23 @@ const homeLat = parseFloat(rawLat.toString().replace(/['"]/g, ''));
 const HOME_COORDS = [homeLng, homeLat];
 const DEFAULT_ZOOM = 10;
 
-// HELPER: Calculates a future GPS coordinate based on heading and speed
+// HELPER: Simplified, bulletproof math for projecting a short visual coordinate
 const getProjectedCoordinate = (lon, lat, track, gsKts, minutes = 1.5) => {
-  const distanceKm = (gsKts * 1.852) * (minutes / 60);
-  const R = 6371; // Earth's radius in km
-  const brng = track * (Math.PI / 180);
-  const lat1 = lat * (Math.PI / 180);
-  const lon1 = lon * (Math.PI / 180);
+  // Speed is in knots (nautical miles/hour). We convert this to approximate degrees.
+  const distDegrees = (gsKts / 60) * (minutes / 60);
+  const brngRad = track * (Math.PI / 180);
+  const latRad = lat * (Math.PI / 180);
 
-  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(distanceKm / R) + Math.cos(lat1) * Math.sin(distanceKm / R) * Math.cos(brng));
-  const lon2 = lon1 + Math.atan2(Math.sin(brng) * Math.sin(distanceKm / R) * Math.cos(lat1), Math.cos(distanceKm / R) - Math.sin(lat1) * Math.sin(lat2));
+  const deltaLat = distDegrees * Math.cos(brngRad);
+  const deltaLon = (distDegrees * Math.sin(brngRad)) / Math.cos(latRad);
 
-  return [lon2 * (180 / Math.PI), lat2 * (180 / Math.PI)];
+  return [lon + deltaLon, lat + deltaLat];
 };
 
 export default function MapWidget() {
   const mapContainer = useRef(null);
   const map = useRef(null);
   
-  // State Tracking
   const planeMarkers = useRef({});
   const metarMarkers = useRef({});
   const flightTrails = useRef({});
@@ -86,7 +84,24 @@ export default function MapWidget() {
       homeEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;
       new maplibregl.Marker({ element: homeEl }).setLngLat(HOME_COORDS).addTo(map.current);
 
-      // --- 2. WEATHER RADAR & LIGHTNING ---
+      // --- 2. ADD FLIGHT GEOJSON LAYERS FIRST (Sync) ---
+      map.current.addSource('flight-trails', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      map.current.addLayer({ 
+        id: 'flight-trails-layer', 
+        type: 'line', 
+        source: 'flight-trails', 
+        paint: { 'line-color': '#38bdf8', 'line-width': 2, 'line-opacity': 0.6 } 
+      });
+
+      map.current.addSource('flight-vectors', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      map.current.addLayer({ 
+        id: 'flight-vectors-layer', 
+        type: 'line', 
+        source: 'flight-vectors', 
+        paint: { 'line-color': '#0ea5e9', 'line-width': 2.5, 'line-opacity': 0.9 } 
+      });
+
+      // --- 3. WEATHER RADAR & LIGHTNING (Async - Slipped UNDER trails) ---
       fetch('https://api.rainviewer.com/public/weather-maps.json')
         .then(res => res.json())
         .then(rvData => {
@@ -97,15 +112,16 @@ export default function MapWidget() {
             tileSize: 256,
             maxzoom: 7 
           });
+          
+          // Force the async radar to render beneath the trails!
+          const beforeLayer = map.current.getLayer('flight-trails-layer') ? 'flight-trails-layer' : undefined;
+          
           map.current.addLayer({ 
             id: 'rainviewer-layer', 
             type: 'raster', 
             source: 'rainviewer', 
-            paint: { 
-              'raster-opacity': 0.65,
-              'raster-resampling': 'linear' 
-            } 
-          });
+            paint: { 'raster-opacity': 0.65, 'raster-resampling': 'linear' } 
+          }, beforeLayer);
         }).catch(err => console.error("RainViewer failed:", err));
 
       const tomorrowKey = import.meta.env.VITE_TOMORROW_API_KEY;
@@ -115,47 +131,15 @@ export default function MapWidget() {
           tiles: [`https://api.tomorrow.io/v4/map/tile/{z}/{x}/{y}/lightning/now.png?apikey=${tomorrowKey}`], 
           tileSize: 256 
         });
+        
+        const beforeLayer = map.current.getLayer('flight-trails-layer') ? 'flight-trails-layer' : undefined;
         map.current.addLayer({ 
           id: 'tomorrow-lightning-layer', 
           type: 'raster', 
           source: 'tomorrow-lightning', 
           paint: { 'raster-opacity': 0.8 } 
-        });
+        }, beforeLayer);
       }
-
-      // --- 3. FLIGHT TRAILS & VECTORS GEOJSON LAYERS ---
-      
-      // Historical Trails
-      map.current.addSource('flight-trails', { 
-        type: 'geojson', 
-        data: { type: 'FeatureCollection', features: [] } 
-      });
-      map.current.addLayer({ 
-        id: 'flight-trails-layer', 
-        type: 'line', 
-        source: 'flight-trails', 
-        paint: { 
-          'line-color': '#38bdf8', 
-          'line-width': 1.5, 
-          'line-opacity': 0.35 // Faded history
-        } 
-      });
-
-      // Predictive Speed Vectors
-      map.current.addSource('flight-vectors', { 
-        type: 'geojson', 
-        data: { type: 'FeatureCollection', features: [] } 
-      });
-      map.current.addLayer({ 
-        id: 'flight-vectors-layer', 
-        type: 'line', 
-        source: 'flight-vectors', 
-        paint: { 
-          'line-color': '#38bdf8', 
-          'line-width': 2, 
-          'line-opacity': 0.85 // Bright predictive path
-        } 
-      });
 
       // --- 4. HTML DOM METAR DOTS ---
       const fetchMETARs = async () => {
@@ -234,6 +218,16 @@ export default function MapWidget() {
               const speed = ac.gs || 0;
               const scale = speed > 300 ? 1.1 : speed > 150 ? 0.9 : 0.75;
 
+              // --- Process Predictive Vectors ---
+              if (speed > 10) { 
+                const projected = getProjectedCoordinate(ac.lon, ac.lat, heading, speed, 1.5);
+                vectorFeatures.push({
+                  type: 'Feature',
+                  geometry: { type: 'LineString', coordinates: [[ac.lon, ac.lat], projected] },
+                  properties: {}
+                });
+              }
+
               // --- Process Historical Trails ---
               if (!flightTrails.current[ac.hex]) flightTrails.current[ac.hex] = [];
               const trail = flightTrails.current[ac.hex];
@@ -242,27 +236,18 @@ export default function MapWidget() {
                 trail.push([ac.lon, ac.lat]);
               } else {
                 const lastPos = trail[trail.length - 1];
-                // Only log a new breadcrumb if the plane physically moved
                 if (lastPos[0] !== ac.lon || lastPos[1] !== ac.lat) {
                   trail.push([ac.lon, ac.lat]);
                 }
               }
 
-              if (trail.length > 45) trail.shift(); // Keep last 45 breadcrumbs
+              if (trail.length > 45) trail.shift(); 
 
               if (trail.length > 1) {
                 trailFeatures.push({ 
                   type: 'Feature', 
-                  geometry: { type: 'LineString', coordinates: trail } 
-                });
-              }
-
-              // --- Process Predictive Vectors ---
-              if (speed > 10) { // Only draw vector if the aircraft is actually moving
-                const projected = getProjectedCoordinate(ac.lon, ac.lat, heading, speed, 1.5); // 1.5 minutes ahead
-                vectorFeatures.push({
-                  type: 'Feature',
-                  geometry: { type: 'LineString', coordinates: [[ac.lon, ac.lat], projected] }
+                  geometry: { type: 'LineString', coordinates: trail },
+                  properties: {}
                 });
               }
 
@@ -275,7 +260,6 @@ export default function MapWidget() {
                 icon.id = `icon-${ac.hex}`;
                 icon.innerHTML = `<svg width="28" height="28" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path d="M16 2 L26 28 L16 22 L6 28 Z" fill="#38bdf8" stroke="#0f172a" stroke-width="1.5"/></svg>`;
                 icon.style.transform = `rotate(${heading}deg) scale(${scale})`;
-                // We keep the CSS transition ONLY for rotation, so it spins smoothly when turning
                 icon.style.transition = 'transform 0.5s ease-out';
 
                 const label = document.createElement('div');
@@ -293,7 +277,6 @@ export default function MapWidget() {
               } else {
                 const marker = planeMarkers.current[ac.hex];
                 
-                // Instantly snap to new coordinates
                 marker.setLngLat([ac.lon, ac.lat]);
 
                 const el = marker.getElement();
@@ -315,7 +298,7 @@ export default function MapWidget() {
             }
           });
 
-          // Push updated trail and vector arrays to MapLibre WebGL canvas
+          // Update MapLibre GeoJSON Sources
           if (map.current.getSource('flight-trails')) {
             map.current.getSource('flight-trails').setData({ type: 'FeatureCollection', features: trailFeatures });
           }
