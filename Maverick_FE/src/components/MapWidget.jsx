@@ -10,20 +10,6 @@ const homeLat = parseFloat(rawLat.toString().replace(/['"]/g, ''));
 const HOME_COORDS = [homeLng, homeLat];
 const DEFAULT_ZOOM = 10;
 
-// HELPER: Strictly parses all inputs to floats to prevent GeoJSON corruption
-const getProjectedCoordinate = (lon, lat, track, gsKts, minutes = 1.5) => {
-  const l = parseFloat(lon);
-  const t = parseFloat(lat);
-  const distDegrees = (parseFloat(gsKts) / 60) * (minutes / 60);
-  const brngRad = parseFloat(track) * (Math.PI / 180);
-  const latRad = t * (Math.PI / 180);
-
-  const deltaLat = distDegrees * Math.cos(brngRad);
-  const deltaLon = (distDegrees * Math.sin(brngRad)) / Math.cos(latRad);
-
-  return [l + deltaLon, t + deltaLat];
-};
-
 export default function MapWidget() {
   const mapContainer = useRef(null);
   const map = useRef(null);
@@ -85,24 +71,20 @@ export default function MapWidget() {
       homeEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;
       new maplibregl.Marker({ element: homeEl }).setLngLat(HOME_COORDS).addTo(map.current);
 
-      // --- 2. ADD FLIGHT GEOJSON LAYERS FIRST (Sync) ---
+      // --- 2. DIAGNOSTIC PINK TRAILS (WebGL) ---
       map.current.addSource('flight-trails', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
       map.current.addLayer({ 
         id: 'flight-trails-layer', 
         type: 'line', 
         source: 'flight-trails', 
-        paint: { 'line-color': '#38bdf8', 'line-width': 2, 'line-opacity': 0.6 } 
+        paint: { 
+          'line-color': '#f43f5e', // Neon Pink for high visibility
+          'line-width': 4,         // Extra thick
+          'line-opacity': 1.0 
+        } 
       });
 
-      map.current.addSource('flight-vectors', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-      map.current.addLayer({ 
-        id: 'flight-vectors-layer', 
-        type: 'line', 
-        source: 'flight-vectors', 
-        paint: { 'line-color': '#0ea5e9', 'line-width': 2.5, 'line-opacity': 0.9 } 
-      });
-
-      // --- 3. WEATHER RADAR & LIGHTNING (Async - Slipped UNDER trails) ---
+      // --- 3. WEATHER RADAR & LIGHTNING ---
       fetch('https://api.rainviewer.com/public/weather-maps.json')
         .then(res => res.json())
         .then(rvData => {
@@ -146,14 +128,12 @@ export default function MapWidget() {
           const airports = 'KSFB,KMCO,KORL,KLEE,KISM,KDAB,KTIX,KDED';
           const targetUrl = encodeURIComponent(`https://aviationweather.gov/api/data/metar?ids=${airports}&format=json`);
           const res = await fetch(`https://api.allorigins.win/raw?url=${targetUrl}`);
-          
           if (!res.ok) return;
-          const data = await res.json();
           
+          const data = await res.json();
           data.forEach(obs => {
             if (obs.lat != null && obs.lon != null) {
               const cat = obs.fltCat || 'VFR';
-              
               let color = '#64748b'; 
               if (cat === 'VFR') color = '#22c55e'; 
               else if (cat === 'MVFR') color = '#3b82f6'; 
@@ -179,7 +159,6 @@ export default function MapWidget() {
                 metarMarkers.current[obs.icaoId] = new maplibregl.Marker({ element: el })
                   .setLngLat([obs.lon, obs.lat])
                   .addTo(map.current);
-                  
               } else {
                 const el = metarMarkers.current[obs.icaoId].getElement();
                 const dot = el.querySelector(`#metar-dot-${obs.icaoId}`);
@@ -187,30 +166,25 @@ export default function MapWidget() {
               }
             }
           });
-        } catch (err) {
-          console.error("METAR fetch failed:", err);
-        }
+        } catch (err) { }
       };
 
       fetchMETARs();
       metarInterval = setInterval(fetchMETARs, 300000); 
 
-      // --- 5. AIRCRAFT POLLING ---
+      // --- 5. AIRCRAFT POLLING (DOM VECTORS) ---
       const updateFlights = async () => {
         try {
           const res = await fetch(`http://${window.location.hostname}:8085/data/aircraft.json`);
           if (!res.ok) return;
           const data = await res.json();
           const currentHexes = new Set();
-          
           const trailFeatures = [];
-          const vectorFeatures = [];
 
           data.aircraft.forEach(ac => {
             if (ac.lat != null && ac.lon != null) {
               currentHexes.add(ac.hex);
 
-              // STRICT PARSING FOR GEOMETRY ENGINE
               const currentLon = parseFloat(ac.lon);
               const currentLat = parseFloat(ac.lat);
               const heading = parseFloat(ac.track) || 0;
@@ -219,18 +193,11 @@ export default function MapWidget() {
               const flightName = ac.flight ? ac.flight.trim() : ac.r || ac.hex;
               const altitude = ac.alt_baro || 0;
               const scale = speed > 300 ? 1.1 : speed > 150 ? 0.9 : 0.75;
+              
+              // Scale the velocity line length visually (150 kts = 30px line)
+              const vectorLength = speed > 10 ? speed * 0.2 : 0; 
 
-              // --- Process Predictive Vectors ---
-              if (speed > 10) { 
-                const projected = getProjectedCoordinate(currentLon, currentLat, heading, speed, 1.5);
-                vectorFeatures.push({
-                  type: 'Feature',
-                  geometry: { type: 'LineString', coordinates: [[currentLon, currentLat], projected] },
-                  properties: {}
-                });
-              }
-
-              // --- Process Historical Trails ---
+              // --- Process Historical Trails (Pink Diagnostic) ---
               if (!flightTrails.current[ac.hex]) flightTrails.current[ac.hex] = [];
               const trail = flightTrails.current[ac.hex];
               
@@ -244,32 +211,43 @@ export default function MapWidget() {
               }
 
               if (trail.length > 45) trail.shift(); 
-
               if (trail.length > 1) {
-                trailFeatures.push({ 
-                  type: 'Feature', 
-                  geometry: { type: 'LineString', coordinates: trail },
-                  properties: {}
-                });
+                trailFeatures.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: trail }, properties: {} });
               }
 
-              // --- Process HTML DOM Markers (Instant Snap) ---
+              // --- Process HTML DOM Markers & Vectors ---
               if (!planeMarkers.current[ac.hex]) {
                 const el = document.createElement('div');
                 el.className = 'relative flex items-center justify-center pointer-events-none z-30';
                 
+                // Rotator Container (Spins the vector line AND the icon together)
+                const rotator = document.createElement('div');
+                rotator.id = `rotator-${ac.hex}`;
+                rotator.className = 'relative flex items-center justify-center';
+                rotator.style.transform = `rotate(${heading}deg) scale(${scale})`;
+                rotator.style.transition = 'transform 0.5s ease-out';
+
+                // DOM Velocity Vector (Points out of the nose)
+                const vector = document.createElement('div');
+                vector.id = `vector-${ac.hex}`;
+                vector.className = 'absolute bottom-1/2 left-1/2 w-[2px] bg-sky-400 origin-bottom opacity-80';
+                vector.style.height = `${vectorLength}px`;
+                vector.style.transform = 'translateX(-50%)'; // Centers the line horizontally
+                vector.style.transition = 'height 0.5s ease-out';
+
+                // Aircraft Icon
                 const icon = document.createElement('div');
-                icon.id = `icon-${ac.hex}`;
                 icon.innerHTML = `<svg width="28" height="28" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path d="M16 2 L26 28 L16 22 L6 28 Z" fill="#38bdf8" stroke="#0f172a" stroke-width="1.5"/></svg>`;
-                icon.style.transform = `rotate(${heading}deg) scale(${scale})`;
-                icon.style.transition = 'transform 0.5s ease-out';
+                icon.className = 'relative z-10'; // Ensures chevron stays above its own vector line
 
                 const label = document.createElement('div');
                 label.id = `label-${ac.hex}`;
                 label.className = 'absolute left-6 text-[10px] leading-tight text-white font-semibold bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-700 whitespace-nowrap';
                 label.innerHTML = `${flightName}<br/><span class="text-emerald-400">${altitude} ft</span>`;
 
-                el.appendChild(icon);
+                rotator.appendChild(vector);
+                rotator.appendChild(icon);
+                el.appendChild(rotator);
                 el.appendChild(label);
 
                 planeMarkers.current[ac.hex] = new maplibregl.Marker({ element: el })
@@ -278,12 +256,14 @@ export default function MapWidget() {
 
               } else {
                 const marker = planeMarkers.current[ac.hex];
-                
                 marker.setLngLat([currentLon, currentLat]);
 
                 const el = marker.getElement();
-                const icon = el.querySelector(`#icon-${ac.hex}`);
-                if (icon) icon.style.transform = `rotate(${heading}deg) scale(${scale})`;
+                const rotator = el.querySelector(`#rotator-${ac.hex}`);
+                if (rotator) rotator.style.transform = `rotate(${heading}deg) scale(${scale})`;
+
+                const vector = el.querySelector(`#vector-${ac.hex}`);
+                if (vector) vector.style.height = `${vectorLength}px`;
 
                 const label = el.querySelector(`#label-${ac.hex}`);
                 if (label) label.innerHTML = `${flightName}<br/><span class="text-emerald-400">${altitude} ft</span>`;
@@ -300,17 +280,12 @@ export default function MapWidget() {
             }
           });
 
-          // Update MapLibre GeoJSON Sources
+          // Update MapLibre WebGL Trails
           if (map.current.getSource('flight-trails')) {
             map.current.getSource('flight-trails').setData({ type: 'FeatureCollection', features: trailFeatures });
           }
-          if (map.current.getSource('flight-vectors')) {
-            map.current.getSource('flight-vectors').setData({ type: 'FeatureCollection', features: vectorFeatures });
-          }
 
-        } catch (err) { 
-          // Silently fail if SDR feed is temporarily down
-        }
+        } catch (err) { }
       };
 
       updateFlights();
