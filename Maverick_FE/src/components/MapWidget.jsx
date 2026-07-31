@@ -73,19 +73,19 @@ export default function MapWidget() {
       homeEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;
       new maplibregl.Marker({ element: homeEl }).setLngLat(HOME_COORDS).addTo(map.current);
 
-      // --- 2. WEATHER RADAR & LIGHTNING ---
+// --- 2. WEATHER RADAR & LIGHTNING ---
       fetch('https://api.rainviewer.com/public/weather-maps.json')
         .then(res => res.json())
         .then(rvData => {
           const latestPath = rvData.radar.past[rvData.radar.past.length - 1].path;
           map.current.addSource('rainviewer', { 
             type: 'raster', 
-            // 1. Upgraded to 512px HD tiles
-            // 2. Changed the /2/ to a /4/ to use the Green/Yellow/Red Wunderground color scheme
-            tiles: [`https://tilecache.rainviewer.com${latestPath}/512/{z}/{x}/{y}/4/1_1.png`], 
-            tileSize: 512,
-            // 3. Unlocked high-resolution zoom levels
-            maxzoom: 8 
+            // The /4/ gives you the Wunderground green/yellow/red color scheme
+            // The 1_1 at the end tells RainViewer to apply smoothing on their end
+            tiles: [`https://tilecache.rainviewer.com${latestPath}/256/{z}/{x}/{y}/4/1_1.png`], 
+            tileSize: 256,
+            // CRITICAL: Stop asking RainViewer for tiles past Zoom 7 to prevent the error
+            maxzoom: 7 
           });
           map.current.addLayer({ 
             id: 'rainviewer-layer', 
@@ -93,10 +93,26 @@ export default function MapWidget() {
             source: 'rainviewer', 
             paint: { 
               'raster-opacity': 0.65,
-              'raster-resampling': 'linear' // Forces smooth rendering across zoom levels
+              // CRITICAL: Forces your GPU to stretch the z7 tiles smoothly instead of making them blocky
+              'raster-resampling': 'linear' 
             } 
           });
         }).catch(err => console.error("RainViewer failed:", err));
+
+      const tomorrowKey = import.meta.env.VITE_TOMORROW_API_KEY;
+      if (tomorrowKey) {
+        map.current.addSource('tomorrow-lightning', { 
+          type: 'raster', 
+          tiles: [`https://api.tomorrow.io/v4/map/tile/{z}/{x}/{y}/lightning/now.png?apikey=${tomorrowKey}`], 
+          tileSize: 256 
+        });
+        map.current.addLayer({ 
+          id: 'tomorrow-lightning-layer', 
+          type: 'raster', 
+          source: 'tomorrow-lightning', 
+          paint: { 'raster-opacity': 0.8 } 
+        });
+      }
 
       const tomorrowKey = import.meta.env.VITE_TOMORROW_API_KEY;
       if (tomorrowKey) {
