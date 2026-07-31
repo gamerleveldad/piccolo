@@ -13,7 +13,9 @@ const DEFAULT_ZOOM = 10;
 export default function MapWidget() {
   const mapContainer = useRef(null);
   const map = useRef(null);
-  const flightTrails = useRef({});
+  
+  // Store references to the active HTML markers so we can move them smoothly
+  const planeMarkers = useRef({});
 
   const handleRecenter = () => {
     if (map.current) {
@@ -30,7 +32,6 @@ export default function MapWidget() {
       zoom: DEFAULT_ZOOM,
       style: {
         version: 8,
-        glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
         sources: {
           'carto-dark': {
             type: 'raster',
@@ -68,145 +69,113 @@ export default function MapWidget() {
       homeEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;
       new maplibregl.Marker({ element: homeEl }).setLngLat(HOME_COORDS).addTo(map.current);
 
-      // --- 2. NON-BLOCKING WEATHER & RADAR ---
+      // --- 2. WEATHER RADAR ---
       fetch('https://api.rainviewer.com/public/weather-maps.json')
         .then(res => res.json())
         .then(rvData => {
           const latestPath = rvData.radar.past[rvData.radar.past.length - 1].path;
-          map.current.addSource('rainviewer', { type: 'raster', tiles: [`https://tilecache.rainviewer.com${latestPath}/256/{z}/{x}/{y}/2/1_1.png`], tileSize: 256, maxzoom: 7 });
-          map.current.addLayer({ id: 'rainviewer-layer', type: 'raster', source: 'rainviewer', paint: { 'raster-opacity': 0.65 } }, 'carto-dark-layer');
+          map.current.addSource('rainviewer', { 
+            type: 'raster', 
+            tiles: [`https://tilecache.rainviewer.com${latestPath}/256/{z}/{x}/{y}/2/1_1.png`], 
+            tileSize: 256,
+            // The maxzoom tells MapLibre to stretch Zoom 7 images if we zoom in closer
+            maxzoom: 7 
+          });
+          map.current.addLayer({ 
+            id: 'rainviewer-layer', 
+            type: 'raster', 
+            source: 'rainviewer', 
+            paint: { 'raster-opacity': 0.65 } 
+          });
         }).catch(err => console.error("RainViewer failed:", err));
 
-      const tomorrowKey = import.meta.env.VITE_TOMORROW_API_KEY;
-      if (tomorrowKey) {
-        map.current.addSource('tomorrow-lightning', { type: 'raster', tiles: [`https://api.tomorrow.io/v4/map/tile/{z}/{x}/{y}/lightning/now.png?apikey=${tomorrowKey}`], tileSize: 256 });
-        map.current.addLayer({ id: 'tomorrow-lightning-layer', type: 'raster', source: 'tomorrow-lightning', paint: { 'raster-opacity': 0.8 } });
-      }
 
-      const updateNWSAlerts = () => {
-        fetch('https://api.weather.gov/alerts/active?area=FL')
-          .then(res => res.json())
-          .then(data => {
-            const severeFeatures = data.features?.filter(f => f.geometry !== null && ['Severe Thunderstorm Warning', 'Tornado Warning', 'Flash Flood Warning', 'Special Weather Statement'].includes(f.properties.event)) || [];
-            data.features = severeFeatures;
-            if (map.current.getSource('nws-alerts')) {
-              map.current.getSource('nws-alerts').setData(data);
-            } else {
-              map.current.addSource('nws-alerts', { type: 'geojson', data });
-              map.current.addLayer({ id: 'nws-alerts-fill', type: 'fill', source: 'nws-alerts', paint: { 'fill-color': ['match', ['get', 'event'], 'Tornado Warning', '#ef4444', 'Severe Thunderstorm Warning', '#eab308', 'Flash Flood Warning', '#22c55e', 'Special Weather Statement', '#94a3b8', '#ffffff'], 'fill-opacity': 0.2 } });
-              map.current.addLayer({ id: 'nws-alerts-outline', type: 'line', source: 'nws-alerts', paint: { 'line-color': ['match', ['get', 'event'], 'Tornado Warning', '#ef4444', 'Severe Thunderstorm Warning', '#eab308', 'Flash Flood Warning', '#22c55e', 'Special Weather Statement', '#94a3b8', '#ffffff'], 'line-width': 2, 'line-dasharray': [2, 2] } });
-            }
-          }).catch(err => console.error("NWS alerts failed:", err));
-      };
-      updateNWSAlerts();
-      setInterval(updateNWSAlerts, 120000);
-
-      // --- 3. AIRCRAFT SVG ICON LOAD ---
-      const chevronSvg = `<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path d="M16 2 L26 28 L16 22 L6 28 Z" fill="#38bdf8" stroke="#0f172a" stroke-width="2"/></svg>`;
-      const img = new Image(32, 32);
-      img.onload = () => { 
-        if (!map.current.hasImage('aircraft-chevron')) {
-          map.current.addImage('aircraft-chevron', img); 
-        }
-      };
-      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(chevronSvg);
-
-      // --- 4. AIRCRAFT SOURCES & LAYERS ---
-      map.current.addSource('flight-trails', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-      map.current.addLayer({ 
-        id: 'flight-trails-layer', 
-        type: 'line', 
-        source: 'flight-trails', 
-        paint: { 'line-color': '#38bdf8', 'line-width': 1.5, 'line-opacity': 0.4 } 
-      });
-
-      map.current.addSource('flights', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-      
-      map.current.addLayer({
-        id: 'flights-layer', 
-        type: 'symbol', 
-        source: 'flights',
-        layout: {
-          'icon-image': 'aircraft-chevron',
-          'icon-rotate': ['coalesce', ['get', 'track'], 0],
-          'icon-allow-overlap': true,
-          'icon-ignore-placement': true,
-          'icon-size': ['interpolate', ['linear'], ['coalesce', ['get', 'gs'], 0], 0, 0.3, 400, 1.0],
-          'text-field': ['concat', ['get', 'flight'], '\n', ['get', 'alt_baro'], ' ft'],
-          'text-font': ['Open Sans Regular'],
-          'text-size': 11,
-          'text-offset': [1.2, 0], 
-          'text-anchor': 'left',
-          'text-allow-overlap': false,
-          'text-optional': true 
-        },
-        paint: { 'text-color': '#f8fafc', 'text-halo-color': '#0f172a', 'text-halo-width': 2 }
-      });
-
-      // --- 5. FLIGHT POLLING LOOP ---
+      // --- 3. HTML DOM AIRCRAFT POLLING ---
       const updateFlights = async () => {
         try {
-          const res = await fetch(`http://192.168.4.55:8085/data/aircraft.json`);
+          const res = await fetch(`http://${window.location.hostname}:8085/data/aircraft.json`);
           if (!res.ok) return;
           const data = await res.json();
-
           const activeHexes = new Set();
-          const pointFeatures = [];
-          const trailFeatures = [];
 
           data.aircraft.forEach(ac => {
             if (ac.lat != null && ac.lon != null) {
               activeHexes.add(ac.hex);
 
-              if (!flightTrails.current[ac.hex]) flightTrails.current[ac.hex] = [];
-              const trail = flightTrails.current[ac.hex];
+              // Data Formatting
+              const flightName = ac.flight ? ac.flight.trim() : ac.r || ac.hex;
+              const altitude = ac.alt_baro || 0;
+              const heading = ac.track || 0;
+              const speed = ac.gs || 0;
               
-              if (trail.length === 0) {
-                trail.push([ac.lon, ac.lat]);
+              // Scale the chevron slightly based on speed
+              const scale = speed > 300 ? 1.1 : speed > 150 ? 0.9 : 0.75;
+
+              if (!planeMarkers.current[ac.hex]) {
+                // CREATE NEW AIRCRAFT MARKER
+                const el = document.createElement('div');
+                el.className = 'relative flex items-center justify-center pointer-events-none transition-all duration-1000 ease-linear';
+                
+                // The Aircraft Chevron
+                const icon = document.createElement('div');
+                icon.id = `icon-${ac.hex}`;
+                icon.innerHTML = `<svg width="28" height="28" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path d="M16 2 L26 28 L16 22 L6 28 Z" fill="#38bdf8" stroke="#0f172a" stroke-width="1.5"/></svg>`;
+                icon.style.transform = `rotate(${heading}deg) scale(${scale})`;
+                icon.style.transition = 'transform 0.5s ease-out';
+
+                // The Aviation Data Block (Flight Name & Altitude)
+                const label = document.createElement('div');
+                label.id = `label-${ac.hex}`;
+                label.className = 'absolute left-6 text-[10px] leading-tight text-white font-semibold bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-700 whitespace-nowrap z-10';
+                label.innerHTML = `${flightName}<br/><span class="text-emerald-400">${altitude} ft</span>`;
+
+                el.appendChild(icon);
+                el.appendChild(label);
+
+                // Add to MapLibre Canvas
+                const marker = new maplibregl.Marker({ element: el })
+                  .setLngLat([ac.lon, ac.lat])
+                  .addTo(map.current);
+                
+                planeMarkers.current[ac.hex] = marker;
+
               } else {
-                const lastPos = trail[trail.length - 1];
-                if (lastPos[0] !== ac.lon || lastPos[1] !== ac.lat) {
-                  trail.push([ac.lon, ac.lat]);
-                }
-              }
+                // UPDATE EXISTING AIRCRAFT MARKER
+                const marker = planeMarkers.current[ac.hex];
+                
+                // Update Coordinates (The CSS transition handles the smooth gliding)
+                marker.setLngLat([ac.lon, ac.lat]);
 
-              if (trail.length > 60) trail.shift();
+                // Update Rotation & Label
+                const el = marker.getElement();
+                const icon = el.querySelector(`#icon-${ac.hex}`);
+                if (icon) icon.style.transform = `rotate(${heading}deg) scale(${scale})`;
 
-              pointFeatures.push({
-                type: 'Feature',
-                geometry: { type: 'Point', coordinates: [ac.lon, ac.lat] },
-                properties: {
-                  hex: ac.hex,
-                  flight: ac.flight ? ac.flight.trim() : ac.r || 'N/A',
-                  alt_baro: ac.alt_baro != null ? ac.alt_baro.toString() : '0', 
-                  gs: ac.gs || 0,
-                  track: ac.track || 0
-                }
-              });
-
-              if (trail.length > 1) {
-                trailFeatures.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: trail } });
+                const label = el.querySelector(`#label-${ac.hex}`);
+                if (label) label.innerHTML = `${flightName}<br/><span class="text-emerald-400">${altitude} ft</span>`;
               }
             }
           });
 
-          Object.keys(flightTrails.current).forEach(hex => {
-            if (!activeHexes.has(hex)) delete flightTrails.current[hex];
+          // Cleanup aircraft that flew out of SDR range
+          Object.keys(planeMarkers.current).forEach(hex => {
+            if (!activeHexes.has(hex)) {
+              planeMarkers.current[hex].remove();
+              delete planeMarkers.current[hex];
+            }
           });
 
-          if (map.current && map.current.getSource('flights')) {
-            map.current.getSource('flights').setData({ type: 'FeatureCollection', features: pointFeatures });
-            map.current.getSource('flight-trails').setData({ type: 'FeatureCollection', features: trailFeatures });
-          }
         } catch (err) { 
           console.error("Flight poll failed:", err); 
         }
       };
 
+      // Fire immediately, then loop every second
       updateFlights();
       flightInterval = setInterval(updateFlights, 1000);
     });
 
+    // React unmount cleanup
     return () => {
       if (flightInterval) clearInterval(flightInterval);
       if (map.current) {
