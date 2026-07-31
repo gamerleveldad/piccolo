@@ -14,8 +14,10 @@ export default function MapWidget() {
   const mapContainer = useRef(null);
   const map = useRef(null);
   
+  // Marker State Tracking
   const planeMarkers = useRef({});
   const activeFlights = useRef({});
+  const metarMarkers = useRef({});
   const animationFrame = useRef(null);
 
   const handleRecenter = () => {
@@ -33,7 +35,6 @@ export default function MapWidget() {
       zoom: DEFAULT_ZOOM,
       style: {
         version: 8,
-        glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
         sources: {
           'carto-dark': {
             type: 'raster',
@@ -68,81 +69,11 @@ export default function MapWidget() {
       
       // --- 1. HOME ICON MARKER ---
       const homeEl = document.createElement('div');
-      homeEl.className = 'flex items-center justify-center w-7 h-7 bg-blue-600 border-2 border-white rounded-full shadow-lg text-white';
+      homeEl.className = 'flex items-center justify-center w-7 h-7 bg-blue-600 border-2 border-white rounded-full shadow-lg text-white z-20';
       homeEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;
       new maplibregl.Marker({ element: homeEl }).setLngLat(HOME_COORDS).addTo(map.current);
 
-      // --- 2. LOCAL METAR FLIGHT CATEGORIES (Created First) ---
-      map.current.addSource('metars', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-
-      map.current.addLayer({
-        id: 'metars-dots',
-        type: 'circle',
-        source: 'metars',
-        paint: {
-          'circle-radius': 5,
-          'circle-color': [
-            'match', ['get', 'fltcat'],
-            'VFR', '#22c55e', // Green
-            'MVFR', '#3b82f6', // Blue
-            'IFR', '#ef4444', // Red
-            'LIFR', '#d946ef', // Magenta
-            '#64748b' // Default Slate (Missing Data)
-          ],
-          'circle-stroke-width': 1.5,
-          'circle-stroke-color': '#0f172a'
-        }
-      });
-
-      map.current.addLayer({
-        id: 'metars-labels',
-        type: 'symbol',
-        source: 'metars',
-        layout: {
-          'text-field': ['get', 'icaoId'],
-          'text-font': ['Open Sans Regular'],
-          'text-size': 11,
-          'text-offset': [0.8, 0],
-          'text-anchor': 'left'
-        },
-        paint: {
-          'text-color': '#f8fafc',
-          'text-halo-color': '#0f172a',
-          'text-halo-width': 2
-        }
-      });
-
-      const fetchMETARs = async () => {
-        try {
-          const airports = 'KSFB,KMCO,KORL,KLEE,KISM,KDAB,KTIX,KDED';
-          const targetUrl = encodeURIComponent(`https://aviationweather.gov/api/data/metar?ids=${airports}&format=json`);
-          const res = await fetch(`https://corsproxy.io/?${targetUrl}`);
-          
-          if (!res.ok) return;
-          const data = await res.json();
-          
-          const features = data.map(obs => ({
-            type: 'Feature',
-            geometry: { type: 'Point', coordinates: [obs.lon, obs.lat] },
-            properties: {
-              icaoId: obs.icaoId,
-              // Fixed uppercase C to match the API response exactly
-              fltcat: obs.fltCat || 'VFR' 
-            }
-          }));
-
-          if (map.current.getSource('metars')) {
-            map.current.getSource('metars').setData({ type: 'FeatureCollection', features });
-          }
-        } catch (err) {
-          console.error("METAR fetch failed:", err);
-        }
-      };
-
-      fetchMETARs();
-      metarInterval = setInterval(fetchMETARs, 300000);
-
-      // --- 3. WEATHER RADAR (Async - Pushed under METARs) ---
+      // --- 2. WEATHER RADAR ---
       fetch('https://api.rainviewer.com/public/weather-maps.json')
         .then(res => res.json())
         .then(rvData => {
@@ -158,19 +89,72 @@ export default function MapWidget() {
             type: 'raster', 
             source: 'rainviewer', 
             paint: { 'raster-opacity': 0.65 } 
-          }, 'metars-dots'); // The critical beforeId! Forces radar below the METARs
+          });
         }).catch(err => console.error("RainViewer failed:", err));
 
-      const tomorrowKey = import.meta.env.VITE_TOMORROW_API_KEY;
-      if (tomorrowKey) {
-        map.current.addSource('tomorrow-lightning', { type: 'raster', tiles: [`https://api.tomorrow.io/v4/map/tile/{z}/{x}/{y}/lightning/now.png?apikey=${tomorrowKey}`], tileSize: 256 });
-        map.current.addLayer({ 
-          id: 'tomorrow-lightning-layer', 
-          type: 'raster', 
-          source: 'tomorrow-lightning', 
-          paint: { 'raster-opacity': 0.8 } 
-        }, 'metars-dots'); // Force lightning below the METARs
-      }
+      // --- 3. HTML DOM METAR DOTS ---
+      const fetchMETARs = async () => {
+        try {
+          const airports = 'KSFB,KMCO,KORL,KLEE,KISM,KDAB,KTIX,KDED';
+          const targetUrl = encodeURIComponent(`https://aviationweather.gov/api/data/metar?ids=${airports}&format=json`);
+          
+          // Using AllOrigins to safely bypass Pi-hole blocklists
+          const res = await fetch(`https://api.allorigins.win/raw?url=${targetUrl}`);
+          if (!res.ok) {
+            console.error("METAR Proxy failed with status:", res.status);
+            return;
+          }
+          
+          const data = await res.json();
+          console.log(`Parsed ${data.length} METAR reports.`);
+          
+          data.forEach(obs => {
+            if (obs.lat != null && obs.lon != null) {
+              const cat = obs.fltCat || 'VFR';
+              
+              // Map NOAA categories to FAA colors
+              let color = '#64748b'; // Slate (Missing)
+              if (cat === 'VFR') color = '#22c55e'; // Green
+              else if (cat === 'MVFR') color = '#3b82f6'; // Blue
+              else if (cat === 'IFR') color = '#ef4444'; // Red
+              else if (cat === 'LIFR') color = '#d946ef'; // Magenta
+
+              if (!metarMarkers.current[obs.icaoId]) {
+                // Create New DOM Marker
+                const el = document.createElement('div');
+                el.className = 'flex items-center justify-center pointer-events-none relative z-10';
+
+                const dot = document.createElement('div');
+                dot.id = `metar-dot-${obs.icaoId}`;
+                dot.className = 'w-3.5 h-3.5 rounded-full border-[1.5px] border-slate-900 shadow-md';
+                dot.style.backgroundColor = color;
+
+                const label = document.createElement('div');
+                label.className = 'absolute left-4 text-[10px] font-bold text-slate-100 drop-shadow-md bg-slate-900/60 px-1 rounded';
+                label.innerText = obs.icaoId;
+
+                el.appendChild(dot);
+                el.appendChild(label);
+
+                metarMarkers.current[obs.icaoId] = new maplibregl.Marker({ element: el })
+                  .setLngLat([obs.lon, obs.lat])
+                  .addTo(map.current);
+                  
+              } else {
+                // Update Existing Marker Color
+                const el = metarMarkers.current[obs.icaoId].getElement();
+                const dot = el.querySelector(`#metar-dot-${obs.icaoId}`);
+                if (dot) dot.style.backgroundColor = color;
+              }
+            }
+          });
+        } catch (err) {
+          console.error("METAR fetch failed:", err);
+        }
+      };
+
+      fetchMETARs();
+      metarInterval = setInterval(fetchMETARs, 300000); // 5 minutes
 
       // --- 4. HTML DOM AIRCRAFT & SMOOTH ANIMATION ---
       const animatePlanes = (timestamp) => {
@@ -216,7 +200,7 @@ export default function MapWidget() {
 
               if (!planeMarkers.current[ac.hex]) {
                 const el = document.createElement('div');
-                el.className = 'relative flex items-center justify-center pointer-events-none';
+                el.className = 'relative flex items-center justify-center pointer-events-none z-30';
                 
                 const icon = document.createElement('div');
                 icon.id = `icon-${ac.hex}`;
@@ -226,7 +210,7 @@ export default function MapWidget() {
 
                 const label = document.createElement('div');
                 label.id = `label-${ac.hex}`;
-                label.className = 'absolute left-6 text-[10px] leading-tight text-white font-semibold bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-700 whitespace-nowrap z-10';
+                label.className = 'absolute left-6 text-[10px] leading-tight text-white font-semibold bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-700 whitespace-nowrap';
                 label.innerHTML = `${flightName}<br/><span class="text-emerald-400">${altitude} ft</span>`;
 
                 el.appendChild(icon);
@@ -276,7 +260,6 @@ export default function MapWidget() {
               delete activeFlights.current[hex];
             }
           });
-
         } catch (err) { 
           // Silently fail if SDR feed is temporarily down
         }
