@@ -11,11 +11,12 @@ const HOME_COORDS = [homeLng, homeLat];
 const DEFAULT_ZOOM = 10;
 
 export default function MapWidget() {
+  // All React Hooks MUST live inside the component function
   const mapContainer = useRef(null);
   const map = useRef(null);
-  
-  // Store references to the active HTML markers so we can move them smoothly
   const planeMarkers = useRef({});
+  const activeFlights = useRef({});
+  const animationFrame = useRef(null);
 
   const handleRecenter = () => {
     if (map.current) {
@@ -78,7 +79,6 @@ export default function MapWidget() {
             type: 'raster', 
             tiles: [`https://tilecache.rainviewer.com${latestPath}/256/{z}/{x}/{y}/2/1_1.png`], 
             tileSize: 256,
-            // The maxzoom tells MapLibre to stretch Zoom 7 images if we zoom in closer
             maxzoom: 7 
           });
           map.current.addLayer({ 
@@ -89,41 +89,61 @@ export default function MapWidget() {
           });
         }).catch(err => console.error("RainViewer failed:", err));
 
+      // --- 3. HTML DOM AIRCRAFT & SMOOTH ANIMATION ---
+      const animatePlanes = (timestamp) => {
+        Object.keys(activeFlights.current).forEach(hex => {
+          const flight = activeFlights.current[hex];
+          const marker = planeMarkers.current[hex];
+          
+          if (marker && flight.isAnimating) {
+            // Calculate how much of the 1000ms polling interval has passed
+            const elapsed = timestamp - flight.lastUpdate;
+            const progress = Math.min(elapsed / 1000, 1.0); 
+            
+            // Linear interpolation (Lerp)
+            const currentLng = flight.startLng + (flight.targetLng - flight.startLng) * progress;
+            const currentLat = flight.startLat + (flight.targetLat - flight.startLat) * progress;
+            
+            marker.setLngLat([currentLng, currentLat]);
 
-      // --- 3. HTML DOM AIRCRAFT POLLING ---
+            if (progress === 1.0) {
+              flight.isAnimating = false;
+            }
+          }
+        });
+        
+        animationFrame.current = requestAnimationFrame(animatePlanes);
+      };
+
       const updateFlights = async () => {
         try {
           const res = await fetch(`http://${window.location.hostname}:8085/data/aircraft.json`);
           if (!res.ok) return;
           const data = await res.json();
-          const activeHexes = new Set();
+          const currentHexes = new Set();
+          const now = performance.now();
 
           data.aircraft.forEach(ac => {
             if (ac.lat != null && ac.lon != null) {
-              activeHexes.add(ac.hex);
+              currentHexes.add(ac.hex);
 
-              // Data Formatting
               const flightName = ac.flight ? ac.flight.trim() : ac.r || ac.hex;
               const altitude = ac.alt_baro || 0;
               const heading = ac.track || 0;
               const speed = ac.gs || 0;
-              
-              // Scale the chevron slightly based on speed
               const scale = speed > 300 ? 1.1 : speed > 150 ? 0.9 : 0.75;
 
               if (!planeMarkers.current[ac.hex]) {
-                // CREATE NEW AIRCRAFT MARKER
+                // CREATE NEW AIRCRAFT
                 const el = document.createElement('div');
-                el.className = 'relative flex items-center justify-center pointer-events-none transition-all duration-1000 ease-linear';
+                el.className = 'relative flex items-center justify-center pointer-events-none';
                 
-                // The Aircraft Chevron
                 const icon = document.createElement('div');
                 icon.id = `icon-${ac.hex}`;
                 icon.innerHTML = `<svg width="28" height="28" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path d="M16 2 L26 28 L16 22 L6 28 Z" fill="#38bdf8" stroke="#0f172a" stroke-width="1.5"/></svg>`;
                 icon.style.transform = `rotate(${heading}deg) scale(${scale})`;
                 icon.style.transition = 'transform 0.5s ease-out';
 
-                // The Aviation Data Block (Flight Name & Altitude)
                 const label = document.createElement('div');
                 label.id = `label-${ac.hex}`;
                 label.className = 'absolute left-6 text-[10px] leading-tight text-white font-semibold bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-700 whitespace-nowrap z-10';
@@ -132,21 +152,35 @@ export default function MapWidget() {
                 el.appendChild(icon);
                 el.appendChild(label);
 
-                // Add to MapLibre Canvas
                 const marker = new maplibregl.Marker({ element: el })
                   .setLngLat([ac.lon, ac.lat])
                   .addTo(map.current);
                 
                 planeMarkers.current[ac.hex] = marker;
+                
+                // Initialize animation state
+                activeFlights.current[ac.hex] = {
+                  startLng: ac.lon,
+                  startLat: ac.lat,
+                  targetLng: ac.lon,
+                  targetLat: ac.lat,
+                  lastUpdate: now,
+                  isAnimating: false
+                };
 
               } else {
-                // UPDATE EXISTING AIRCRAFT MARKER
+                // UPDATE EXISTING AIRCRAFT
+                const flight = activeFlights.current[ac.hex];
                 const marker = planeMarkers.current[ac.hex];
-                
-                // Update Coordinates (The CSS transition handles the smooth gliding)
-                marker.setLngLat([ac.lon, ac.lat]);
+                const currentPos = marker.getLngLat();
 
-                // Update Rotation & Label
+                flight.startLng = currentPos.lng;
+                flight.startLat = currentPos.lat;
+                flight.targetLng = ac.lon;
+                flight.targetLat = ac.lat;
+                flight.lastUpdate = now;
+                flight.isAnimating = true;
+
                 const el = marker.getElement();
                 const icon = el.querySelector(`#icon-${ac.hex}`);
                 if (icon) icon.style.transform = `rotate(${heading}deg) scale(${scale})`;
@@ -159,9 +193,10 @@ export default function MapWidget() {
 
           // Cleanup aircraft that flew out of SDR range
           Object.keys(planeMarkers.current).forEach(hex => {
-            if (!activeHexes.has(hex)) {
+            if (!currentHexes.has(hex)) {
               planeMarkers.current[hex].remove();
               delete planeMarkers.current[hex];
+              delete activeFlights.current[hex];
             }
           });
 
@@ -170,14 +205,16 @@ export default function MapWidget() {
         }
       };
 
-      // Fire immediately, then loop every second
+      // Start the loops
       updateFlights();
       flightInterval = setInterval(updateFlights, 1000);
+      animationFrame.current = requestAnimationFrame(animatePlanes);
     });
 
     // React unmount cleanup
     return () => {
       if (flightInterval) clearInterval(flightInterval);
+      if (animationFrame.current) cancelAnimationFrame(animationFrame.current);
       if (map.current) {
         map.current.remove();
         map.current = null;
