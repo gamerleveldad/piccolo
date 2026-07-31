@@ -419,6 +419,9 @@ services:
       - TAR1090_DEFAULTCENTERLAT=${HOME_LATITUDE}
       - TAR1090_DEFAULTCENTERLON=${HOME_LONGITUDE}
       - MLAT_USER=${MLAT_USER:-piccolo_feeder}
+      - ADSBFI_ENABLE=true
+      - ADSBLOL_ENABLE=true
+      - AIRPLANES_LIVE_ENABLE=true
     networks:
       - piccolo_net
 
@@ -434,6 +437,8 @@ services:
       - BEASTHOST=ultrafeeder
       - LAT=${HOME_LATITUDE}
       - LONG=${HOME_LONGITUDE}
+      - ALT=85ft                     # Add this line
+      - ALLOW_MLAT=yes               # Explicitly enable MLAT
       - FEEDER_ID=${PIAWARE_FEEDER_ID}
     networks:
       - piccolo_net
