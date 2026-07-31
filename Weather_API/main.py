@@ -474,3 +474,128 @@ async def get_aviation_weather() -> Dict[str, Any]:
         return {}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+def calc_vapor_pressure_inhg(temp_c: float | None) -> float | None:
+    """Calculates vapor pressure in inHg using the Tetens formula."""
+    if temp_c is None: 
+        return None
+    # Calculate mb first, then convert to inHg
+    mb = 6.11 * (10 ** ((7.5 * temp_c) / (237.3 + temp_c)))
+    return mb * 0.0295301
+
+def calculate_evaporation_gallons(water_temp_c: float | None, dewpoint_c: float | None, wind_ms: float | None, hours: int) -> float:
+    """Calculates pool evaporation in gallons using the Carrier mass transfer equation."""
+    if water_temp_c is None or dewpoint_c is None or wind_ms is None: 
+        return 0.0
+    
+    pw = calc_vapor_pressure_inhg(water_temp_c)
+    pa = calc_vapor_pressure_inhg(dewpoint_c)
+    
+    # If air vapor pressure is higher than water vapor pressure, condensation occurs (no evaporation)
+    if pw is None or pa is None or pw < pa: 
+        return 0.0 
+    
+    wind_mph = ms_to_mph(wind_ms)
+    if wind_mph is None: 
+        wind_mph = 0.0
+        
+    wind_ft_min = wind_mph * 88
+    
+    # Carrier equation for lbs/hr
+    w_lbs_hr = (450 * (pw - pa) * (95 + 0.425 * wind_ft_min)) / 1050
+    gallons_hr = w_lbs_hr / 8.33
+    
+    return round(gallons_hr * hours, 1)
+
+@app.get("/api/weather/pool")
+async def get_pool_evaporation() -> Dict[str, Any]:
+    """
+    Calculates estimated pool evaporation and net water loss/gain 
+    over the last 24, 48, and 72 hours.
+    """
+    now = datetime.now(timezone.utc)
+    start_time = now - timedelta(days=3)
+    start_str = start_time.strftime('%Y-%m-%dT%H:%M:%SZ')
+    
+    # We query the raw data for the last 3 days
+    query = f'''
+    from(bucket: "{INFLUXDB_BUCKET}")
+      |> range(start: {start_str})
+      |> filter(fn: (r) => r["_measurement"] == "weatherflow_obs")
+      |> filter(fn: (r) => r["_field"] == "air_temperature" or r["_field"] == "dew_point" or r["_field"] == "wind_avg" or r["_field"] == "local_daily_rain_accumulation")
+      |> keep(columns: ["_time", "_field", "_value"])
+    '''
+    
+    try:
+        async with get_async_influx_client() as client:
+            tables = await client.query_api().query(query)
+
+        # Initialize lists to hold data for the 3 time windows
+        data = {
+            1: {"temp": [], "dew": [], "wind": [], "rain_maxes": {}},
+            2: {"temp": [], "dew": [], "wind": [], "rain_maxes": {}},
+            3: {"temp": [], "dew": [], "wind": [], "rain_maxes": {}}
+        }
+
+        for table in tables:
+            for record in table.records:
+                rec_time = record.get_time()
+                field = record.get_field()
+                val = record.get_value()
+                
+                if val is None: continue
+                
+                # Determine how many days ago this record was (1, 2, or 3)
+                delta_hours = (now - rec_time).total_seconds() / 3600
+                day_key = rec_time.strftime("%Y-%m-%d")
+
+                # Add data to the appropriate rolling windows
+                windows_to_update = []
+                if delta_hours <= 24: windows_to_update.extend([1, 2, 3])
+                elif delta_hours <= 48: windows_to_update.extend([2, 3])
+                elif delta_hours <= 72: windows_to_update.append(3)
+
+                for w in windows_to_update:
+                    if field == "air_temperature": data[w]["temp"].append(val)
+                    elif field == "dew_point": data[w]["dew"].append(val)
+                    elif field == "wind_avg": data[w]["wind"].append(val)
+                    elif field == "local_daily_rain_accumulation":
+                        # Rain accumulates daily, so we track the max value reached each calendar day
+                        current_max = data[w]["rain_maxes"].get(day_key, 0.0)
+                        if val > current_max:
+                            data[w]["rain_maxes"][day_key] = val
+
+        results = {}
+        for days in [1, 2, 3]:
+            w_data = data[days]
+            if not w_data["temp"]: 
+                continue
+                
+            avg_temp = sum(w_data["temp"]) / len(w_data["temp"])
+            avg_dew = sum(w_data["dew"]) / len(w_data["dew"])
+            avg_wind = sum(w_data["wind"]) / len(w_data["wind"])
+            
+            # Sum the daily max rain accumulations (in mm, convert to inches)
+            total_rain_mm = sum(w_data["rain_maxes"].values())
+            total_rain_in = total_rain_mm / 25.4
+            
+            # 1 inch of rain over 1 sq ft = 0.623 gallons
+            rain_gallons = round(total_rain_in * 450 * 0.623, 1)
+            evap_gallons = calculate_evaporation_gallons(avg_temp, avg_dew, avg_wind, days * 24)
+            
+            net_gallons = round(rain_gallons - evap_gallons, 1)
+            # Positive net_inches means pool level rose, negative means it dropped
+            net_inches = round(net_gallons / (450 * 0.623), 2)
+            
+            results[f"last_{days}_days"] = {
+                "estimated_water_temp_f": c_to_f(avg_temp),
+                "evaporated_gallons": evap_gallons,
+                "rain_added_gallons": rain_gallons,
+                "net_volume_change_gallons": net_gallons,
+                "net_level_change_inches": net_inches
+            }
+
+        return results
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

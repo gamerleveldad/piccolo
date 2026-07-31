@@ -72,26 +72,7 @@ export default function MapWidget() {
       homeEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;
       new maplibregl.Marker({ element: homeEl }).setLngLat(HOME_COORDS).addTo(map.current);
 
-      // --- 2. WEATHER RADAR ---
-      fetch('https://api.rainviewer.com/public/weather-maps.json')
-        .then(res => res.json())
-        .then(rvData => {
-          const latestPath = rvData.radar.past[rvData.radar.past.length - 1].path;
-          map.current.addSource('rainviewer', { 
-            type: 'raster', 
-            tiles: [`https://tilecache.rainviewer.com${latestPath}/256/{z}/{x}/{y}/2/1_1.png`], 
-            tileSize: 256,
-            maxzoom: 7 
-          });
-          map.current.addLayer({ 
-            id: 'rainviewer-layer', 
-            type: 'raster', 
-            source: 'rainviewer', 
-            paint: { 'raster-opacity': 0.65 } 
-          });
-        }).catch(err => console.error("RainViewer failed:", err));
-
-      // --- 3. LOCAL METAR FLIGHT CATEGORIES ---
+      // --- 2. LOCAL METAR FLIGHT CATEGORIES (Created First) ---
       map.current.addSource('metars', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
 
       map.current.addLayer({
@@ -134,7 +115,6 @@ export default function MapWidget() {
       const fetchMETARs = async () => {
         try {
           const airports = 'KSFB,KMCO,KORL,KLEE,KISM,KDAB,KTIX,KDED';
-          // Wrap the API URL in a CORS proxy to bypass browser restrictions
           const targetUrl = encodeURIComponent(`https://aviationweather.gov/api/data/metar?ids=${airports}&format=json`);
           const res = await fetch(`https://corsproxy.io/?${targetUrl}`);
           
@@ -146,7 +126,8 @@ export default function MapWidget() {
             geometry: { type: 'Point', coordinates: [obs.lon, obs.lat] },
             properties: {
               icaoId: obs.icaoId,
-              fltcat: obs.fltcat || 'VFR' 
+              // Fixed uppercase C to match the API response exactly
+              fltcat: obs.fltCat || 'VFR' 
             }
           }));
 
@@ -160,6 +141,36 @@ export default function MapWidget() {
 
       fetchMETARs();
       metarInterval = setInterval(fetchMETARs, 300000);
+
+      // --- 3. WEATHER RADAR (Async - Pushed under METARs) ---
+      fetch('https://api.rainviewer.com/public/weather-maps.json')
+        .then(res => res.json())
+        .then(rvData => {
+          const latestPath = rvData.radar.past[rvData.radar.past.length - 1].path;
+          map.current.addSource('rainviewer', { 
+            type: 'raster', 
+            tiles: [`https://tilecache.rainviewer.com${latestPath}/256/{z}/{x}/{y}/2/1_1.png`], 
+            tileSize: 256,
+            maxzoom: 7 
+          });
+          map.current.addLayer({ 
+            id: 'rainviewer-layer', 
+            type: 'raster', 
+            source: 'rainviewer', 
+            paint: { 'raster-opacity': 0.65 } 
+          }, 'metars-dots'); // The critical beforeId! Forces radar below the METARs
+        }).catch(err => console.error("RainViewer failed:", err));
+
+      const tomorrowKey = import.meta.env.VITE_TOMORROW_API_KEY;
+      if (tomorrowKey) {
+        map.current.addSource('tomorrow-lightning', { type: 'raster', tiles: [`https://api.tomorrow.io/v4/map/tile/{z}/{x}/{y}/lightning/now.png?apikey=${tomorrowKey}`], tileSize: 256 });
+        map.current.addLayer({ 
+          id: 'tomorrow-lightning-layer', 
+          type: 'raster', 
+          source: 'tomorrow-lightning', 
+          paint: { 'raster-opacity': 0.8 } 
+        }, 'metars-dots'); // Force lightning below the METARs
+      }
 
       // --- 4. HTML DOM AIRCRAFT & SMOOTH ANIMATION ---
       const animatePlanes = (timestamp) => {
@@ -267,7 +278,7 @@ export default function MapWidget() {
           });
 
         } catch (err) { 
-          console.error("Flight poll failed:", err); 
+          // Silently fail if SDR feed is temporarily down
         }
       };
 
