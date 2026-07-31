@@ -10,20 +10,6 @@ const homeLat = parseFloat(rawLat.toString().replace(/['"]/g, ''));
 const HOME_COORDS = [homeLat, homeLng]; // Leaflet uses [Lat, Lng]
 const DEFAULT_ZOOM = 10;
 
-// HELPER: Projects a future coordinate (Leaflet expects Lat, Lng)
-const getProjectedCoordinate = (lat, lon, track, gsKts, minutes = 1.5) => {
-  const l = parseFloat(lon);
-  const t = parseFloat(lat);
-  const distDegrees = (parseFloat(gsKts) / 60) * (minutes / 60);
-  const brngRad = parseFloat(track) * (Math.PI / 180);
-  const latRad = t * (Math.PI / 180);
-
-  const deltaLat = distDegrees * Math.cos(brngRad);
-  const deltaLon = (distDegrees * Math.sin(brngRad)) / Math.cos(latRad);
-
-  return [t + deltaLat, l + deltaLon];
-};
-
 export default function MapWidget() {
   const mapContainer = useRef(null);
   const map = useRef(null);
@@ -31,7 +17,6 @@ export default function MapWidget() {
   // State Tracking
   const planeMarkers = useRef({});
   const trailLines = useRef({});
-  const vectorLines = useRef({});
   const metarMarkers = useRef({});
   const flightTrails = useRef({});
   const radarLayer = useRef(null);
@@ -55,8 +40,13 @@ export default function MapWidget() {
 
     L.control.zoom({ position: 'topright' }).addTo(map.current);
 
+    // FIX FOR THE GREY VOID: Force Leaflet to recalculate its container size 
+    // after the DOM has finished painting the flexbox layout.
+    setTimeout(() => {
+      if (map.current) map.current.invalidateSize();
+    }, 400);
+
     // --- 2. CREATE STRICT Z-INDEX PANES ---
-    // This permanently solves layers hiding beneath the radar
     map.current.createPane('radarPane');
     map.current.getPane('radarPane').style.zIndex = 250;
     
@@ -65,9 +55,6 @@ export default function MapWidget() {
     
     map.current.createPane('trailsPane');
     map.current.getPane('trailsPane').style.zIndex = 270;
-    
-    map.current.createPane('vectorsPane');
-    map.current.getPane('vectorsPane').style.zIndex = 280;
     
     map.current.createPane('metarPane');
     map.current.getPane('metarPane').style.zIndex = 290;
@@ -103,14 +90,14 @@ export default function MapWidget() {
         radarLayer.current = L.tileLayer(`https://tilecache.rainviewer.com${latestPath}/256/{z}/{x}/{y}/4/1_1.png`, {
           pane: 'radarPane',
           opacity: 0.65,
-          maxNativeZoom: 7 // Leaflet natively scales this smoothly if zoomed past 7
+          maxNativeZoom: 7
         }).addTo(map.current);
       } catch (err) {
         console.error("RainViewer failed:", err);
       }
     };
     updateRadar();
-    radarInterval = setInterval(updateRadar, 600000); // 10 minutes
+    radarInterval = setInterval(updateRadar, 600000); 
 
     // --- 6. TOMORROW.IO LIGHTNING ---
     const tomorrowKey = import.meta.env.VITE_TOMORROW_API_KEY;
@@ -159,7 +146,7 @@ export default function MapWidget() {
     fetchMETARs();
     metarInterval = setInterval(fetchMETARs, 300000); 
 
-    // --- 8. AIRCRAFT POLLING (Vectors & Trails Restored) ---
+    // --- 8. AIRCRAFT POLLING ---
     const updateFlights = async () => {
       try {
         const res = await fetch(`http://${window.location.hostname}:8085/data/aircraft.json`);
@@ -184,17 +171,20 @@ export default function MapWidget() {
 
             let isSpecial = false;
             if (ac.dbFlags) {
-              if (ac.dbFlags & 1) isSpecial = true; // Military
-              else if (ac.dbFlags & 2) isSpecial = true; // LEO
+              if (ac.dbFlags & 1) isSpecial = true; 
+              else if (ac.dbFlags & 2) isSpecial = true; 
             }
 
             const starIcon = isSpecial 
               ? `<svg class="inline-block w-3 h-3 text-amber-400 ml-1 mb-0.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>` 
               : '';
 
-            const labelHTML = `${flightName}${starIcon}<br/><span class="text-slate-300 font-normal text-[9px]">${readableType}</span><br/><span class="text-emerald-400">${altitude} ft</span>`;
+            // Cleanly integrated ground speed beside the altitude
+            const labelHTML = `${flightName}${starIcon}<br/>
+              <span class="text-slate-300 font-normal text-[9px]">${readableType}</span><br/>
+              <span class="text-emerald-400">${altitude} ft</span> <span class="text-slate-500 mx-0.5">|</span> <span class="text-sky-300">${speed} kts</span>`;
 
-            // --- Historical Trails (Leaflet Polyline) ---
+            // --- Historical Trails ---
             if (!flightTrails.current[ac.hex]) flightTrails.current[ac.hex] = [];
             const trail = flightTrails.current[ac.hex];
             
@@ -211,18 +201,7 @@ export default function MapWidget() {
               }
             }
 
-            // --- Predictive Vectors (Leaflet Polyline) ---
-            if (speed > 10) { 
-              const projected = getProjectedCoordinate(currentLat, currentLon, heading, speed, 1.5);
-              const vecCoords = [[currentLat, currentLon], projected];
-              if (!vectorLines.current[ac.hex]) {
-                vectorLines.current[ac.hex] = L.polyline(vecCoords, { color: '#0ea5e9', weight: 2.5, opacity: 0.9, pane: 'vectorsPane' }).addTo(map.current);
-              } else {
-                vectorLines.current[ac.hex].setLatLngs(vecCoords);
-              }
-            }
-
-            // --- HTML DOM Markers (Aircraft Chevron & Label) ---
+            // --- HTML DOM Markers ---
             const iconHtml = `
               <div class="relative flex items-center justify-center pointer-events-none z-30">
                 <div id="rotator-${ac.hex}" class="relative flex items-center justify-center" style="transform: rotate(${heading}deg) scale(${scale}); transition: transform 0.5s ease-out;">
@@ -246,12 +225,11 @@ export default function MapWidget() {
           }
         });
 
-        // Cleanup stale data for planes that flew away
+        // Cleanup stale data
         Object.keys(planeMarkers.current).forEach(hex => {
           if (!currentHexes.has(hex)) {
             if (planeMarkers.current[hex]) { map.current.removeLayer(planeMarkers.current[hex]); delete planeMarkers.current[hex]; }
             if (trailLines.current[hex]) { map.current.removeLayer(trailLines.current[hex]); delete trailLines.current[hex]; }
-            if (vectorLines.current[hex]) { map.current.removeLayer(vectorLines.current[hex]); delete vectorLines.current[hex]; }
             delete flightTrails.current[hex];
           }
         });
