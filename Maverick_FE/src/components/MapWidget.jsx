@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
-// Using your specific coordinates
+// Using your specific coordinates another change
 const HOME_COORDS = [-81.3884, 28.6611];
 
 export default function MapWidget() {
