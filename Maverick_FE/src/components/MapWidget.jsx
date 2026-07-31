@@ -19,6 +19,9 @@ export default function MapWidget() {
   const activeFlights = useRef({});
   const metarMarkers = useRef({});
   const animationFrame = useRef(null);
+  
+  // Re-introducing the historical flight trails
+  const flightTrails = useRef({});
 
   const handleRecenter = () => {
     if (map.current) {
@@ -80,11 +83,8 @@ export default function MapWidget() {
           const latestPath = rvData.radar.past[rvData.radar.past.length - 1].path;
           map.current.addSource('rainviewer', { 
             type: 'raster', 
-            // The /4/ gives you the Wunderground green/yellow/red color scheme
-            // The 1_1 at the end tells RainViewer to apply smoothing on their end
             tiles: [`https://tilecache.rainviewer.com${latestPath}/256/{z}/{x}/{y}/4/1_1.png`], 
             tileSize: 256,
-            // CRITICAL: Stop asking RainViewer for tiles past Zoom 7 to prevent the error
             maxzoom: 7 
           });
           map.current.addLayer({ 
@@ -93,7 +93,6 @@ export default function MapWidget() {
             source: 'rainviewer', 
             paint: { 
               'raster-opacity': 0.65,
-              // CRITICAL: Forces your GPU to stretch the z7 tiles smoothly instead of making them blocky
               'raster-resampling': 'linear' 
             } 
           });
@@ -114,7 +113,24 @@ export default function MapWidget() {
         });
       }
 
-      // --- 3. HTML DOM METAR DOTS ---
+      // --- 3. FLIGHT TRAILS GEOJSON LAYER ---
+      map.current.addSource('flight-trails', { 
+        type: 'geojson', 
+        data: { type: 'FeatureCollection', features: [] } 
+      });
+      map.current.addLayer({ 
+        id: 'flight-trails-layer', 
+        type: 'line', 
+        source: 'flight-trails', 
+        paint: { 
+          'line-color': '#38bdf8', 
+          'line-width': 2, 
+          'line-opacity': 0.5,
+          'line-dasharray': [1, 2] // Dashed look to emulate radar vector trails
+        } 
+      });
+
+      // --- 4. HTML DOM METAR DOTS ---
       const fetchMETARs = async () => {
         try {
           const airports = 'KSFB,KMCO,KORL,KLEE,KISM,KDAB,KTIX,KDED';
@@ -129,11 +145,11 @@ export default function MapWidget() {
             if (obs.lat != null && obs.lon != null) {
               const cat = obs.fltCat || 'VFR';
               
-              let color = '#64748b'; // Slate (Missing)
-              if (cat === 'VFR') color = '#22c55e'; // Green
-              else if (cat === 'MVFR') color = '#3b82f6'; // Blue
-              else if (cat === 'IFR') color = '#ef4444'; // Red
-              else if (cat === 'LIFR') color = '#d946ef'; // Magenta
+              let color = '#64748b'; 
+              if (cat === 'VFR') color = '#22c55e'; 
+              else if (cat === 'MVFR') color = '#3b82f6'; 
+              else if (cat === 'IFR') color = '#ef4444'; 
+              else if (cat === 'LIFR') color = '#d946ef'; 
 
               if (!metarMarkers.current[obs.icaoId]) {
                 const el = document.createElement('div');
@@ -170,7 +186,7 @@ export default function MapWidget() {
       fetchMETARs();
       metarInterval = setInterval(fetchMETARs, 300000); 
 
-      // --- 4. HTML DOM AIRCRAFT & SMOOTH ANIMATION ---
+      // --- 5. HTML DOM AIRCRAFT & SMOOTH ANIMATION ---
       const animatePlanes = (timestamp) => {
         Object.keys(activeFlights.current).forEach(hex => {
           const flight = activeFlights.current[hex];
@@ -201,6 +217,7 @@ export default function MapWidget() {
           const data = await res.json();
           const currentHexes = new Set();
           const now = performance.now();
+          const trailFeatures = [];
 
           data.aircraft.forEach(ac => {
             if (ac.lat != null && ac.lon != null) {
@@ -212,6 +229,29 @@ export default function MapWidget() {
               const speed = ac.gs || 0;
               const scale = speed > 300 ? 1.1 : speed > 150 ? 0.9 : 0.75;
 
+              // --- Process GeoJSON Trails ---
+              if (!flightTrails.current[ac.hex]) flightTrails.current[ac.hex] = [];
+              const trail = flightTrails.current[ac.hex];
+              
+              if (trail.length === 0) {
+                trail.push([ac.lon, ac.lat]);
+              } else {
+                const lastPos = trail[trail.length - 1];
+                if (lastPos[0] !== ac.lon || lastPos[1] !== ac.lat) {
+                  trail.push([ac.lon, ac.lat]);
+                }
+              }
+
+              if (trail.length > 45) trail.shift(); // Keep last 45 breadcrumbs
+
+              if (trail.length > 1) {
+                trailFeatures.push({ 
+                  type: 'Feature', 
+                  geometry: { type: 'LineString', coordinates: trail } 
+                });
+              }
+
+              // --- Process HTML DOM Markers ---
               if (!planeMarkers.current[ac.hex]) {
                 const el = document.createElement('div');
                 el.className = 'relative flex items-center justify-center pointer-events-none z-30';
@@ -246,17 +286,12 @@ export default function MapWidget() {
                 };
 
               } else {
-                const flight = activeFlights.current[ac.hex];
                 const marker = planeMarkers.current[ac.hex];
-                const currentPos = marker.getLngLat();
+                
+                // 1. Force the marker to snap instantly to the new coordinates
+                marker.setLngLat([ac.lon, ac.lat]);
 
-                flight.startLng = currentPos.lng;
-                flight.startLat = currentPos.lat;
-                flight.targetLng = ac.lon;
-                flight.targetLat = ac.lat;
-                flight.lastUpdate = now;
-                flight.isAnimating = true;
-
+                // 2. Update rotation and labels
                 const el = marker.getElement();
                 const icon = el.querySelector(`#icon-${ac.hex}`);
                 if (icon) icon.style.transform = `rotate(${heading}deg) scale(${scale})`;
@@ -267,13 +302,24 @@ export default function MapWidget() {
             }
           });
 
+          // Cleanup stale DOM markers and GeoJSON trails
           Object.keys(planeMarkers.current).forEach(hex => {
             if (!currentHexes.has(hex)) {
               planeMarkers.current[hex].remove();
               delete planeMarkers.current[hex];
               delete activeFlights.current[hex];
+              delete flightTrails.current[hex];
             }
           });
+
+          // Push updated trail arrays to MapLibre WebGL canvas
+          if (map.current.getSource('flight-trails')) {
+            map.current.getSource('flight-trails').setData({ 
+              type: 'FeatureCollection', 
+              features: trailFeatures 
+            });
+          }
+
         } catch (err) { 
           // Silently fail if SDR feed is temporarily down
         }
@@ -281,7 +327,7 @@ export default function MapWidget() {
 
       updateFlights();
       flightInterval = setInterval(updateFlights, 1000);
-      animationFrame.current = requestAnimationFrame(animatePlanes);
+      //animationFrame.current = requestAnimationFrame(animatePlanes);
     });
 
     return () => {
