@@ -134,7 +134,10 @@ export default function MapWidget() {
       const fetchMETARs = async () => {
         try {
           const airports = 'KSFB,KMCO,KORL,KLEE,KISM,KDAB,KTIX,KDED';
-          const res = await fetch(`https://aviationweather.gov/api/data/metar?ids=${airports}&format=json`);
+          // Wrap the API URL in a CORS proxy to bypass browser restrictions
+          const targetUrl = encodeURIComponent(`https://aviationweather.gov/api/data/metar?ids=${airports}&format=json`);
+          const res = await fetch(`https://corsproxy.io/?${targetUrl}`);
+          
           if (!res.ok) return;
           const data = await res.json();
           
@@ -143,7 +146,7 @@ export default function MapWidget() {
             geometry: { type: 'Point', coordinates: [obs.lon, obs.lat] },
             properties: {
               icaoId: obs.icaoId,
-              fltcat: obs.fltcat || 'VFR' // Fallback to VFR if the API omits the category
+              fltcat: obs.fltcat || 'VFR' 
             }
           }));
 
@@ -156,7 +159,7 @@ export default function MapWidget() {
       };
 
       fetchMETARs();
-      metarInterval = setInterval(fetchMETARs, 300000); // Update every 5 minutes
+      metarInterval = setInterval(fetchMETARs, 300000);
 
       // --- 4. HTML DOM AIRCRAFT & SMOOTH ANIMATION ---
       const animatePlanes = (timestamp) => {
