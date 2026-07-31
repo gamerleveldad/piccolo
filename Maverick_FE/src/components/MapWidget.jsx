@@ -7,7 +7,7 @@ const rawLng = import.meta.env.VITE_HOME_LONGITUDE || '-81.3884';
 const rawLat = import.meta.env.VITE_HOME_LATITUDE || '28.6611';
 const homeLng = parseFloat(rawLng.toString().replace(/['"]/g, ''));
 const homeLat = parseFloat(rawLat.toString().replace(/['"]/g, ''));
-const HOME_COORDS = [homeLat, homeLng]; // Leaflet uses [Lat, Lng]
+const HOME_COORDS = [homeLat, homeLng]; 
 const DEFAULT_ZOOM = 10;
 
 export default function MapWidget() {
@@ -20,6 +20,7 @@ export default function MapWidget() {
   const metarMarkers = useRef({});
   const flightTrails = useRef({});
   const radarLayer = useRef(null);
+  const stormLayer = useRef(null);
 
   const handleRecenter = () => {
     if (map.current) {
@@ -40,8 +41,6 @@ export default function MapWidget() {
 
     L.control.zoom({ position: 'topright' }).addTo(map.current);
 
-    // FIX FOR THE GREY VOID: Force Leaflet to recalculate its container size 
-    // after the DOM has finished painting the flexbox layout.
     setTimeout(() => {
       if (map.current) map.current.invalidateSize();
     }, 400);
@@ -52,6 +51,9 @@ export default function MapWidget() {
     
     map.current.createPane('lightningPane');
     map.current.getPane('lightningPane').style.zIndex = 260;
+
+    map.current.createPane('stormPane');
+    map.current.getPane('stormPane').style.zIndex = 265;
     
     map.current.createPane('trailsPane');
     map.current.getPane('trailsPane').style.zIndex = 270;
@@ -76,8 +78,9 @@ export default function MapWidget() {
     let flightInterval;
     let metarInterval;
     let radarInterval;
+    let stormInterval;
 
-    // --- 5. WEATHER RADAR (10-Min Auto Refresh) ---
+    // --- 5. WEATHER RADAR ---
     const updateRadar = async () => {
       try {
         const res = await fetch('https://api.rainviewer.com/public/weather-maps.json');
@@ -108,7 +111,47 @@ export default function MapWidget() {
       }).addTo(map.current);
     }
 
-    // --- 7. METAR DOTS ---
+    // --- 7. NWS STORM TRACKS / WARNINGS ---
+    const updateStormTracks = async () => {
+      try {
+        // Fetching localized FL alerts to minimize data processing overhead on the Pi
+        const res = await fetch('https://api.weather.gov/alerts/active?area=FL');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Filter for severe weather polygons only (drops county-wide textual alerts)
+        const severeAlerts = {
+          ...data,
+          features: data.features.filter(f => 
+            f.geometry && 
+            ['Severe Thunderstorm Warning', 'Tornado Warning', 'Flash Flood Warning', 'Special Marine Warning'].includes(f.properties.event)
+          )
+        };
+
+        if (stormLayer.current) {
+          map.current.removeLayer(stormLayer.current);
+        }
+
+        stormLayer.current = L.geoJSON(severeAlerts, {
+          pane: 'stormPane',
+          style: function () {
+            return {
+              color: '#a855f7', // Subtle Purple
+              weight: 2,
+              opacity: 0.6,
+              fillOpacity: 0.15
+            };
+          }
+        }).addTo(map.current);
+
+      } catch (err) {
+        console.error("Storm tracks failed:", err);
+      }
+    };
+    updateStormTracks();
+    stormInterval = setInterval(updateStormTracks, 300000); // Check every 5 minutes
+
+    // --- 8. METAR DOTS ---
     const fetchMETARs = async () => {
       try {
         const airports = 'KSFB,KMCO,KORL,KLEE,KISM,KDAB,KTIX,KDED';
@@ -146,7 +189,7 @@ export default function MapWidget() {
     fetchMETARs();
     metarInterval = setInterval(fetchMETARs, 300000); 
 
-    // --- 8. AIRCRAFT POLLING ---
+    // --- 9. AIRCRAFT POLLING ---
     const updateFlights = async () => {
       try {
         const res = await fetch(`http://${window.location.hostname}:8085/data/aircraft.json`);
@@ -179,7 +222,6 @@ export default function MapWidget() {
               ? `<svg class="inline-block w-3 h-3 text-amber-400 ml-1 mb-0.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>` 
               : '';
 
-            // Cleanly integrated ground speed beside the altitude
             const labelHTML = `${flightName}${starIcon}<br/>
               <span class="text-slate-300 font-normal text-[9px]">${readableType}</span><br/>
               <span class="text-emerald-400">${altitude} ft</span> <span class="text-slate-500 mx-0.5">|</span> <span class="text-sky-300">${speed} kts</span>`;
@@ -201,26 +243,34 @@ export default function MapWidget() {
               }
             }
 
-            // --- HTML DOM Markers ---
+            // --- HTML DOM Markers (Fixed Anchor Alignment) ---
             const iconHtml = `
-              <div class="relative flex items-center justify-center pointer-events-none z-30">
-                <div id="rotator-${ac.hex}" class="relative flex items-center justify-center" style="transform: rotate(${heading}deg) scale(${scale}); transition: transform 0.5s ease-out;">
+              <div class="relative w-[28px] h-[28px] pointer-events-none z-30">
+                <div id="rotator-${ac.hex}" class="absolute inset-0 flex items-center justify-center" style="transform: rotate(${heading}deg) scale(${scale}); transition: transform 0.5s ease-out;">
                   <div class="relative z-10">
                     <svg width="28" height="28" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path d="M16 2 L26 28 L16 22 L6 28 Z" fill="#38bdf8" stroke="#0f172a" stroke-width="1.5"/></svg>
                   </div>
                 </div>
-                <div id="label-${ac.hex}" class="absolute left-4 text-[10px] leading-tight text-white font-semibold bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-700 whitespace-nowrap">
+                <div id="label-${ac.hex}" class="absolute left-8 top-1/2 -translate-y-1/2 text-[10px] leading-tight text-white font-semibold bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-700 whitespace-nowrap">
                   ${labelHTML}
                 </div>
               </div>`;
 
             if (!planeMarkers.current[ac.hex]) {
-              const acIcon = L.divIcon({ html: iconHtml, className: '', iconSize: [0, 0], iconAnchor: [0, 0] });
+              // Strictly defining a 28x28 size with a 14x14 anchor point forces the exact center of the box to snap to the trail origin
+              const acIcon = L.divIcon({ html: iconHtml, className: '', iconSize: [28, 28], iconAnchor: [14, 14] });
               planeMarkers.current[ac.hex] = L.marker([currentLat, currentLon], { icon: acIcon }).addTo(map.current);
             } else {
               planeMarkers.current[ac.hex].setLatLng([currentLat, currentLon]);
               const el = planeMarkers.current[ac.hex].getElement();
-              if (el) el.innerHTML = iconHtml;
+              
+              if (el) {
+                const rotator = el.querySelector(`#rotator-${ac.hex}`);
+                if (rotator) rotator.style.transform = `rotate(${heading}deg) scale(${scale})`;
+
+                const label = el.querySelector(`#label-${ac.hex}`);
+                if (label) label.innerHTML = labelHTML;
+              }
             }
           }
         });
@@ -244,6 +294,7 @@ export default function MapWidget() {
       if (flightInterval) clearInterval(flightInterval);
       if (metarInterval) clearInterval(metarInterval);
       if (radarInterval) clearInterval(radarInterval);
+      if (stormInterval) clearInterval(stormInterval);
       if (map.current) {
         map.current.remove();
         map.current = null;
