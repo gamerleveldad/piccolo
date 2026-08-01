@@ -11,12 +11,18 @@ export default function InfrastructureWidget() {
   useEffect(() => {
     const fetchNetdata = async () => {
       try {
-        // 1. Fetch System CPU (Not just the Netdata container CPU)
-        const cpuRes = await fetch(`${NETDATA_API_BASE}?chart=system.cpu&format=json&points=1`);
-        const cpuData = await cpuRes.json();
-        const idleIndex = cpuData.labels.indexOf('idle');
-        const idleValue = cpuData.data[0][idleIndex];
-        const cpuUsage = 100 - idleValue;
+        // 1. Fetch System CPU
+        let cpuUsage = 0;
+        try {
+          const cpuRes = await fetch(`${NETDATA_API_BASE}?chart=system.cpu&format=json&points=1`);
+          if (cpuRes.ok) {
+            const cpuData = await cpuRes.json();
+            const idleIndex = cpuData.labels.indexOf('idle');
+            if (idleIndex !== -1 && cpuData.data && cpuData.data[0]) {
+              cpuUsage = 100 - cpuData.data[0][idleIndex];
+            }
+          }
+        } catch (e) { console.warn("CPU metric missing", e); }
 
         // 2. Fetch RAM
         const ramRes = await fetch(`${NETDATA_API_BASE}?chart=system.ram&format=json&points=1`);
@@ -34,26 +40,28 @@ export default function InfrastructureWidget() {
         const totalRam = free + used + cached + buffers;
         const ramUsage = totalRam > 0 ? (used / totalRam) * 100 : 0;
 
-        // 3. Fetch Root Disk Space
+        // 3. Fetch Disk Space (Using disk.space)
         let diskUsage = 0;
         try {
-          const diskRes = await fetch(`${NETDATA_API_BASE}?chart=disk_space._&format=json&points=1`);
+          const diskRes = await fetch(`${NETDATA_API_BASE}?chart=disk.space&format=json&points=1`);
           if (diskRes.ok) {
             const diskData = await diskRes.json();
             const availIdx = diskData.labels.indexOf('avail');
             const usedIdx = diskData.labels.indexOf('used');
             const reservedIdx = diskData.labels.indexOf('reserved_for_root');
 
-            const avail = diskData.data[0][availIdx] || 0;
-            const diskUsed = diskData.data[0][usedIdx] || 0;
-            const reserved = diskData.data[0][reservedIdx] || 0;
-
-            const totalDisk = avail + diskUsed + reserved;
-            if (totalDisk > 0) {
-              diskUsage = (diskUsed / totalDisk) * 100;
+            if (availIdx !== -1 && usedIdx !== -1 && diskData.data && diskData.data[0]) {
+              const avail = diskData.data[0][availIdx] || 0;
+              const diskUsed = diskData.data[0][usedIdx] || 0;
+              const reserved = (reservedIdx !== -1 ? diskData.data[0][reservedIdx] : 0) || 0;
+              
+              const totalDisk = avail + diskUsed + reserved;
+              if (totalDisk > 0) {
+                diskUsage = (diskUsed / totalDisk) * 100;
+              }
             }
           }
-        } catch (e) { console.warn("Disk space metric missing"); }
+        } catch (e) { console.warn("Disk space metric missing", e); }
 
         // 4. Fetch System Uptime
         let formattedUptime = '--';
@@ -73,8 +81,8 @@ export default function InfrastructureWidget() {
 
         // Update State
         setNetdata({
-          cpu: cpuUsage.toFixed(1),
-          ram: ramUsage.toFixed(1),
+          cpu: cpuUsage > 0 ? cpuUsage.toFixed(1) : '--',
+          ram: ramUsage > 0 ? ramUsage.toFixed(1) : '--',
           disk: diskUsage > 0 ? diskUsage.toFixed(1) : '--',
           uptime: formattedUptime
         });
