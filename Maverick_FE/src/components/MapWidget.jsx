@@ -406,7 +406,7 @@ export default function MapWidget() {
               </div>
 
               {/* 3. LOWER MIDDLE: Callsign & Registration */}
-              <div className="pt-3 pb-4 border-t border-slate-700/60 flex items-baseline justify-between md:ml-28 md:mr-8">
+              <div className="pt-3 pb-4 border-t border-slate-700/60 flex items-baseline justify-between md:ml-28 md:mr-24">
                 <span className="text-2xl font-black tracking-tight text-white leading-none truncate">
                   {primary}
                 </span>
@@ -414,7 +414,6 @@ export default function MapWidget() {
                   {secondary}
                 </span>
               </div>
-            </div>
 
             {/* 4. BOTTOM: Airline Logo / Tail Graphic */}
             <div className="w-full h-16 md:h-24 bg-slate-900/60 flex items-center justify-center relative mt-auto border-t border-slate-800 md:pl-[15%]">
