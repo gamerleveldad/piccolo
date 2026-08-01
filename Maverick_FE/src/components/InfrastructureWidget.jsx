@@ -11,75 +11,85 @@ export default function InfrastructureWidget() {
   useEffect(() => {
     const fetchNetdata = async () => {
       try {
+        // HELPER FUNCTION: The Secret Sauce
+        // By adding '&after=-10&group=average', we give Netdata a 10-second lookback window.
+        // This guarantees it will find a data point instead of returning an empty array.
+        const fetchMetric = async (chart) => {
+          const url = `${NETDATA_API_BASE}?chart=${chart}&format=json&points=1&after=-10&group=average`;
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return await res.json();
+        };
+
         // 1. Fetch System CPU
         let cpuUsage = 0;
         try {
-          const cpuRes = await fetch(`${NETDATA_API_BASE}?chart=system.cpu&format=json&points=1`);
-          if (cpuRes.ok) {
-            const cpuData = await cpuRes.json();
-            const idleIndex = cpuData.labels.indexOf('idle');
-            if (idleIndex !== -1 && cpuData.data && cpuData.data[0]) {
-              cpuUsage = 100 - cpuData.data[0][idleIndex];
-            }
+          const cpuData = await fetchMetric('system.cpu');
+          const idleIndex = cpuData.labels.indexOf('idle');
+          if (idleIndex !== -1 && cpuData.data && cpuData.data.length > 0) {
+            cpuUsage = 100 - cpuData.data[0][idleIndex];
+          } else {
+            console.warn("CPU data missing or empty:", cpuData);
           }
-        } catch (e) { console.warn("CPU metric missing", e); }
+        } catch (e) { console.warn("CPU fetch error:", e); }
 
         // 2. Fetch RAM
-        const ramRes = await fetch(`${NETDATA_API_BASE}?chart=system.ram&format=json&points=1`);
-        const ramData = await ramRes.json();
-        const freeIndex = ramData.labels.indexOf('free');
-        const usedIndex = ramData.labels.indexOf('used');
-        const cachedIndex = ramData.labels.indexOf('cached');
-        const buffersIndex = ramData.labels.indexOf('buffers');
-        
-        const free = ramData.data[0][freeIndex] || 0;
-        const used = ramData.data[0][usedIndex] || 0;
-        const cached = ramData.data[0][cachedIndex] || 0;
-        const buffers = ramData.data[0][buffersIndex] || 0;
-        
-        const totalRam = free + used + cached + buffers;
-        const ramUsage = totalRam > 0 ? (used / totalRam) * 100 : 0;
+        let ramUsage = 0;
+        try {
+          const ramData = await fetchMetric('system.ram');
+          const freeIndex = ramData.labels.indexOf('free');
+          const usedIndex = ramData.labels.indexOf('used');
+          const cachedIndex = ramData.labels.indexOf('cached');
+          const buffersIndex = ramData.labels.indexOf('buffers');
+          
+          if (usedIndex !== -1 && ramData.data && ramData.data.length > 0) {
+            const free = ramData.data[0][freeIndex] || 0;
+            const used = ramData.data[0][usedIndex] || 0;
+            const cached = (cachedIndex !== -1 ? ramData.data[0][cachedIndex] : 0);
+            const buffers = (buffersIndex !== -1 ? ramData.data[0][buffersIndex] : 0);
+            
+            const totalRam = free + used + cached + buffers;
+            if (totalRam > 0) ramUsage = (used / totalRam) * 100;
+          }
+        } catch (e) { console.warn("RAM fetch error:", e); }
 
-        // 3. Fetch Disk Space (Using disk.space)
+        // 3. Fetch Root Disk Space
         let diskUsage = 0;
         try {
-          const diskRes = await fetch(`${NETDATA_API_BASE}?chart=disk.space&format=json&points=1`);
-          if (diskRes.ok) {
-            const diskData = await diskRes.json();
-            const availIdx = diskData.labels.indexOf('avail');
-            const usedIdx = diskData.labels.indexOf('used');
-            const reservedIdx = diskData.labels.indexOf('reserved_for_root');
+          const diskData = await fetchMetric('disk_space._');
+          const availIdx = diskData.labels.indexOf('avail');
+          const usedIdx = diskData.labels.indexOf('used');
+          
+          // Netdata sometimes spaces this label differently depending on the version
+          let reservedIdx = diskData.labels.indexOf('reserved_for_root');
+          if (reservedIdx === -1) reservedIdx = diskData.labels.indexOf('reserved for root');
 
-            if (availIdx !== -1 && usedIdx !== -1 && diskData.data && diskData.data[0]) {
-              const avail = diskData.data[0][availIdx] || 0;
-              const diskUsed = diskData.data[0][usedIdx] || 0;
-              const reserved = (reservedIdx !== -1 ? diskData.data[0][reservedIdx] : 0) || 0;
-              
-              const totalDisk = avail + diskUsed + reserved;
-              if (totalDisk > 0) {
-                diskUsage = (diskUsed / totalDisk) * 100;
-              }
-            }
+          if (availIdx !== -1 && usedIdx !== -1 && diskData.data && diskData.data.length > 0) {
+            const avail = diskData.data[0][availIdx] || 0;
+            const diskUsed = diskData.data[0][usedIdx] || 0;
+            const reserved = (reservedIdx !== -1 ? diskData.data[0][reservedIdx] : 0);
+            
+            const totalDisk = avail + diskUsed + reserved;
+            if (totalDisk > 0) diskUsage = (diskUsed / totalDisk) * 100;
+          } else {
+            console.warn("Disk data missing or empty labels:", diskData);
           }
-        } catch (e) { console.warn("Disk space metric missing", e); }
+        } catch (e) { console.warn("Disk space fetch error:", e); }
 
         // 4. Fetch System Uptime
         let formattedUptime = '--';
         try {
-          const upRes = await fetch(`${NETDATA_API_BASE}?chart=system.uptime&format=json&points=1`);
-          if (upRes.ok) {
-            const upData = await upRes.json();
-            const seconds = upData.data[0][1];
-            
+          const upData = await fetchMetric('system.uptime');
+          if (upData.data && upData.data.length > 0) {
+            const seconds = upData.data[0][1]; // In the uptime chart, index 1 is usually the value
             const days = Math.floor(seconds / (3600 * 24));
             const hours = Math.floor((seconds % (3600 * 24)) / 3600);
             const minutes = Math.floor((seconds % 3600) / 60);
-            
             formattedUptime = `${days}d ${hours}h ${minutes}m`;
           }
-        } catch (e) { console.warn("Uptime metric missing"); }
+        } catch (e) { console.warn("Uptime fetch error:", e); }
 
-        // Update State
+        // Update State (will gracefully fallback to '--' if a metric failed)
         setNetdata({
           cpu: cpuUsage > 0 ? cpuUsage.toFixed(1) : '--',
           ram: ramUsage > 0 ? ramUsage.toFixed(1) : '--',
@@ -89,7 +99,7 @@ export default function InfrastructureWidget() {
         setError(null);
 
       } catch (err) {
-        console.error("Netdata fetch error:", err);
+        console.error("Netdata global fetch error:", err);
         setError("Netdata unreachable. Check if port 19999 is exposed.");
       }
     };
