@@ -55,6 +55,7 @@ export default function MapWidget() {
   const stormLayer = useRef(null);
 
   const [selectedFlight, setSelectedFlight] = useState(null);
+  const [selectedMetar, setSelectedMetar] = useState(null);
   const selectedHexRef = useRef(null);
 
   const handleRecenter = () => {
@@ -65,6 +66,7 @@ export default function MapWidget() {
 
   const closePanel = () => {
     setSelectedFlight(null);
+    setSelectedMetar(null);
     selectedHexRef.current = null;
   };
 
@@ -156,23 +158,46 @@ export default function MapWidget() {
     const fetchMETARs = async () => {
       try {
         const airports = 'KSFB,KMCO,KORL,KLEE,KISM,KDAB,KTIX,KDED';
-        const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://aviationweather.gov/api/data/metar?ids=${airports}&format=json`)}`);
+        // Swapped to corsproxy.io due to allorigins timeouts
+        const targetUrl = `https://aviationweather.gov/api/data/metar?ids=${airports}&format=json`;
+        const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(targetUrl)}`);
+        
         if (!res.ok) return;
         const data = await res.json();
+        
         data.forEach(obs => {
           if (obs.lat != null && obs.lon != null) {
             const cat = obs.fltCat || 'VFR';
             let color = '#64748b'; 
             if (cat === 'VFR') color = '#22c55e'; else if (cat === 'MVFR') color = '#3b82f6'; else if (cat === 'IFR') color = '#ef4444'; else if (cat === 'LIFR') color = '#d946ef'; 
-            const iconHtml = `<div class="relative flex items-center justify-center pointer-events-none"><div class="w-3.5 h-3.5 rounded-full border-[1.5px] border-slate-900 shadow-md" style="background-color: ${color}"></div><div class="absolute left-4 text-[10px] font-bold text-slate-100 drop-shadow-md bg-slate-900/60 px-1 rounded">${obs.icaoId}</div></div>`;
+            
+            // Removed pointer-events-none so it can be clicked, added a hover scale effect
+            const iconHtml = `<div class="relative flex items-center justify-center cursor-pointer hover:scale-125 transition-transform"><div class="w-3.5 h-3.5 rounded-full border-[1.5px] border-slate-900 shadow-md" style="background-color: ${color}"></div><div class="absolute left-4 text-[10px] font-bold text-slate-100 drop-shadow-md bg-slate-900/60 px-1 rounded">${obs.icaoId}</div></div>`;
+            
             if (!metarMarkers.current[obs.icaoId]) {
-              metarMarkers.current[obs.icaoId] = L.marker([obs.lat, obs.lon], { icon: L.divIcon({ html: iconHtml, className: '', iconSize: [0, 0] }), pane: 'metarPane' }).addTo(map.current);
+              const marker = L.marker([obs.lat, obs.lon], { icon: L.divIcon({ html: iconHtml, className: '', iconSize: [0, 0] }), pane: 'metarPane' }).addTo(map.current);
+              
+              marker.on('click', () => {
+                setSelectedMetar({ ...obs, cat, color });
+                setSelectedFlight(null); // Close flight panel if it is open
+                L.DomEvent.stopPropagation(new Event('click'));
+              });
+
+              metarMarkers.current[obs.icaoId] = marker;
             } else {
               metarMarkers.current[obs.icaoId].getElement().innerHTML = iconHtml;
+              // Re-bind the click listener to ensure it has the freshest weather data
+              metarMarkers.current[obs.icaoId].off('click').on('click', () => {
+                setSelectedMetar({ ...obs, cat, color });
+                setSelectedFlight(null);
+                L.DomEvent.stopPropagation(new Event('click'));
+              });
             }
           }
         });
-      } catch (err) {}
+      } catch (err) {
+        console.warn("METAR fetch error:", err);
+      }
     };
     fetchMETARs();
     metarInterval = setInterval(fetchMETARs, 300000); 
@@ -229,6 +254,7 @@ export default function MapWidget() {
                 trailLines.current[ac.hex] = L.polyline(trail, { color: style.fill, weight: 1.5, opacity: 0.4, pane: 'trailsPane' }).addTo(map.current);
               } else {
                 trailLines.current[ac.hex].setLatLngs(trail);
+                trailLines.current[ac.hex].setStyle({ color: style.fill });
               }
             }
 
@@ -237,7 +263,7 @@ export default function MapWidget() {
                 <div id="rotator-${ac.hex}" class="absolute inset-0 flex items-center justify-center" style="transform: rotate(${heading}deg) scale(${scale}); transition: transform 0.5s ease-out;">
                   <div class="relative z-10 drop-shadow-md">
                     <svg width="28" height="28" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M16 2 L26 28 L16 22 L6 28 Z" fill="${style.fill}" stroke="${style.stroke}" stroke-width="2"/>
+                      <path id="chevron-${ac.hex}" d="M16 2 L26 28 L16 22 L6 28 Z" fill="${style.fill}" stroke="${style.stroke}" stroke-width="2"/>
                     </svg>
                   </div>
                 </div>
@@ -263,6 +289,11 @@ export default function MapWidget() {
               if (el) {
                 const rotator = el.querySelector(`#rotator-${ac.hex}`);
                 if (rotator) rotator.style.transform = `rotate(${heading}deg) scale(${scale})`;
+                const chevron = el.querySelector(`#chevron-${ac.hex}`);
+                if (chevron) {
+                  chevron.setAttribute('fill', style.fill);
+                  chevron.setAttribute('stroke', style.stroke);
+                }
                 const label = el.querySelector(`#label-${ac.hex}`);
                 if (label) label.innerHTML = labelHTML;
               }
@@ -461,6 +492,73 @@ export default function MapWidget() {
                 </div>
               </div>
 
+            </div>
+          </div>
+        )}
+        {/* METAR INFO PANEL */}
+        {selectedMetar && (
+          <div 
+            className="absolute z-[1000] bottom-0 left-0 w-full md:bottom-6 md:left-6 md:w-[450px] pointer-events-none transition-all duration-300"
+            style={{
+              // Uses the flight category color for the border and a soft glow
+              filter: `drop-shadow(0px 0px 2px ${selectedMetar.color}) drop-shadow(0px 0px 12px ${selectedMetar.color}40)`
+            }}
+          >
+            <div className="bg-[#162032] w-full pointer-events-auto flex flex-col overflow-hidden rounded-t-2xl md:rounded-none md:[clip-path:polygon(0%_0%,65%_0%,100%_100%,15%_100%)] md:min-h-[400px]">
+              
+              <button 
+                onClick={closePanel} 
+                className="absolute p-1 bg-slate-800/80 rounded-full text-slate-300 hover:text-white hover:bg-red-500/80 z-50 transition-colors top-3 right-4 md:top-4 md:left-6 md:right-auto"
+                title="Close Panel"
+              >
+                <X className="w-3 h-3" />
+              </button>
+
+              <div className="flex-1 flex flex-col w-full text-slate-100 p-5 md:p-0 md:pt-14 md:pr-4">
+                
+                {/* Station ID and Badge */}
+                <div className="flex items-center gap-3 mb-4 md:ml-12 border-b border-slate-700/60 pb-3">
+                  <span className="text-3xl font-black tracking-tight text-white">{selectedMetar.icaoId}</span>
+                  <span className="px-2 py-0.5 rounded text-sm font-bold text-slate-900 shadow-sm" style={{ backgroundColor: selectedMetar.color }}>
+                    {selectedMetar.cat}
+                  </span>
+                </div>
+
+                {/* Ground School Explanations */}
+                <div className="flex flex-col gap-3 text-sm text-slate-300 md:ml-16 mb-4 md:mr-8">
+                  {selectedMetar.cat === 'VFR' && <p><strong className="text-emerald-400">Visual Flight Rules</strong><br/>Ceiling &gt; 3,000 ft and Visibility &gt; 5 sm.</p>}
+                  {selectedMetar.cat === 'MVFR' && <p><strong className="text-blue-400">Marginal VFR</strong><br/>Ceiling 1,000 to 3,000 ft and/or Visibility 3 to 5 sm.</p>}
+                  {selectedMetar.cat === 'IFR' && <p><strong className="text-red-400">Instrument Flight Rules</strong><br/>Ceiling 500 to 1,000 ft and/or Visibility 1 to 3 sm.</p>}
+                  {selectedMetar.cat === 'LIFR' && <p><strong className="text-fuchsia-400">Low IFR</strong><br/>Ceiling &lt; 500 ft and/or Visibility &lt; 1 sm.</p>}
+                  
+                  {/* Current Obs Data */}
+                  <div className="grid grid-cols-2 gap-2 mt-2 pt-3 border-t border-slate-700/40">
+                    {selectedMetar.temp != null && (
+                      <div>
+                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Temp / Dew</span>
+                        <span className="text-slate-200 font-semibold">{selectedMetar.temp}°C / {selectedMetar.dewp}°C</span>
+                      </div>
+                    )}
+                    {selectedMetar.wspd != null && (
+                      <div>
+                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Winds</span>
+                        <span className="text-slate-200 font-semibold">
+                          {selectedMetar.wdir === 0 ? 'VRB' : selectedMetar.wdir}° @ {selectedMetar.wspd} kts
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Raw METAR String */}
+                <div className="mt-auto bg-slate-900/60 p-4 border-t border-slate-800 md:pl-[15%]">
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500 block mb-1.5">Raw Report</span>
+                  <p className="font-mono text-[11px] text-slate-400 leading-relaxed break-words">
+                    {selectedMetar.rawOb || 'No raw data available.'}
+                  </p>
+                </div>
+
+              </div>
             </div>
           </div>
         )}
