@@ -172,7 +172,14 @@ export default function MapWidget() {
             if (cat === 'VFR') color = '#22c55e'; else if (cat === 'MVFR') color = '#3b82f6'; else if (cat === 'IFR') color = '#ef4444'; else if (cat === 'LIFR') color = '#d946ef'; 
             
             // Removed pointer-events-none so it can be clicked, added a hover scale effect
-            const iconHtml = `<div class="relative flex items-center justify-center cursor-pointer hover:scale-125 transition-transform"><div class="w-3.5 h-3.5 rounded-full border-[1.5px] border-slate-900 shadow-md" style="background-color: ${color}"></div><div class="absolute left-4 text-[10px] font-bold text-slate-100 drop-shadow-md bg-slate-900/60 px-1 rounded">${obs.icaoId}</div></div>`;
+            // Clean text-based badge with condition-based coloring and a subtle tinted border
+            const iconHtml = `
+              <div class="relative flex items-center justify-center cursor-pointer hover:scale-110 transition-transform">
+                <div class="text-[11px] font-black tracking-widest bg-slate-900/80 border px-1.5 py-0.5 rounded shadow-md backdrop-blur-sm" 
+                     style="color: ${color}; border-color: ${color}50;">
+                  ${obs.icaoId}
+                </div>
+              </div>`;
             
             if (!metarMarkers.current[obs.icaoId]) {
               const marker = L.marker([obs.lat, obs.lon], { icon: L.divIcon({ html: iconHtml, className: '', iconSize: [0, 0] }), pane: 'metarPane' }).addTo(map.current);
