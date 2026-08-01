@@ -425,6 +425,7 @@ services:
       - AIRPLANES_LIVE_ENABLE=true
       - ADSBX_ENABLE=true
       - READSB_EXTRA_ARGS=--db-file /usr/local/share/tar1090/aircraft.csv.gz --db-file-lt
+      - ULTRAFEEDER_UUID={ULTRAFEEDER_UUID}
     networks:
       - piccolo_net
 
