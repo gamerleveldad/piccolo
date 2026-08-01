@@ -289,6 +289,21 @@ export default function MapWidget() {
     };
   }, []);
 
+  // --- Dynamic Display Logic for Identifiers ---
+  const getIdentifiers = () => {
+    if (!selectedFlight) return { primary: '', secondary: '' };
+    const flightText = selectedFlight.flight ? selectedFlight.flight.trim() : '';
+    const regText = selectedFlight.r ? selectedFlight.r.trim() : '';
+    const hexText = selectedFlight.hex;
+
+    const primary = flightText || regText || hexText;
+    const secondary = (regText && regText !== primary) ? regText : '';
+
+    return { primary, secondary };
+  };
+
+  const { primary, secondary } = getIdentifiers();
+
   return (
     <div className="bg-cardBg border border-borderSlate rounded-xl shadow-lg flex-1 min-h-[450px] lg:min-h-[600px] flex flex-col overflow-hidden relative">
       <div className="bg-[#161f33] p-4 border-b border-borderSlate flex items-center justify-between z-10">
@@ -313,27 +328,27 @@ export default function MapWidget() {
           <div 
             className={`absolute z-[1000] bg-[#162032] shadow-2xl transition-all duration-300 pointer-events-auto flex flex-col overflow-hidden 
               bottom-0 left-0 w-full rounded-t-2xl border-t border-slate-700
-              md:bottom-6 md:left-6 md:w-[400px] md:rounded-none md:border-none md:[clip-path:polygon(0%_0%,65%_0%,100%_100%,15%_100%)]
+              md:bottom-6 md:left-6 md:w-[450px] md:rounded-none md:border-none md:[clip-path:polygon(0%_0%,65%_0%,100%_100%,15%_100%)]
               md:min-h-[400px]`}
           >
             {/* Close Button */}
             <button 
               onClick={closePanel} 
               className="absolute p-1 bg-slate-800/80 rounded-full text-slate-300 hover:text-white hover:bg-red-500/80 z-50 transition-colors
-                top-3 right-4 md:top-4 md:left-8 md:right-auto"
+                top-3 right-4 md:top-4 md:left-6 md:right-auto"
               title="Close Panel"
             >
               <X className="w-3 h-3" />
             </button>
 
             {/* Content Wrapper */}
-            <div className="flex-1 flex flex-col w-full text-slate-100 p-5 md:p-0 md:pt-14 md:pr-10">
+            <div className="flex-1 flex flex-col w-full text-slate-100 p-5 md:p-0 md:pt-14 md:pr-4">
               
               {/* 1. TOP: Pilot Telemetry Stats */}
               <div className="flex flex-col text-xs border-b border-slate-700/60 pb-3 md:pr-2">
                 
                 {/* Row 1 */}
-                <div className="grid grid-cols-2 gap-2 md:ml-8">
+                <div className="grid grid-cols-2 gap-2 md:ml-10">
                   <div>
                     <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Altitude</span>
                     <span className="text-sm font-bold text-emerald-400">
@@ -349,7 +364,7 @@ export default function MapWidget() {
                 </div>
 
                 {/* Row 2 */}
-                <div className="grid grid-cols-2 gap-2 mt-3 md:ml-12">
+                <div className="grid grid-cols-2 gap-2 mt-3 md:ml-14">
                   <div>
                     <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Climb / Descent</span>
                     <span className="font-semibold text-slate-200">
@@ -368,7 +383,7 @@ export default function MapWidget() {
 
                 {/* Row 3 */}
                 {selectedFlight.track != null && (
-                  <div className="grid grid-cols-2 gap-2 mt-3 md:ml-16">
+                  <div className="grid grid-cols-2 gap-2 mt-3 md:ml-20">
                     <div>
                       <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Heading</span>
                       <span className="font-semibold text-slate-200">{Math.round(selectedFlight.track)}°</span>
@@ -383,20 +398,20 @@ export default function MapWidget() {
                 )}
               </div>
 
-              {/* 2. MIDDLE: Aircraft Type */}
-              <div className="py-3 md:ml-20">
+              {/* 2. MIDDLE: Aircraft Type (Staggered Right) */}
+              <div className="py-3 md:ml-24 md:pr-4">
                 <div className="text-sm font-bold text-slate-100 leading-snug break-words">
                   {selectedFlight.desc || selectedFlight.t || 'Unknown Aircraft'}
                 </div>
               </div>
 
-              {/* 3. LOWER MIDDLE: Callsign & Registration (Flex Row, Right Justified N-Number) */}
-              <div className="pt-3 pb-4 border-t border-slate-700/60 flex items-baseline justify-between md:ml-24">
+              {/* 3. LOWER MIDDLE: Callsign & Registration */}
+              <div className="pt-3 pb-4 border-t border-slate-700/60 flex items-baseline justify-between md:ml-28 md:mr-8">
                 <span className="text-2xl font-black tracking-tight text-white leading-none truncate">
-                  {selectedFlight.flight ? selectedFlight.flight.trim() : (selectedFlight.r || selectedFlight.hex)}
+                  {primary}
                 </span>
                 <span className="text-sm font-bold text-sky-400 font-mono ml-4 shrink-0 text-right">
-                  {selectedFlight.r || ''}
+                  {secondary}
                 </span>
               </div>
             </div>
