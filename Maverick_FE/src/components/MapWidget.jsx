@@ -17,20 +17,20 @@ const getAircraftStyle = (ac, isMilitary, isLEO, flightName) => {
 
   const airlineCode = flightName.substring(0, 3).toUpperCase();
   const airlineColors = {
-    'SWA': { fill: '#0230c4', stroke: '#ffbf00' }, // Southwest
-    'JBU': { fill: '#0033a0', stroke: '#ffffff' }, // JetBlue
-    'DAL': { fill: '#e51420', stroke: '#002554' }, // Delta
-    'UAL': { fill: '#005da6', stroke: '#ffffff' }, // United
-    'AAL': { fill: '#dfdfdf', stroke: '#00467f' }, // American
-    'FFT': { fill: '#006643', stroke: '#ffffff' }, // Frontier
-    'NKS': { fill: '#ffc40f', stroke: '#000000' }, // Spirit
-    'ROU': { fill: '#c8102e', stroke: '#ffffff' }, // Air Canada Rouge
-    'AAY': { fill: '#01579B', stroke: '#F48820' }  // Allegiant
+    'SWA': { fill: '#0230c4', stroke: '#ffbf00' }, 
+    'JBU': { fill: '#0033a0', stroke: '#ffffff' }, 
+    'DAL': { fill: '#e51420', stroke: '#002554' }, 
+    'UAL': { fill: '#005da6', stroke: '#ffffff' }, 
+    'AAL': { fill: '#dfdfdf', stroke: '#00467f' }, 
+    'FFT': { fill: '#006643', stroke: '#ffffff' }, 
+    'NKS': { fill: '#ffc40f', stroke: '#000000' }, 
+    'ROU': { fill: '#c8102e', stroke: '#ffffff' }, 
+    'AAY': { fill: '#01579B', stroke: '#F48820' }  
   };
 
   if (airlineColors[airlineCode]) return airlineColors[airlineCode];
 
-  return { fill: '#f8fafc', stroke: '#0284c7' }; // General Aviation
+  return { fill: '#f8fafc', stroke: '#0284c7' }; 
 };
 
 export default function MapWidget() {
@@ -310,28 +310,29 @@ export default function MapWidget() {
         {/* ADVANCED STATS TAIL PANEL */}
         {selectedFlight && (
           <div 
-            className="absolute right-6 bottom-6 z-[1000] w-[400px] bg-[#162032] shadow-2xl transition-all duration-300 pointer-events-auto flex flex-col overflow-hidden"
-            style={{ 
-              // Polyon adjusted: Right side sweeps heavily starting at 50%
-              clipPath: 'polygon(0% 0%, 50% 0%, 100% 100%, 15% 100%)',
-              minHeight: '400px'
-            }}
+            className={`absolute z-[1000] bg-[#162032] shadow-2xl transition-all duration-300 pointer-events-auto flex flex-col overflow-hidden 
+              bottom-0 left-0 w-full rounded-t-2xl border-t border-slate-700
+              md:bottom-6 md:left-6 md:w-[400px] md:rounded-none md:border-none md:[clip-path:polygon(0%_0%,65%_0%,100%_100%,15%_100%)]
+              md:min-h-[400px]`}
           >
-            {/* Close Button moved to Top Left */}
+            {/* Close Button - Top right on mobile, Top left on desktop to follow the lean */}
             <button 
               onClick={closePanel} 
-              className="absolute top-4 left-6 p-1.5 bg-slate-900/80 rounded-full text-slate-300 hover:text-white hover:bg-red-500/80 z-50 transition-colors"
+              className="absolute p-1 bg-slate-800/80 rounded-full text-slate-300 hover:text-white hover:bg-red-500/80 z-50 transition-colors
+                top-3 right-4 md:top-4 md:left-8 md:right-auto"
               title="Close Panel"
             >
-              <X className="w-4 h-4" />
+              <X className="w-3 h-3" />
             </button>
 
-            {/* Content Wrapper - Pushed right slightly to clear the slanted trailing edge (left side) and heavily to clear the sweeping leading edge (right side) */}
-            <div className="flex-1 flex flex-col w-full text-slate-100 pt-16 pr-10">
+            {/* Content Wrapper - Standard padding on mobile, tailored lean padding on desktop */}
+            <div className="flex-1 flex flex-col w-full text-slate-100 p-5 md:p-0 md:pt-14 md:pr-10">
               
-              {/* 1. TOP: Pilot Telemetry Stats - Starts furthest left */}
-              <div className="flex flex-col gap-3 text-xs border-b border-slate-700/60 pb-3 ml-6">
-                <div className="grid grid-cols-2 gap-2">
+              {/* 1. TOP: Pilot Telemetry Stats - Incrementally staggered on desktop */}
+              <div className="flex flex-col text-xs border-b border-slate-700/60 pb-3 md:pr-2">
+                
+                {/* Row 1 */}
+                <div className="grid grid-cols-2 gap-2 md:ml-2">
                   <div>
                     <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Altitude</span>
                     <span className="text-sm font-bold text-emerald-400">
@@ -346,7 +347,8 @@ export default function MapWidget() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                {/* Row 2 */}
+                <div className="grid grid-cols-2 gap-2 mt-3 md:ml-5">
                   <div>
                     <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Climb / Descent</span>
                     <span className="font-semibold text-slate-200">
@@ -363,8 +365,9 @@ export default function MapWidget() {
                   </div>
                 </div>
 
+                {/* Row 3 */}
                 {selectedFlight.track != null && (
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 gap-2 mt-3 md:ml-8">
                     <div>
                       <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Heading</span>
                       <span className="font-semibold text-slate-200">{Math.round(selectedFlight.track)}°</span>
@@ -379,16 +382,15 @@ export default function MapWidget() {
                 )}
               </div>
 
-              {/* 2. MIDDLE: Aircraft Type - Shifted right */}
-              <div className="py-3 ml-10">
-                <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block mb-0.5">Aircraft Type</span>
+              {/* 2. MIDDLE: Aircraft Type (Removed header text) - Shifted right on desktop */}
+              <div className="py-3 md:ml-10">
                 <div className="text-sm font-bold text-slate-100 leading-snug break-words">
                   {selectedFlight.desc || selectedFlight.t || 'Unknown Aircraft'}
                 </div>
               </div>
 
-              {/* 3. LOWER MIDDLE: Callsign & Registration - Shifted furthest right */}
-              <div className="pt-2 pb-4 border-t border-slate-700/60 flex flex-col ml-14">
+              {/* 3. LOWER MIDDLE: Callsign & Registration - Shifted furthest right on desktop */}
+              <div className="pt-2 pb-4 border-t border-slate-700/60 flex flex-col md:ml-12">
                 <span className="text-2xl font-black tracking-tight text-white leading-none mb-1">
                   {selectedFlight.flight ? selectedFlight.flight.trim() : (selectedFlight.r || selectedFlight.hex)}
                 </span>
@@ -399,10 +401,7 @@ export default function MapWidget() {
             </div>
 
             {/* 4. BOTTOM: Airline Logo / Tail Graphic */}
-            <div 
-              className="w-full h-24 bg-slate-900/60 flex items-center justify-center relative mt-auto border-t border-slate-800" 
-              style={{ paddingLeft: '15%' }} // Aligns the image safely past the bottom-left clip margin
-            >
+            <div className="w-full h-16 md:h-24 bg-slate-900/60 flex items-center justify-center relative mt-auto border-t border-slate-800 md:pl-[15%]">
               {selectedFlight.flight ? (
                 <img 
                   src={`/tails/${selectedFlight.flight.trim().substring(0, 3).toUpperCase()}.svg`} 
