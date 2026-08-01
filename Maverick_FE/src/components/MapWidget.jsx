@@ -350,7 +350,7 @@ export default function MapWidget() {
             style={{
               // First shadow mimics a solid 2px border matching the plane body
               // Second shadow provides a soft ambient glow matching the plane trim
-              filter: `drop-shadow(0px 0px 2px ${panelStyle.fill}) drop-shadow(0px 0px 15px ${panelStyle.stroke})`
+              filter: `drop-shadow(0px 0px 3px ${panelStyle.fill}) drop-shadow(0px 0px 7px ${panelStyle.stroke})`
             }}
           >
             <div 
