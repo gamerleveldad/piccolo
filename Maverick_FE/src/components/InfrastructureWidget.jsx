@@ -21,15 +21,14 @@ export default function InfrastructureWidget() {
           return await res.json();
         };
 
-        // 1. Fetch System CPU
+        // 1. Fetch System CPU (Sums all active non-idle CPU states)
         let cpuUsage = 0;
         try {
           const cpuData = await fetchMetric('system.cpu');
-          const idleIndex = cpuData.labels.indexOf('idle');
-          if (idleIndex !== -1 && cpuData.data && cpuData.data.length > 0) {
-            cpuUsage = 100 - cpuData.data[0][idleIndex];
-          } else {
-            console.warn("CPU data missing or empty:", cpuData);
+          if (cpuData.data && cpuData.data.length > 0) {
+            // Slice off index 0 (timestamp) and sum up all active CPU state percentages
+            const activeValues = cpuData.data[0].slice(1);
+            cpuUsage = activeValues.reduce((sum, val) => sum + (val || 0), 0);
           }
         } catch (e) { console.warn("CPU fetch error:", e); }
 
@@ -53,16 +52,13 @@ export default function InfrastructureWidget() {
           }
         } catch (e) { console.warn("RAM fetch error:", e); }
 
-        // 3. Fetch Root Disk Space
+        // 3. Fetch Root Disk Space (Using disk_space.*)
         let diskUsage = 0;
         try {
-          const diskData = await fetchMetric('disk_space._');
+          const diskData = await fetchMetric('disk_space.*');
           const availIdx = diskData.labels.indexOf('avail');
           const usedIdx = diskData.labels.indexOf('used');
-          
-          // Netdata sometimes spaces this label differently depending on the version
-          let reservedIdx = diskData.labels.indexOf('reserved_for_root');
-          if (reservedIdx === -1) reservedIdx = diskData.labels.indexOf('reserved for root');
+          const reservedIdx = diskData.labels.indexOf('reserved for root');
 
           if (availIdx !== -1 && usedIdx !== -1 && diskData.data && diskData.data.length > 0) {
             const avail = diskData.data[0][availIdx] || 0;
@@ -71,8 +67,6 @@ export default function InfrastructureWidget() {
             
             const totalDisk = avail + diskUsed + reserved;
             if (totalDisk > 0) diskUsage = (diskUsed / totalDisk) * 100;
-          } else {
-            console.warn("Disk data missing or empty labels:", diskData);
           }
         } catch (e) { console.warn("Disk space fetch error:", e); }
 
