@@ -310,31 +310,27 @@ export default function MapWidget() {
         {/* ADVANCED STATS TAIL PANEL */}
         {selectedFlight && (
           <div 
-            className="absolute right-6 bottom-6 z-[1000] w-[340px] bg-[#162032] shadow-2xl transition-all duration-300 pointer-events-auto flex flex-col overflow-hidden"
+            className="absolute right-6 bottom-6 z-[1000] w-[400px] bg-[#162032] shadow-2xl transition-all duration-300 pointer-events-auto flex flex-col overflow-hidden"
             style={{ 
-              // Polyon adjusted: Left side tilts slightly backwards (15% to 0%), right side sweeps heavily (100% to 65%)
-              clipPath: 'polygon(0% 0%, 65% 0%, 100% 100%, 15% 100%)',
+              // Polyon adjusted: Right side sweeps heavily starting at 50%
+              clipPath: 'polygon(0% 0%, 50% 0%, 100% 100%, 15% 100%)',
               minHeight: '400px'
             }}
           >
-            {/* 
-              Close Button 
-              Moved inward to 35% from the right to ensure it never gets clipped by the 65% swept corner 
-            */}
+            {/* Close Button moved to Top Left */}
             <button 
               onClick={closePanel} 
-              className="absolute p-1 bg-slate-900/80 rounded-full text-slate-300 hover:text-white hover:bg-red-500/80 z-50 transition-colors"
-              style={{ top: '1rem', right: '35%' }}
+              className="absolute top-4 left-6 p-1.5 bg-slate-900/80 rounded-full text-slate-300 hover:text-white hover:bg-red-500/80 z-50 transition-colors"
               title="Close Panel"
             >
               <X className="w-4 h-4" />
             </button>
 
-            {/* Content Wrapper for Text elements - Adds left padding to follow the lean */}
-            <div className="flex-1 flex flex-col w-full text-slate-100" style={{ padding: '2.5rem 1rem 0 16%' }}>
+            {/* Content Wrapper - Pushed right slightly to clear the slanted trailing edge (left side) and heavily to clear the sweeping leading edge (right side) */}
+            <div className="flex-1 flex flex-col w-full text-slate-100 pt-16 pr-10">
               
-              {/* 1. TOP: Pilot Telemetry Stats */}
-              <div className="flex flex-col gap-3 text-xs border-b border-slate-700/60 pb-3 pr-2">
+              {/* 1. TOP: Pilot Telemetry Stats - Starts furthest left */}
+              <div className="flex flex-col gap-3 text-xs border-b border-slate-700/60 pb-3 ml-6">
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Altitude</span>
@@ -383,16 +379,16 @@ export default function MapWidget() {
                 )}
               </div>
 
-              {/* 2. MIDDLE: Aircraft Type */}
-              <div className="py-3 pr-2">
+              {/* 2. MIDDLE: Aircraft Type - Shifted right */}
+              <div className="py-3 ml-10">
                 <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block mb-0.5">Aircraft Type</span>
                 <div className="text-sm font-bold text-slate-100 leading-snug break-words">
                   {selectedFlight.desc || selectedFlight.t || 'Unknown Aircraft'}
                 </div>
               </div>
 
-              {/* 3. LOWER MIDDLE: Callsign & Registration */}
-              <div className="pt-2 pb-3 border-t border-slate-700/60 flex flex-col pr-2">
+              {/* 3. LOWER MIDDLE: Callsign & Registration - Shifted furthest right */}
+              <div className="pt-2 pb-4 border-t border-slate-700/60 flex flex-col ml-14">
                 <span className="text-2xl font-black tracking-tight text-white leading-none mb-1">
                   {selectedFlight.flight ? selectedFlight.flight.trim() : (selectedFlight.r || selectedFlight.hex)}
                 </span>
