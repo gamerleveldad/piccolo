@@ -4,50 +4,41 @@ import requests
 import psycopg2
 from datetime import datetime, date
 import math
+from influxdb_client import InfluxDBClient, Point
+from influxdb_client.client.write_api import SYNCHRONOUS
 
 # --- Configuration ---
-# Your Home Coordinates (Replace with your actual coordinates)
 HOME_LAT = 28.679885  
 HOME_LON = -81.368495
 
-# SDR JSON URL (Assuming ultrafeeder is running locally on port 8085)
 JSON_URL = "http://localhost:8085/data/aircraft.json"
-
-# Discord Webhook URL
 DISCORD_WEBHOOK_URL = "YOUR_DISCORD_WEBHOOK_URL" 
 
-# Database Connection (Adjust as needed)
+# PostgreSQL Settings
 DB_HOST = "localhost" 
 DB_NAME = "piccolo"
 DB_USER = "YOUR_DB_USER"
 DB_PASS = "YOUR_DB_PASSWORD"
 
-# --- Distance Calculation (Haversine Formula) ---
+# InfluxDB 2.x Settings
+INFLUX_URL = "http://localhost:8086"
+INFLUX_TOKEN = "YOUR_NEW_INFLUX_TOKEN"  # Update with your new token if recreated
+INFLUX_ORG = "YOUR_INFLUX_ORG"
+INFLUX_BUCKET = "piccolo"
+
+# --- Distance Calculation ---
 def calculate_distance(lat1, lon1, lat2, lon2):
-    """Calculates the great-circle distance between two points in miles."""
-    # Convert latitude and longitude from degrees to radians
     lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
-    
-    # Calculate the differences
     dlat = lat2 - lat1
     dlon = lon2 - lon1
-    
-    # Haversine formula
     a = math.sin(dlat / 2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2)**2
     c = 2 * math.asin(math.sqrt(a))
-    
-    # Radius of Earth in miles
-    r = 3958.8 
-    
-    # Return distance
-    return c * r
+    return c * 3958.8  # Miles
 
 # --- Database Initialization ---
 def init_db():
     conn = psycopg2.connect(host=DB_HOST, database=DB_NAME, user=DB_USER, password=DB_PASS)
     cur = conn.cursor()
-    
-    # Create the main tracking table (dropping if exists for a clean slate, adjust if you want to keep old data)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS daily_flights (
             hex VARCHAR(10) PRIMARY KEY,
@@ -70,53 +61,70 @@ def init_db():
     conn.commit()
     return conn, cur
 
+# --- InfluxDB Client ---
+influx_client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+write_api = influx_client.write_api(write_options=SYNCHRONOUS)
+
 # --- Data Processing and Storage ---
 def process_aircraft(conn, cur, data):
+    influx_points = []
+    
     for aircraft in data.get("aircraft", []):
         hex_code = aircraft.get("hex")
         lat = aircraft.get("lat")
         lon = aircraft.get("lon")
         
-        # Skip if no position data
         if not lat or not lon:
             continue
             
         distance = calculate_distance(HOME_LAT, HOME_LON, lat, lon)
         
-        # Determine Category using dbFlags
+        # Determine Category
         is_military = False
         is_leo = False
         category_name = "Civilian"
         db_flags = aircraft.get("dbFlags", 0)
         
-        if db_flags & 1:  # Military flag
+        if db_flags & 1:
             is_military = True
             category_name = "Military"
-        elif db_flags & 2:  # LEO / Interesting flag
+        elif db_flags & 2:
             is_leo = True
             category_name = "LEO"
 
-        # Check for immediate Discord Alerts (within 4 miles)
+        # 1. Discord Alerts (within 4 miles)
         if (is_military or is_leo) and distance <= 4.0:
             alert_special_aircraft(aircraft, distance, category_name)
 
-        # We only want to track data for the digest if it's within a reasonable radius (e.g., 20 miles) to save DB space,
-        # but we'll apply the 3-mile filter during the digest generation.
-        if distance <= 20: 
-            # Extract data
-            flight = aircraft.get("flight", "").strip()
-            registration = aircraft.get("r", "")
-            ac_type = aircraft.get("t", "")
-            desc = aircraft.get("desc", "")
-            operator = aircraft.get("ownOp", "")
-            alt = aircraft.get("alt_baro")
-            speed = aircraft.get("gs")
-            
-            # Skip if alt or speed are missing or invalid
-            if not isinstance(alt, (int, float)) or not isinstance(speed, (int, float)):
-                continue
+        flight = aircraft.get("flight", "").strip()
+        registration = aircraft.get("r", "")
+        ac_type = aircraft.get("t", "")
+        desc = aircraft.get("desc", "")
+        operator = aircraft.get("ownOp", "")
+        alt = aircraft.get("alt_baro")
+        speed = aircraft.get("gs")
+        track = aircraft.get("track", 0.0)
 
-            # Upsert into database
+        if not isinstance(alt, (int, float)) or not isinstance(speed, (int, float)):
+            continue
+
+        # 2. InfluxDB Time-Series Metric (Point-in-Time Telemetry)
+        p = Point("flights_overhead") \
+            .tag("hex", hex_code) \
+            .tag("flight", flight or "UNKNOWN") \
+            .tag("type", ac_type or "UNKNOWN") \
+            .tag("category", category_name) \
+            .field("altitude", float(alt)) \
+            .field("speed", float(speed)) \
+            .field("heading", float(track)) \
+            .field("distance_miles", float(distance)) \
+            .field("latitude", float(lat)) \
+            .field("longitude", float(lon))
+        
+        influx_points.append(p)
+
+        # 3. PostgreSQL Aggregations (Only for local radius tracking <= 20 miles)
+        if distance <= 20: 
             cur.execute("""
                 INSERT INTO daily_flights (
                     hex, flight, registration, type, description, operator, category, 
@@ -137,14 +145,18 @@ def process_aircraft(conn, cur, data):
             ))
             conn.commit()
 
-# --- Discord Alerts ---
+    # Batch write points to InfluxDB
+    if influx_points:
+        try:
+            write_api.write(bucket=INFLUX_BUCKET, record=influx_points)
+        except Exception as e:
+            print(f"Failed to write to InfluxDB: {e}")
 
-# Global set to track alerted hex codes to prevent spamming
+# --- Discord Alerts & Digest ---
 alerted_aircraft = set()
 
 def alert_special_aircraft(aircraft, distance, category):
     hex_code = aircraft.get("hex")
-    
     if hex_code in alerted_aircraft:
         return
         
@@ -159,77 +171,59 @@ def alert_special_aircraft(aircraft, distance, category):
     try:
         requests.post(DISCORD_WEBHOOK_URL, json=message)
         alerted_aircraft.add(hex_code)
-        print(f"Alerted for {hex_code}")
     except Exception as e:
         print(f"Failed to send Discord alert: {e}")
 
 def send_daily_digest(cur):
     print("Generating Daily Digest...")
     
-    # 1. Top 5 Airlines (Operators)
     cur.execute("""
         SELECT operator, COUNT(*) as count 
         FROM daily_flights 
         WHERE operator != '' AND is_military = FALSE AND is_leo = FALSE
-        GROUP BY operator 
-        ORDER BY count DESC 
-        LIMIT 5
+        GROUP BY operator ORDER BY count DESC LIMIT 5
     """)
     top_airlines = cur.fetchall()
 
-    # 2. Top 5 Airplane Types
     cur.execute("""
         SELECT type, description, COUNT(*) as count 
         FROM daily_flights 
         WHERE type != ''
-        GROUP BY type, description 
-        ORDER BY count DESC 
-        LIMIT 5
+        GROUP BY type, description ORDER BY count DESC LIMIT 5
     """)
     top_types = cur.fetchall()
 
-    # 3. LEO Visits
     cur.execute("SELECT COUNT(*) FROM daily_flights WHERE is_leo = TRUE")
     leo_visits = cur.fetchone()[0]
 
-    # 4. Military Aircraft Detected (with types)
     cur.execute("SELECT flight, type, description FROM daily_flights WHERE is_military = TRUE")
     mil_flights = cur.fetchall()
 
-    # 5. Highest Altitude (Overall)
     cur.execute("SELECT MAX(max_altitude) FROM daily_flights")
     max_alt = cur.fetchone()[0]
 
-    # 6. Lowest Altitude (Within 3 miles)
     cur.execute("SELECT MIN(min_altitude) FROM daily_flights WHERE closest_distance <= 3.0")
     min_alt_3m = cur.fetchone()[0]
     
-    # 7. Closest Aircraft
     cur.execute("""
         SELECT flight, registration, type, closest_distance 
-        FROM daily_flights 
-        WHERE closest_distance IS NOT NULL
-        ORDER BY closest_distance ASC 
-        LIMIT 1
+        FROM daily_flights WHERE closest_distance IS NOT NULL
+        ORDER BY closest_distance ASC LIMIT 1
     """)
     closest_ac = cur.fetchone()
 
-    # 8. Fastest Speed (Overall)
     cur.execute("SELECT MAX(max_speed) FROM daily_flights")
     max_spd = cur.fetchone()[0]
 
-    # 9. Lowest Speed (Within 3 miles)
     cur.execute("SELECT MIN(min_speed) FROM daily_flights WHERE closest_distance <= 3.0")
     min_spd_3m = cur.fetchone()[0]
 
-    # 10. Total Count (Within 3 miles)
     cur.execute("SELECT COUNT(*) FROM daily_flights WHERE closest_distance <= 3.0")
     count_3m = cur.fetchone()[0]
 
-    # --- Constructing the Embed Message ---
     embed = {
         "title": f"📊 Daily Airspace Digest: {date.today()}",
-        "color": 3447003, # A nice blue color
+        "color": 3447003,
         "fields": []
     }
 
@@ -253,17 +247,12 @@ def send_daily_digest(cur):
     embed["fields"].append({"name": "Slowest Speed (<3mi)", "value": f"{min_spd_3m or 'N/A'} kts", "inline": True})
     embed["fields"].append({"name": "Total Flights (<3mi)", "value": str(count_3m), "inline": True})
 
-
     message = {"embeds": [embed]}
 
     try:
         requests.post(DISCORD_WEBHOOK_URL, json=message)
-        print("Daily digest sent successfully.")
-        
-        # Clear the database for the next day
         cur.execute("TRUNCATE TABLE daily_flights")
         alerted_aircraft.clear()
-        
     except Exception as e:
         print(f"Failed to send digest: {e}")
 
@@ -272,7 +261,7 @@ if __name__ == "__main__":
     conn, cur = init_db()
     last_digest_date = datetime.now().date()
     
-    print("Starting native SDR tracker loop...")
+    print("Starting native SDR tracker loop (PostgreSQL + InfluxDB)...")
     while True:
         try:
             current_date = datetime.now().date()
@@ -290,4 +279,4 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"An unexpected error occurred: {e}")
             
-        time.sleep(5) # Poll every 5 seconds
+        time.sleep(5)
