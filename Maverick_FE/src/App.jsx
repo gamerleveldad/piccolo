@@ -8,19 +8,16 @@ import AdvancedWeatherWidget from './components/AdvancedWeatherWidget';
 function App() {
   // Data state variables
   const [weather, setWeather] = useState(null);
-  const [flights, setFlights] = useState([]);
   const [error, setError] = useState(null);
 
   const host = window.location.hostname;
   const WEATHER_URL = `http://${host}:8004/api/weather/current`;
-  const FLIGHT_URL = `http://${host}:8003/api/flights/active`;
 
-  // Unit Conversion Helpers
+  // Unit Conversion Helpers (Note: These might also be dead code if handled inside your Weather widgets now!)
   const toFahrenheit = (c) => c != null ? ((c * 9/5) + 32).toFixed(1) : '--';
   const toMPH = (ms) => ms != null ? (ms * 2.23694).toFixed(1) : '--';
   const toInches = (mm) => mm != null ? (mm / 25.4).toFixed(2) : '0.00';
 
-  // Fetch logic remains exactly the same as your previous working version
   useEffect(() => {
     fetch(WEATHER_URL)
       .then(async res => {
@@ -29,15 +26,7 @@ function App() {
       })
       .then(data => setWeather(data))
       .catch(err => setError(prev => (prev ? `${prev} | ${err.message}` : err.message)));
-
-    fetch(FLIGHT_URL)
-      .then(async res => {
-        if (!res.ok) throw new Error(`Flight API: ${res.status}`);
-        return res.json();
-      })
-      .then(data => setFlights(data))
-      .catch(err => setError(prev => (prev ? `${prev} | ${err.message}` : err.message)));
-  }, [WEATHER_URL, FLIGHT_URL]);
+  }, [WEATHER_URL]);
 
   return (
     <div className="min-h-screen bg-[#0b0f19] text-slate-100 p-4 md:p-6">

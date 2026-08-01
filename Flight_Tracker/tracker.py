@@ -1,235 +1,293 @@
-import os
+import json
 import time
 import requests
 import psycopg2
-from influxdb_client import InfluxDBClient, Point
-from influxdb_client.client.write_api import SYNCHRONOUS
-from haversine import haversine, Unit
-from datetime import datetime
+from datetime import datetime, date
+import math
 
 # --- Configuration ---
-LATITUDE = float(os.getenv("HOME_LATITUDE", "0.0"))
-LONGITUDE = float(os.getenv("HOME_LONGITUDE", "0.0"))
-RADIUS_NM = 5
-POLL_INTERVAL = 30 
-FLIGHT_DISCORD_WEBHOOK = os.getenv("FLIGHT_DISCORD_WEBHOOK")
+# Your Home Coordinates (Replace with your actual coordinates)
+HOME_LAT = 28.679885  
+HOME_LON = -81.368495
 
-# Common local sheriff aviation callsigns or N-numbers
-LEO_IDENTIFIERS = ["ALERT", "CHASE"] 
+# SDR JSON URL (Assuming ultrafeeder is running locally on port 8085)
+JSON_URL = "http://localhost:8085/data/aircraft.json"
 
-# PostgreSQL config
-PG_HOST = os.getenv("POSTGRES_HOST", "postgres_db")
-PG_USER = os.getenv("POSTGRES_USER")
-PG_PASSWORD = os.getenv("POSTGRES_PASSWORD")
-PG_DB = os.getenv("POSTGRES_DB")
+# Discord Webhook URL
+DISCORD_WEBHOOK_URL = "YOUR_DISCORD_WEBHOOK_URL" 
 
-# InfluxDB config
-INFLUX_URL = os.getenv("INFLUXDB_URL", "http://influxdb:8086")
-INFLUX_TOKEN = os.getenv("INFLUXDB_TOKEN")
-INFLUX_ORG = os.getenv("INFLUXDB_ORG")
-INFLUX_BUCKET = os.getenv("FLIGHT_TRACKER_BUCKET", "flight_data")
+# Database Connection (Adjust as needed)
+DB_HOST = "localhost" 
+DB_NAME = "piccolo"
+DB_USER = "YOUR_DB_USER"
+DB_PASS = "YOUR_DB_PASSWORD"
 
-API_URL = f"https://api.adsb.lol/v2/point/{LATITUDE}/{LONGITUDE}/{RADIUS_NM}"
-HOME_COORDS = (LATITUDE, LONGITUDE)
+# --- Distance Calculation (Haversine Formula) ---
+def calculate_distance(lat1, lon1, lat2, lon2):
+    """Calculates the great-circle distance between two points in miles."""
+    # Convert latitude and longitude from degrees to radians
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    
+    # Calculate the differences
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    
+    # Haversine formula
+    a = math.sin(dlat / 2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2)**2
+    c = 2 * math.asin(math.sqrt(a))
+    
+    # Radius of Earth in miles
+    r = 3958.8 
+    
+    # Return distance
+    return c * r
 
-def init_postgres():
-    conn = psycopg2.connect(host=PG_HOST, dbname=PG_DB, user=PG_USER, password=PG_PASSWORD)
+# --- Database Initialization ---
+def init_db():
+    conn = psycopg2.connect(host=DB_HOST, database=DB_NAME, user=DB_USER, password=DB_PASS)
     cur = conn.cursor()
+    
+    # Create the main tracking table (dropping if exists for a clean slate, adjust if you want to keep old data)
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS flights_overhead (
-            icao_hex VARCHAR(10) PRIMARY KEY,
-            registration VARCHAR(15),
-            callsign VARCHAR(20),
-            aircraft_type VARCHAR(20),
-            emitter_category VARCHAR(10),
-            altitude_ft INTEGER,
-            vertical_rate INTEGER,
-            ground_speed_kts INTEGER,
-            heading NUMERIC,
-            distance_nm NUMERIC,
-            squawk VARCHAR(10),
-            emergency VARCHAR(20),
+        CREATE TABLE IF NOT EXISTS daily_flights (
+            hex VARCHAR(10) PRIMARY KEY,
+            flight VARCHAR(10),
+            registration VARCHAR(10),
+            type VARCHAR(10),
+            description TEXT,
+            operator TEXT,
+            category VARCHAR(50),
+            max_altitude INT,
+            min_altitude INT,
+            max_speed INT,
+            min_speed INT,
+            closest_distance FLOAT,
+            last_seen TIMESTAMP,
             is_military BOOLEAN,
-            is_leo BOOLEAN,
-            first_seen TIMESTAMP DEFAULT NOW(),
-            last_seen TIMESTAMP DEFAULT NOW(),
-            ping_count INTEGER DEFAULT 1
+            is_leo BOOLEAN
         )
     """)
     conn.commit()
     return conn, cur
 
-def send_discord_alert(title, color, fields):
-    if not FLIGHT_DISCORD_WEBHOOK:
+# --- Data Processing and Storage ---
+def process_aircraft(conn, cur, data):
+    for aircraft in data.get("aircraft", []):
+        hex_code = aircraft.get("hex")
+        lat = aircraft.get("lat")
+        lon = aircraft.get("lon")
+        
+        # Skip if no position data
+        if not lat or not lon:
+            continue
+            
+        distance = calculate_distance(HOME_LAT, HOME_LON, lat, lon)
+        
+        # Determine Category using dbFlags
+        is_military = False
+        is_leo = False
+        category_name = "Civilian"
+        db_flags = aircraft.get("dbFlags", 0)
+        
+        if db_flags & 1:  # Military flag
+            is_military = True
+            category_name = "Military"
+        elif db_flags & 2:  # LEO / Interesting flag
+            is_leo = True
+            category_name = "LEO"
+
+        # Check for immediate Discord Alerts (within 4 miles)
+        if (is_military or is_leo) and distance <= 4.0:
+            alert_special_aircraft(aircraft, distance, category_name)
+
+        # We only want to track data for the digest if it's within a reasonable radius (e.g., 20 miles) to save DB space,
+        # but we'll apply the 3-mile filter during the digest generation.
+        if distance <= 20: 
+            # Extract data
+            flight = aircraft.get("flight", "").strip()
+            registration = aircraft.get("r", "")
+            ac_type = aircraft.get("t", "")
+            desc = aircraft.get("desc", "")
+            operator = aircraft.get("ownOp", "")
+            alt = aircraft.get("alt_baro")
+            speed = aircraft.get("gs")
+            
+            # Skip if alt or speed are missing or invalid
+            if not isinstance(alt, (int, float)) or not isinstance(speed, (int, float)):
+                continue
+
+            # Upsert into database
+            cur.execute("""
+                INSERT INTO daily_flights (
+                    hex, flight, registration, type, description, operator, category, 
+                    max_altitude, min_altitude, max_speed, min_speed, closest_distance, 
+                    last_seen, is_military, is_leo
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s, %s
+                ) ON CONFLICT (hex) DO UPDATE SET
+                    max_altitude = GREATEST(daily_flights.max_altitude, EXCLUDED.max_altitude),
+                    min_altitude = LEAST(daily_flights.min_altitude, EXCLUDED.min_altitude),
+                    max_speed = GREATEST(daily_flights.max_speed, EXCLUDED.max_speed),
+                    min_speed = LEAST(daily_flights.min_speed, EXCLUDED.min_speed),
+                    closest_distance = LEAST(daily_flights.closest_distance, EXCLUDED.closest_distance),
+                    last_seen = EXCLUDED.last_seen
+            """, (
+                hex_code, flight, registration, ac_type, desc, operator, category_name,
+                alt, alt, speed, speed, distance, is_military, is_leo
+            ))
+            conn.commit()
+
+# --- Discord Alerts ---
+
+# Global set to track alerted hex codes to prevent spamming
+alerted_aircraft = set()
+
+def alert_special_aircraft(aircraft, distance, category):
+    hex_code = aircraft.get("hex")
+    
+    if hex_code in alerted_aircraft:
         return
-    payload = {
-        "embeds": [{
-            "title": title,
-            "color": color,
-            "fields": fields,
-            "timestamp": datetime.utcnow().isoformat()
-        }]
+        
+    flight_id = aircraft.get("flight", "").strip() or aircraft.get("r", "Unknown")
+    ac_type = aircraft.get("desc") or aircraft.get("t", "Unknown Type")
+    
+    message = {
+        "content": f"🚨 **{category} Aircraft Alert!** 🚨\n"
+                   f"**{flight_id}** ({ac_type}) is currently **{distance:.1f} miles** away."
     }
+    
     try:
-        requests.post(FLIGHT_DISCORD_WEBHOOK, json=payload, timeout=5)
+        requests.post(DISCORD_WEBHOOK_URL, json=message)
+        alerted_aircraft.add(hex_code)
+        print(f"Alerted for {hex_code}")
     except Exception as e:
-        print(f"Discord error: {e}")
+        print(f"Failed to send Discord alert: {e}")
 
-def send_midnight_digest(pg_cur, sheriff_visits, sheriff_seconds):
-    # Top 5 Types
-    pg_cur.execute("SELECT aircraft_type, COUNT(*) as c FROM flights_overhead WHERE aircraft_type NOT IN ('Unknown', '') GROUP BY aircraft_type ORDER BY c DESC LIMIT 5")
-    types = "\n".join([f"{row[0]}: {row[1]}" for row in pg_cur.fetchall()]) or "None"
+def send_daily_digest(cur):
+    print("Generating Daily Digest...")
     
-    # Top 5 Airlines (Extracting the first 3 ICAO characters)
-    pg_cur.execute("SELECT SUBSTRING(callsign FROM '^[A-Z]{3}') as airline, COUNT(*) as c FROM flights_overhead WHERE callsign ~ '^[A-Z]{3}[0-9]' GROUP BY airline ORDER BY c DESC LIMIT 5")
-    airlines = "\n".join([f"{row[0]}: {row[1]}" for row in pg_cur.fetchall()]) or "None"
-    
-    # Military List
-    pg_cur.execute("SELECT registration, callsign, aircraft_type FROM flights_overhead WHERE is_military = TRUE")
-    mil = "\n".join([f"{row[1]} ({row[0]}) - {row[2]}" for row in pg_cur.fetchall()]) or "None"
-    
-    minutes_in_range = sheriff_seconds // 60
-    fields = [
-        {"name": "Top 5 Types", "value": types, "inline": True},
-        {"name": "Top 5 Airlines", "value": airlines, "inline": True},
-        {"name": "Sheriff Stats", "value": f"Unique Visits: {sheriff_visits}\nTime in Range: {minutes_in_range} mins", "inline": False},
-        {"name": "Military Aircraft Detected", "value": mil, "inline": False},
-    ]
-    send_discord_alert("Daily Flight Tracking Digest", 3447003, fields)
+    # 1. Top 5 Airlines (Operators)
+    cur.execute("""
+        SELECT operator, COUNT(*) as count 
+        FROM daily_flights 
+        WHERE operator != '' AND is_military = FALSE AND is_leo = FALSE
+        GROUP BY operator 
+        ORDER BY count DESC 
+        LIMIT 5
+    """)
+    top_airlines = cur.fetchall()
 
-def main():
-    print(f"Starting ADS-B Tracker for {LATITUDE}, {LONGITUDE} ({RADIUS_NM}nm radius)")
-    pg_conn, pg_cur = init_postgres()
-    influx_client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
-    write_api = influx_client.write_api(write_options=SYNCHRONOUS)
+    # 2. Top 5 Airplane Types
+    cur.execute("""
+        SELECT type, description, COUNT(*) as count 
+        FROM daily_flights 
+        WHERE type != ''
+        GROUP BY type, description 
+        ORDER BY count DESC 
+        LIMIT 5
+    """)
+    top_types = cur.fetchall()
 
-    # State Variables
-    alerted_aircraft = {}
-    active_leo_tracking = {}
-    sheriff_visits_today = 0
-    sheriff_seconds_in_range = 0
+    # 3. LEO Visits
+    cur.execute("SELECT COUNT(*) FROM daily_flights WHERE is_leo = TRUE")
+    leo_visits = cur.fetchone()[0]
+
+    # 4. Military Aircraft Detected (with types)
+    cur.execute("SELECT flight, type, description FROM daily_flights WHERE is_military = TRUE")
+    mil_flights = cur.fetchall()
+
+    # 5. Highest Altitude (Overall)
+    cur.execute("SELECT MAX(max_altitude) FROM daily_flights")
+    max_alt = cur.fetchone()[0]
+
+    # 6. Lowest Altitude (Within 3 miles)
+    cur.execute("SELECT MIN(min_altitude) FROM daily_flights WHERE closest_distance <= 3.0")
+    min_alt_3m = cur.fetchone()[0]
+    
+    # 7. Closest Aircraft
+    cur.execute("""
+        SELECT flight, registration, type, closest_distance 
+        FROM daily_flights 
+        WHERE closest_distance IS NOT NULL
+        ORDER BY closest_distance ASC 
+        LIMIT 1
+    """)
+    closest_ac = cur.fetchone()
+
+    # 8. Fastest Speed (Overall)
+    cur.execute("SELECT MAX(max_speed) FROM daily_flights")
+    max_spd = cur.fetchone()[0]
+
+    # 9. Lowest Speed (Within 3 miles)
+    cur.execute("SELECT MIN(min_speed) FROM daily_flights WHERE closest_distance <= 3.0")
+    min_spd_3m = cur.fetchone()[0]
+
+    # 10. Total Count (Within 3 miles)
+    cur.execute("SELECT COUNT(*) FROM daily_flights WHERE closest_distance <= 3.0")
+    count_3m = cur.fetchone()[0]
+
+    # --- Constructing the Embed Message ---
+    embed = {
+        "title": f"📊 Daily Airspace Digest: {date.today()}",
+        "color": 3447003, # A nice blue color
+        "fields": []
+    }
+
+    if top_airlines:
+        embed["fields"].append({"name": "Top 5 Airlines", "value": "\n".join([f"{row[0]} ({row[1]})" for row in top_airlines]), "inline": False})
+    if top_types:
+        embed["fields"].append({"name": "Top 5 Aircraft Types", "value": "\n".join([f"{row[1] or row[0]} ({row[2]})" for row in top_types]), "inline": False})
+    
+    embed["fields"].append({"name": "LEO Activity", "value": f"{leo_visits} LEO aircraft detected", "inline": True})
+    
+    mil_text = "\n".join([f"{row[0] or 'Unknown'} - {row[2] or row[1]}" for row in mil_flights]) if mil_flights else "None"
+    embed["fields"].append({"name": "Military Activity", "value": mil_text, "inline": False})
+    
+    embed["fields"].append({"name": "Highest Altitude (Overall)", "value": f"{max_alt or 'N/A'} ft", "inline": True})
+    embed["fields"].append({"name": "Lowest Altitude (<3mi)", "value": f"{min_alt_3m or 'N/A'} ft", "inline": True})
+    
+    closest_text = f"{closest_ac[0] or closest_ac[1]} ({closest_ac[2]}) at {closest_ac[3]:.2f} miles" if closest_ac else "N/A"
+    embed["fields"].append({"name": "Closest Approach", "value": closest_text, "inline": False})
+    
+    embed["fields"].append({"name": "Fastest Speed (Overall)", "value": f"{max_spd or 'N/A'} kts", "inline": True})
+    embed["fields"].append({"name": "Slowest Speed (<3mi)", "value": f"{min_spd_3m or 'N/A'} kts", "inline": True})
+    embed["fields"].append({"name": "Total Flights (<3mi)", "value": str(count_3m), "inline": True})
+
+
+    message = {"embeds": [embed]}
+
+    try:
+        requests.post(DISCORD_WEBHOOK_URL, json=message)
+        print("Daily digest sent successfully.")
+        
+        # Clear the database for the next day
+        cur.execute("TRUNCATE TABLE daily_flights")
+        alerted_aircraft.clear()
+        
+    except Exception as e:
+        print(f"Failed to send digest: {e}")
+
+# --- Main Loop ---
+if __name__ == "__main__":
+    conn, cur = init_db()
     last_digest_date = datetime.now().date()
-
+    
+    print("Starting native SDR tracker loop...")
     while True:
         try:
-            current_time = time.time()
             current_date = datetime.now().date()
-            
-            # Trigger Midnight Digest
             if current_date != last_digest_date:
-                send_midnight_digest(pg_cur, sheriff_visits_today, sheriff_seconds_in_range)
-                sheriff_visits_today = 0
-                sheriff_seconds_in_range = 0
-                alerted_aircraft.clear()
-                active_leo_tracking.clear()
+                send_daily_digest(cur)
                 last_digest_date = current_date
 
-            response = requests.get(API_URL, timeout=30)
-            response.raise_for_status()
-            aircraft_list = response.json().get("ac", [])
-
-            for ac in aircraft_list:
-                icao_hex = ac.get("hex", "Unknown")
-                registration = str(ac.get("r", "Unknown")).strip()
-                callsign = str(ac.get("flight", "N/A")).strip()
-                ac_type = ac.get("t", "Unknown")
-                emitter_cat = ac.get("category", "Unknown")
-                lat = ac.get("lat")
-                lon = ac.get("lon")
+            response = requests.get(JSON_URL, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                process_aircraft(conn, cur, data)
                 
-                squawk = str(ac.get("squawk", "")).strip()
-                emergency = str(ac.get("emergency", "none")).strip()
-                vertical_rate = int(ac.get("baro_rate", 0))
-                heading = float(ac.get("trk", 0.0)) if ac.get("trk") is not None else 0.0
-                alt_raw = ac.get("alt_baro", 0)
-                altitude_ft = 0 if alt_raw == "ground" else int(alt_raw or 0)
-                ground_speed_kts = int(ac.get("gs", 0))
-
-                if lat is None or lon is None:
-                    continue
-
-                distance_nm = round(haversine(HOME_COORDS, (lat, lon), unit=Unit.NAUTICAL_MILES), 2)
-
-                # Flag Parsing
-                is_military = ac.get("mil", False) == True or (ac.get("dbFlags", 0) & 1) == 1 
-                is_leo = any(ident in registration for ident in LEO_IDENTIFIERS) or any(ident in callsign for ident in LEO_IDENTIFIERS)
-                is_emergency = squawk in ["7500", "7600", "7700"] or (emergency.lower() not in ["none", ""])
-
-                # --- DISCORD ALERT LOGIC ---
-                if is_emergency or is_leo or is_military:
-                    last_alert = alerted_aircraft.get(icao_hex, 0)
-                    # Block repeat alerts for the same airframe for 4 hours
-                    if current_time - last_alert > 14400: 
-                        alert_type = "Emergency Squawk Detected!" if is_emergency else "LEO / Military Aircraft Overhead"
-                        color = 16711680 if is_emergency else 3447003
-                        fields = [
-                            {"name": "Callsign / Reg", "value": f"{callsign} / {registration}", "inline": True},
-                            {"name": "Type", "value": ac_type, "inline": True},
-                            {"name": "Distance", "value": f"{distance_nm} nm", "inline": True},
-                            {"name": "Altitude", "value": f"{altitude_ft} ft", "inline": True},
-                            {"name": "Squawk", "value": f"{squawk} ({emergency})", "inline": True}
-                        ]
-                        send_discord_alert(alert_type, color, fields)
-                        alerted_aircraft[icao_hex] = current_time
-
-                # --- LEO STAT TRACKING ---
-                if is_leo:
-                    sheriff_seconds_in_range += POLL_INTERVAL
-                    last_leo_ping = active_leo_tracking.get(icao_hex, 0)
-                    # If we haven't seen this hex in 20 minutes, count it as a new distinct flyover
-                    if current_time - last_leo_ping > 1200: 
-                        sheriff_visits_today += 1
-                    active_leo_tracking[icao_hex] = current_time
-
-                # 1. Write to InfluxDB
-                point = Point("flight_tracking") \
-                    .tag("icao_hex", icao_hex) \
-                    .tag("callsign", callsign) \
-                    .tag("aircraft_type", ac_type) \
-                    .tag("squawk", squawk) \
-                    .field("altitude_ft", altitude_ft) \
-                    .field("distance_nm", float(distance_nm)) \
-                    .field("lat", float(lat)) \
-                    .field("lon", float(lon))
-                write_api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=point)
-
-                # 2. Upsert to PostgreSQL
-                pg_cur.execute("""
-                    INSERT INTO flights_overhead (
-                        icao_hex, registration, callsign, aircraft_type, emitter_category, 
-                        altitude_ft, vertical_rate, ground_speed_kts, heading, distance_nm, 
-                        squawk, emergency, is_military, is_leo, first_seen, last_seen, ping_count
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), 1)
-                    ON CONFLICT (icao_hex) DO UPDATE SET
-                        registration = EXCLUDED.registration,
-                        callsign = EXCLUDED.callsign,
-                        altitude_ft = EXCLUDED.altitude_ft,
-                        vertical_rate = EXCLUDED.vertical_rate,
-                        ground_speed_kts = EXCLUDED.ground_speed_kts,
-                        heading = EXCLUDED.heading,
-                        distance_nm = EXCLUDED.distance_nm,
-                        squawk = EXCLUDED.squawk,
-                        emergency = EXCLUDED.emergency,
-                        is_military = EXCLUDED.is_military,
-                        is_leo = EXCLUDED.is_leo,
-                        last_seen = NOW(),
-                        ping_count = flights_overhead.ping_count + 1;
-                """, (icao_hex, registration, callsign, ac_type, emitter_cat, altitude_ft, 
-                      vertical_rate, ground_speed_kts, heading, distance_nm, squawk, emergency, is_military, is_leo))
-
-            # Prune aircraft not seen in 24 hours
-            pg_cur.execute("DELETE FROM flights_overhead WHERE last_seen < NOW() - INTERVAL '24 hours';")
-            pg_conn.commit()
-            
-            print(f"[{time.strftime('%X')}] Tracked {len(aircraft_list)} aircraft.")
-
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching JSON: {e}")
         except Exception as e:
-            print(f"Error: {e}")
-            if pg_conn.closed:
-                pg_conn, pg_cur = init_postgres()
-
-        time.sleep(POLL_INTERVAL)
-
-if __name__ == "__main__":
-    main()
+            print(f"An unexpected error occurred: {e}")
+            
+        time.sleep(5) # Poll every 5 seconds
