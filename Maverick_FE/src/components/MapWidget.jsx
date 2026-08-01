@@ -414,6 +414,7 @@ export default function MapWidget() {
                   {secondary}
                 </span>
               </div>
+            </div>
 
             {/* 4. BOTTOM: Airline Logo / Tail Graphic */}
             <div className="w-full h-16 md:h-24 bg-slate-900/60 flex items-center justify-center relative mt-auto border-t border-slate-800 md:pl-[15%]">
