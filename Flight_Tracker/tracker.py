@@ -1,3 +1,4 @@
+import os
 import json
 import time
 import requests
@@ -7,24 +8,28 @@ import math
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
 
-# --- Configuration ---
-HOME_LAT = 28.679885  
-HOME_LON = -81.368495
+# --- Configuration (Loaded from Environment Variables) ---
+# Home Coordinates
+HOME_LAT = float(os.environ.get("HOME_LATITUDE", 0.0))
+HOME_LON = float(os.environ.get("HOME_LONGITUDE", 0.0))
 
-JSON_URL = "http://localhost:8085/data/aircraft.json"
-DISCORD_WEBHOOK_URL = "YOUR_DISCORD_WEBHOOK_URL" 
+# Internal Docker network URL for ultrafeeder (port 80 internally)
+JSON_URL = "http://ultrafeeder:80/data/aircraft.json"
+
+# Webhook
+DISCORD_WEBHOOK_URL = os.environ.get("FLIGHT_DISCORD_WEBHOOK")
 
 # PostgreSQL Settings
-DB_HOST = "localhost" 
-DB_NAME = "piccolo"
-DB_USER = "YOUR_DB_USER"
-DB_PASS = "YOUR_DB_PASSWORD"
+DB_HOST = os.environ.get("POSTGRES_HOST", "postgres_db")
+DB_NAME = os.environ.get("POSTGRES_DB")
+DB_USER = os.environ.get("POSTGRES_USER")
+DB_PASS = os.environ.get("POSTGRES_PASSWORD")
 
 # InfluxDB 2.x Settings
-INFLUX_URL = "http://localhost:8086"
-INFLUX_TOKEN = "YOUR_NEW_INFLUX_TOKEN"  # Update with your new token if recreated
-INFLUX_ORG = "YOUR_INFLUX_ORG"
-INFLUX_BUCKET = "piccolo"
+INFLUX_URL = os.environ.get("INFLUXDB_URL", "http://influxdb:8086")
+INFLUX_TOKEN = os.environ.get("INFLUXDB_TOKEN")
+INFLUX_ORG = os.environ.get("INFLUXDB_ORG")
+INFLUX_BUCKET = os.environ.get("FLIGHT_TRACKER_BUCKET")
 
 # --- Distance Calculation ---
 def calculate_distance(lat1, lon1, lat2, lon2):
