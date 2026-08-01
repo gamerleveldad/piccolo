@@ -131,7 +131,7 @@ export default function MapWidget() {
 
     const tomorrowKey = import.meta.env.VITE_TOMORROW_API_KEY;
     if (tomorrowKey) {
-      L.tileLayer(`https://api.tomorrow.io/v4/map/tile/{z}/{x}/{y}/lightning/now.png?apikey=${tomorrowKey}`, {
+      L.tileLayer(`https://api.tomorrow.io/v4/map/tile/{z}/{x}/{y}/precipitationIntensity/now.png?apikey=${tomorrowKey}`, {
         pane: 'lightningPane', opacity: 0.8
       }).addTo(map.current);
     }
