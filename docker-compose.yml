@@ -355,7 +355,7 @@ services:
       args:
         - VITE_HOME_LATITUDE=${HOME_LATITUDE}
         - VITE_HOME_LONGITUDE=${HOME_LONGITUDE}
-        - VITE_TOMORROW_API_KEY=${TOMORROW_API_KEY}
+        - VITE_TOMORROW_API_KEY=${VITE_TOMORROW_API_KEY}
     container_name: maverick_front_end
     restart: unless-stopped
     ports:
