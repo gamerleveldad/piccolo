@@ -17,13 +17,14 @@ const getAircraftStyle = (ac, isMilitary, isLEO, flightName) => {
 
   const airlineCode = flightName.substring(0, 3).toUpperCase();
   const airlineColors = {
-    'SWA': { fill: '#0230c4', stroke: '#ffbf00' }, // Southwest (Blue/Yellow)
+    'SWA': { fill: '#0230c4', stroke: '#ffbf00' }, // Southwest
     'JBU': { fill: '#0033a0', stroke: '#ffffff' }, // JetBlue
     'DAL': { fill: '#e51420', stroke: '#002554' }, // Delta
     'UAL': { fill: '#005da6', stroke: '#ffffff' }, // United
     'AAL': { fill: '#dfdfdf', stroke: '#00467f' }, // American
     'FFT': { fill: '#006643', stroke: '#ffffff' }, // Frontier
-    'NKS': { fill: '#ffc40f', stroke: '#000000' }  // Spirit
+    'NKS': { fill: '#ffc40f', stroke: '#000000' }, // Spirit
+    'ROU': { fill: '#c8102e', stroke: '#ffffff' }  // Air Canada Rouge
   };
 
   if (airlineColors[airlineCode]) return airlineColors[airlineCode];
@@ -44,7 +45,7 @@ export default function MapWidget() {
 
   // State for Advanced Stats Tail Panel
   const [selectedFlight, setSelectedFlight] = useState(null);
-  const selectedHexRef = useRef(null); // Used to track selection inside the async polling loop
+  const selectedHexRef = useRef(null);
 
   const handleRecenter = () => {
     if (map.current) {
@@ -69,7 +70,6 @@ export default function MapWidget() {
 
     L.control.zoom({ position: 'topright' }).addTo(map.current);
 
-    // Clicking empty map space closes the panel
     map.current.on('click', closePanel);
 
     setTimeout(() => {
@@ -181,7 +181,6 @@ export default function MapWidget() {
           if (ac.lat != null && ac.lon != null) {
             currentHexes.add(ac.hex);
 
-            // If this aircraft is actively selected, continuously update the Side Panel React State
             if (selectedHexRef.current === ac.hex) {
               setSelectedFlight(ac);
             }
@@ -203,7 +202,6 @@ export default function MapWidget() {
               else if (ac.dbFlags & 2) isLEO = true; 
             }
 
-            // Get dynamic chevron styling
             const style = getAircraftStyle(ac, isMilitary, isLEO, flightName);
 
             const starIcon = (isMilitary || isLEO) 
@@ -246,11 +244,10 @@ export default function MapWidget() {
               const acIcon = L.divIcon({ html: iconHtml, className: '', iconSize: [28, 28], iconAnchor: [14, 14] });
               const marker = L.marker([currentLat, currentLon], { icon: acIcon }).addTo(map.current);
               
-              // Bind Leaflet click event to trigger React state
               marker.on('click', () => {
                 selectedHexRef.current = ac.hex;
                 setSelectedFlight(ac);
-                L.DomEvent.stopPropagation(new Event('click')); // Prevent map click from immediately closing it
+                L.DomEvent.stopPropagation(new Event('click'));
               });
 
               planeMarkers.current[ac.hex] = marker;
@@ -295,35 +292,6 @@ export default function MapWidget() {
     };
   }, []);
 
-  // --- Sub-component Rendering Helpers for the Tail Panel ---
-  const renderTailGraphic = () => {
-    if (!selectedFlight) return null;
-    const flightName = selectedFlight.flight ? selectedFlight.flight.trim() : "";
-    const airlineCode = flightName.substring(0, 3).toUpperCase();
-    
-    // Fallback gradients if local image isn't found
-    let gradient = "bg-gradient-to-br from-slate-600 to-slate-800";
-    if (selectedFlight.dbFlags & 1) gradient = "bg-gradient-to-br from-slate-400 to-slate-500"; // Mil
-    if (selectedFlight.dbFlags & 2) gradient = "bg-gradient-to-br from-green-700 to-green-900"; // LEO
-    
-    return (
-      <div className={`relative w-full h-28 ${gradient} overflow-hidden border-b-4 border-slate-900`}>
-        {/* Placeholder instruction: Drop SVG logos in /public/tails/ named SWA.svg, etc. */}
-        {flightName && (
-          <img 
-            src={`/tails/${airlineCode}.svg`} 
-            alt={airlineCode} 
-            className="absolute inset-0 w-full h-full object-contain p-4 opacity-80"
-            onError={(e) => e.target.style.display = 'none'} 
-          />
-        )}
-        <div className="absolute bottom-2 left-8 text-xl font-black text-white/90 drop-shadow-md">
-          {flightName || selectedFlight.r || selectedFlight.hex}
-        </div>
-      </div>
-    );
-  };
-
   return (
     <div className="bg-cardBg border border-borderSlate rounded-xl shadow-lg flex-1 min-h-[450px] lg:min-h-[600px] flex flex-col overflow-hidden relative">
       <div className="bg-[#161f33] p-4 border-b border-borderSlate flex items-center justify-between z-10">
@@ -346,64 +314,107 @@ export default function MapWidget() {
         {/* ADVANCED STATS TAIL PANEL */}
         {selectedFlight && (
           <div 
-            className="absolute right-6 bottom-6 z-[1000] w-72 bg-slate-800 shadow-2xl transition-all duration-300 pointer-events-auto"
+            className="absolute right-6 bottom-6 z-[1000] w-80 bg-[#162032] border border-slate-700 shadow-2xl transition-all duration-300 pointer-events-auto text-slate-100 flex flex-col justify-between"
             style={{ 
-              // Custom polygon mimicking a swept vertical stabilizer facing right
-              clipPath: 'polygon(0 100%, 25% 0, 100% 0, 100% 100%)',
-              paddingLeft: '15%' // Pushes content right to avoid the slanted cut
+              clipPath: 'polygon(22% 0%, 75% 0%, 100% 100%, 0% 100%)',
+              minHeight: '380px',
+              padding: '2.5rem 1.5rem 1.25rem 3.5rem' // Left padding prevents text cutoff from leading-edge sweep
             }}
           >
-            <button onClick={closePanel} className="absolute top-2 right-2 p-1 bg-slate-900/50 rounded-full text-slate-300 hover:text-white hover:bg-red-500/80 z-50 transition-colors">
+            <button 
+              onClick={closePanel} 
+              className="absolute top-3 right-8 p-1 bg-slate-900/80 rounded-full text-slate-300 hover:text-white hover:bg-red-500/80 z-50 transition-colors"
+              title="Close Panel"
+            >
               <X className="w-4 h-4" />
             </button>
 
-            {renderTailGraphic()}
-
-            <div className="p-4 flex flex-col gap-3 text-xs">
-              <div className="grid grid-cols-2 gap-2 text-slate-300">
-                <div className="flex flex-col">
-                  <span className="text-slate-500 font-bold uppercase tracking-wider text-[9px]">Aircraft Type</span>
-                  <span className="font-semibold text-white truncate" title={selectedFlight.desc || selectedFlight.t}>
-                    {selectedFlight.desc || selectedFlight.t || 'Unknown'}
+            {/* 1. TOP: Pilot Telemetry Stats */}
+            <div className="flex flex-col gap-2.5 text-xs border-b border-slate-700/60 pb-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Altitude</span>
+                  <span className="text-sm font-bold text-emerald-400">
+                    {selectedFlight.alt_baro != null ? `${selectedFlight.alt_baro.toLocaleString()} ft` : 'Ground'}
                   </span>
                 </div>
-                <div className="flex flex-col">
-                  <span className="text-slate-500 font-bold uppercase tracking-wider text-[9px]">Registration</span>
-                  <span className="font-semibold text-sky-400">{selectedFlight.r || 'N/A'}</span>
+                <div>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Speed</span>
+                  <span className="text-sm font-bold text-sky-400">
+                    {selectedFlight.gs != null ? `${Math.round(selectedFlight.gs)} kts` : '0 kts'}
+                  </span>
                 </div>
               </div>
 
-              <div className="h-px bg-slate-700 w-full" />
-
-              <div className="grid grid-cols-2 gap-2 text-slate-300">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500">Squawk</span>
-                  <span className="text-amber-400 font-mono">{selectedFlight.squawk || '----'}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500">Wake Cat</span>
-                  <span>{selectedFlight.category || '--'}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500">Msg Count</span>
-                  <span>{selectedFlight.messages || 0}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500">Signal (RSSI)</span>
-                  <span className={selectedFlight.rssi < -20 ? "text-emerald-400" : "text-red-400"}>
-                    {selectedFlight.rssi ? selectedFlight.rssi.toFixed(1) : '--'}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Climb / Descent</span>
+                  <span className="font-semibold text-slate-200">
+                    {selectedFlight.baro_rate 
+                      ? `${selectedFlight.baro_rate > 0 ? '↑ ' : '↓ '}${Math.abs(selectedFlight.baro_rate).toLocaleString()} fpm`
+                      : 'Level'}
                   </span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500">NIC</span>
-                  <span>{selectedFlight.nic || '-'}</span>
+                <div>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Squawk</span>
+                  <span className="font-mono font-bold text-amber-400">
+                    {selectedFlight.squawk || '----'}
+                  </span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500">SIL</span>
-                  <span>{selectedFlight.sil || '-'}</span>
+              </div>
+
+              {selectedFlight.track != null && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Heading</span>
+                    <span className="font-semibold text-slate-200">{Math.round(selectedFlight.track)}°</span>
+                  </div>
+                  {selectedFlight.category && (
+                    <div>
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Category</span>
+                      <span className="font-semibold text-slate-200">{selectedFlight.category}</span>
+                    </div>
+                  )}
                 </div>
+              )}
+            </div>
+
+            {/* 2. MIDDLE: Aircraft Type / Description */}
+            <div className="py-2">
+              <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block mb-0.5">Aircraft Type</span>
+              <div className="text-xs font-bold text-slate-100 leading-snug break-words">
+                {selectedFlight.desc || selectedFlight.t || 'Unknown Aircraft'}
               </div>
             </div>
+
+            {/* 3. LOWER MIDDLE: Callsign & Registration */}
+            <div className="pt-2 pb-2 border-t border-slate-700/60 flex items-baseline justify-between gap-2">
+              <span className="text-lg font-black tracking-tight text-white">
+                {selectedFlight.flight ? selectedFlight.flight.trim() : (selectedFlight.r || selectedFlight.hex)}
+              </span>
+              <span className="text-xs font-bold text-sky-400 font-mono">
+                {selectedFlight.r || ''}
+              </span>
+            </div>
+
+            {/* 4. BOTTOM: Airline Logo / Tail Graphic */}
+            <div className="w-full h-16 bg-slate-900/90 rounded-lg overflow-hidden flex items-center justify-center p-2 relative border border-slate-700/50">
+              {selectedFlight.flight ? (
+                <img 
+                  src={`/tails/${selectedFlight.flight.trim().substring(0, 3).toUpperCase()}.svg`} 
+                  alt={selectedFlight.flight.trim().substring(0, 3)} 
+                  className="max-h-full max-w-full object-contain"
+                  onError={(e) => {
+                    e.target.style.display = 'none';
+                    if (e.target.nextSibling) e.target.nextSibling.style.display = 'block';
+                  }} 
+                />
+              ) : null}
+              <div className="hidden text-xs font-bold text-slate-400 tracking-wider uppercase">
+                {selectedFlight.flight ? selectedFlight.flight.trim().substring(0, 3) : 'GA / Private'}
+              </div>
+            </div>
+
           </div>
         )}
       </div>
