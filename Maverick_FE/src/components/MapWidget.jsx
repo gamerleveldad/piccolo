@@ -11,11 +11,14 @@ const HOME_COORDS = [homeLat, homeLng];
 const DEFAULT_ZOOM = 10;
 
 // HELPER: Determine Chevron Colors
-const getAircraftStyle = (ac, isMilitary, isLEO, flightName) => {
+const getAircraftStyle = (ac, isMilitary, isLEO) => {
   if (isLEO) return { fill: '#16a34a', stroke: '#fbbf24' }; 
   if (isMilitary) return { fill: '#94a3b8', stroke: '#3f6212' }; 
 
-  const airlineCode = flightName.substring(0, 3).toUpperCase();
+  // Safely extract flight to check if it's commercial vs GA
+  const rawFlight = ac.flight ? ac.flight.trim() : '';
+  const airlineCode = rawFlight.substring(0, 3).toUpperCase();
+  
   const airlineColors = {
     'SWA': { fill: '#0230c4', stroke: '#ffbf00' }, 
     'JBU': { fill: '#0033a0', stroke: '#ffffff' }, 
@@ -26,11 +29,17 @@ const getAircraftStyle = (ac, isMilitary, isLEO, flightName) => {
     'NKS': { fill: '#ffc40f', stroke: '#000000' }, 
     'ROU': { fill: '#c8102e', stroke: '#ffffff' }, 
     'AAY': { fill: '#01579B', stroke: '#F48820' },
-    'ABX': { fill: '#CB0024', stroke: '#2E2E2E' }
+    'ABX': { fill: '#CB0024', stroke: '#2E2E2E' }, 
+    'EJA': { fill: '#f8fafc', stroke: '#4e058a' }  
   };
 
-  if (airlineColors[airlineCode]) return airlineColors[airlineCode];
+  // 1. Known Airline
+  if (rawFlight && airlineColors[airlineCode]) return airlineColors[airlineCode];
 
+  // 2. Unknown Commercial / Charter (Has a flight number, but no color defined)
+  if (rawFlight) return { fill: '#f8fafc', stroke: '#4e058a' }; 
+
+  // 3. True General Aviation (No flight number broadcast)
   return { fill: '#f8fafc', stroke: '#0284c7' }; 
 };
 
@@ -200,7 +209,7 @@ export default function MapWidget() {
               else if (ac.dbFlags & 2) isLEO = true; 
             }
 
-            const style = getAircraftStyle(ac, isMilitary, isLEO, flightName);
+            const style = getAircraftStyle(ac, isMilitary, isLEO);
             const starIcon = (isMilitary || isLEO) 
               ? `<svg class="inline-block w-3 h-3 text-amber-400 ml-1 mb-0.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>` 
               : '';
@@ -289,7 +298,6 @@ export default function MapWidget() {
     };
   }, []);
 
-  // --- Dynamic Display Logic for Identifiers ---
   const getIdentifiers = () => {
     if (!selectedFlight) return { primary: '', secondary: '' };
     const flightText = selectedFlight.flight ? selectedFlight.flight.trim() : '';
@@ -302,7 +310,19 @@ export default function MapWidget() {
     return { primary, secondary };
   };
 
+  const getPanelStyle = () => {
+    if (!selectedFlight) return { fill: '#162032', stroke: '#0f172a' };
+    let isMilitary = false;
+    let isLEO = false;
+    if (selectedFlight.dbFlags) {
+      if (selectedFlight.dbFlags & 1) isMilitary = true;
+      else if (selectedFlight.dbFlags & 2) isLEO = true;
+    }
+    return getAircraftStyle(selectedFlight, isMilitary, isLEO);
+  };
+
   const { primary, secondary } = getIdentifiers();
+  const panelStyle = getPanelStyle();
 
   return (
     <div className="bg-cardBg border border-borderSlate rounded-xl shadow-lg flex-1 min-h-[450px] lg:min-h-[600px] flex flex-col overflow-hidden relative">
@@ -323,117 +343,125 @@ export default function MapWidget() {
       <div className="relative flex-1 w-full h-full">
         <div ref={mapContainer} className="absolute inset-0 bg-[#0b0f19] z-0" />
         
-        {/* ADVANCED STATS TAIL PANEL */}
+        {/* ADVANCED STATS TAIL PANEL WRAPPER - Handles Drop Shadows over the Clip-Path */}
         {selectedFlight && (
           <div 
-            className={`absolute z-[1000] bg-[#162032] shadow-2xl transition-all duration-300 pointer-events-auto flex flex-col overflow-hidden 
-              bottom-0 left-0 w-full rounded-t-2xl border-t border-slate-700
-              md:bottom-6 md:left-6 md:w-[450px] md:rounded-none md:border-none md:[clip-path:polygon(0%_0%,65%_0%,100%_100%,15%_100%)]
-              md:min-h-[400px]`}
+            className="absolute z-[1000] bottom-0 left-0 w-full md:bottom-6 md:left-6 md:w-[450px] pointer-events-none transition-all duration-300"
+            style={{
+              // First shadow mimics a solid 2px border matching the plane body
+              // Second shadow provides a soft ambient glow matching the plane trim
+              filter: `drop-shadow(0px 0px 2px ${panelStyle.fill}) drop-shadow(0px 0px 15px ${panelStyle.stroke})`
+            }}
           >
-            {/* Close Button */}
-            <button 
-              onClick={closePanel} 
-              className="absolute p-1 bg-slate-800/80 rounded-full text-slate-300 hover:text-white hover:bg-red-500/80 z-50 transition-colors
-                top-3 right-4 md:top-4 md:left-6 md:right-auto"
-              title="Close Panel"
+            <div 
+              className={`bg-[#162032] w-full pointer-events-auto flex flex-col overflow-hidden 
+                rounded-t-2xl md:rounded-none md:[clip-path:polygon(0%_0%,65%_0%,100%_100%,15%_100%)]
+                md:min-h-[400px]`}
             >
-              <X className="w-3 h-3" />
-            </button>
+              {/* Close Button */}
+              <button 
+                onClick={closePanel} 
+                className="absolute p-1 bg-slate-800/80 rounded-full text-slate-300 hover:text-white hover:bg-red-500/80 z-50 transition-colors
+                  top-3 right-4 md:top-4 md:left-6 md:right-auto"
+                title="Close Panel"
+              >
+                <X className="w-3 h-3" />
+              </button>
 
-            {/* Content Wrapper */}
-            <div className="flex-1 flex flex-col w-full text-slate-100 p-5 md:p-0 md:pt-14 md:pr-4">
-              
-              {/* 1. TOP: Pilot Telemetry Stats */}
-              <div className="flex flex-col text-xs border-b border-slate-700/60 pb-3 md:pr-2">
+              {/* Content Wrapper */}
+              <div className="flex-1 flex flex-col w-full text-slate-100 p-5 md:p-0 md:pt-14 md:pr-4">
                 
-                {/* Row 1 */}
-                <div className="grid grid-cols-2 gap-2 md:ml-10">
-                  <div>
-                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Altitude</span>
-                    <span className="text-sm font-bold text-emerald-400">
-                      {selectedFlight.alt_baro != null ? `${selectedFlight.alt_baro.toLocaleString()} ft` : 'Ground'}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Speed</span>
-                    <span className="text-sm font-bold text-sky-400">
-                      {selectedFlight.gs != null ? `${Math.round(selectedFlight.gs)} kts` : '0 kts'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Row 2 */}
-                <div className="grid grid-cols-2 gap-2 mt-3 md:ml-14">
-                  <div>
-                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Climb / Descent</span>
-                    <span className="font-semibold text-slate-200">
-                      {selectedFlight.baro_rate 
-                        ? `${selectedFlight.baro_rate > 0 ? '↑ ' : '↓ '}${Math.abs(selectedFlight.baro_rate).toLocaleString()} fpm`
-                        : 'Level'}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Squawk</span>
-                    <span className="font-mono font-bold text-amber-400">
-                      {selectedFlight.squawk || '----'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Row 3 */}
-                {selectedFlight.track != null && (
-                  <div className="grid grid-cols-2 gap-2 mt-3 md:ml-20">
+                {/* 1. TOP: Pilot Telemetry Stats */}
+                <div className="flex flex-col text-xs border-b border-slate-700/60 pb-3 md:pr-2">
+                  
+                  {/* Row 1 */}
+                  <div className="grid grid-cols-2 gap-2 md:ml-10">
                     <div>
-                      <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Heading</span>
-                      <span className="font-semibold text-slate-200">{Math.round(selectedFlight.track)}°</span>
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Altitude</span>
+                      <span className="text-sm font-bold text-emerald-400">
+                        {selectedFlight.alt_baro != null ? `${selectedFlight.alt_baro.toLocaleString()} ft` : 'Ground'}
+                      </span>
                     </div>
-                    {selectedFlight.category && (
-                      <div>
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Category</span>
-                        <span className="font-semibold text-slate-200">{selectedFlight.category}</span>
-                      </div>
-                    )}
+                    <div>
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Speed</span>
+                      <span className="text-sm font-bold text-sky-400">
+                        {selectedFlight.gs != null ? `${Math.round(selectedFlight.gs)} kts` : '0 kts'}
+                      </span>
+                    </div>
                   </div>
-                )}
-              </div>
 
-              {/* 2. MIDDLE: Aircraft Type (Staggered Right) */}
-              <div className="py-3 md:ml-24 md:pr-4">
-                <div className="text-sm font-bold text-slate-100 leading-snug break-words">
-                  {selectedFlight.desc || selectedFlight.t || 'Unknown Aircraft'}
+                  {/* Row 2 */}
+                  <div className="grid grid-cols-2 gap-2 mt-3 md:ml-14">
+                    <div>
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Climb / Descent</span>
+                      <span className="font-semibold text-slate-200">
+                        {selectedFlight.baro_rate 
+                          ? `${selectedFlight.baro_rate > 0 ? '↑ ' : '↓ '}${Math.abs(selectedFlight.baro_rate).toLocaleString()} fpm`
+                          : 'Level'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Squawk</span>
+                      <span className="font-mono font-bold text-amber-400">
+                        {selectedFlight.squawk || '----'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Row 3 */}
+                  {selectedFlight.track != null && (
+                    <div className="grid grid-cols-2 gap-2 mt-3 md:ml-20">
+                      <div>
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Heading</span>
+                        <span className="font-semibold text-slate-200">{Math.round(selectedFlight.track)}°</span>
+                      </div>
+                      {selectedFlight.category && (
+                        <div>
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Category</span>
+                          <span className="font-semibold text-slate-200">{selectedFlight.category}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. MIDDLE: Aircraft Type (Staggered Right) */}
+                <div className="py-3 md:ml-24 md:pr-4">
+                  <div className="text-sm font-bold text-slate-100 leading-snug break-words">
+                    {selectedFlight.desc || selectedFlight.t || 'Unknown Aircraft'}
+                  </div>
+                </div>
+
+                {/* 3. LOWER MIDDLE: Callsign & Registration */}
+                <div className="pt-3 pb-4 border-t border-slate-700/60 flex items-baseline justify-between md:ml-28 md:mr-24">
+                  <span className="text-2xl font-black tracking-tight text-white leading-none truncate">
+                    {primary}
+                  </span>
+                  <span className="text-sm font-bold text-sky-400 font-mono ml-4 shrink-0 text-right">
+                    {secondary}
+                  </span>
                 </div>
               </div>
 
-              {/* 3. LOWER MIDDLE: Callsign & Registration */}
-              <div className="pt-3 pb-4 border-t border-slate-700/60 flex items-baseline justify-between md:ml-28 md:mr-24">
-                <span className="text-2xl font-black tracking-tight text-white leading-none truncate">
-                  {primary}
-                </span>
-                <span className="text-sm font-bold text-sky-400 font-mono ml-4 shrink-0 text-right">
-                  {secondary}
-                </span>
+              {/* 4. BOTTOM: Airline Logo / Tail Graphic */}
+              <div className="w-full h-16 md:h-24 bg-slate-900/60 flex items-center justify-center relative mt-auto border-t border-slate-800 md:pl-[15%]">
+                {selectedFlight.flight ? (
+                  <img 
+                    src={`/tails/${selectedFlight.flight.trim().substring(0, 3).toUpperCase()}.svg`} 
+                    alt={selectedFlight.flight.trim().substring(0, 3)} 
+                    className="w-full h-full object-contain p-2"
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                      if (e.target.nextSibling) e.target.nextSibling.style.display = 'block';
+                    }} 
+                  />
+                ) : null}
+                <div className="hidden text-sm font-black text-slate-400 tracking-wider uppercase">
+                  {selectedFlight.flight ? selectedFlight.flight.trim().substring(0, 3) : 'GA / Private'}
+                </div>
               </div>
-            </div>
 
-            {/* 4. BOTTOM: Airline Logo / Tail Graphic */}
-            <div className="w-full h-16 md:h-24 bg-slate-900/60 flex items-center justify-center relative mt-auto border-t border-slate-800 md:pl-[15%]">
-              {selectedFlight.flight ? (
-                <img 
-                  src={`/tails/${selectedFlight.flight.trim().substring(0, 3).toUpperCase()}.svg`} 
-                  alt={selectedFlight.flight.trim().substring(0, 3)} 
-                  className="w-full h-full object-contain p-2"
-                  onError={(e) => {
-                    e.target.style.display = 'none';
-                    if (e.target.nextSibling) e.target.nextSibling.style.display = 'block';
-                  }} 
-                />
-              ) : null}
-              <div className="hidden text-sm font-black text-slate-400 tracking-wider uppercase">
-                {selectedFlight.flight ? selectedFlight.flight.trim().substring(0, 3) : 'GA / Private'}
-              </div>
             </div>
-
           </div>
         )}
       </div>

@@ -4,6 +4,7 @@ import MapWidget from '@/components/MapWidget';
 import MediaWidget from './components/MediaWidget';
 import WeatherWidget from './components/WeatherWidget'; 
 import AdvancedWeatherWidget from './components/AdvancedWeatherWidget'; 
+import InfrastructureWidget from './components/InfrastructureWidget';
 
 function App() {
   // Data state variables
@@ -59,26 +60,8 @@ function App() {
           </div>
 
           {/* System Health Widget */}
-          <div className="bg-cardBg border border-borderSlate rounded-xl shadow-lg p-5">
-            <div className="flex items-center gap-2 mb-4">
-              <Activity className="text-accentBlue w-5 h-5" />
-              <h2 className="text-lg font-semibold text-textSilver">Infrastructure</h2>
-            </div>
-            {/* Hardcoded placeholders for the green/red bubbles until the Uptime Kuma API bridge is built */}
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">Weather API</span>
-                <span className="flex h-3 w-3 rounded-full bg-green-500"></span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">Flight API</span>
-                <span className="flex h-3 w-3 rounded-full bg-green-500"></span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">Netdata Core</span>
-                <span className="flex h-3 w-3 rounded-full bg-green-500"></span>
-              </div>
-            </div>
+          <div className="bg-cardBg border border-borderSlate rounded-xl shadow-lg p-5 flex flex-col min-h-[300px]">
+            <InfrastructureWidget />
           </div>
         </div>
 
