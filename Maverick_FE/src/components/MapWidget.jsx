@@ -129,12 +129,12 @@ export default function MapWidget() {
     updateRadar();
     radarInterval = setInterval(updateRadar, 600000); 
 
-    const tomorrowKey = import.meta.env.VITE_TOMORROW_API_KEY;
+    /*const tomorrowKey = import.meta.env.VITE_TOMORROW_API_KEY;
     if (tomorrowKey) {
       L.tileLayer(`https://api.tomorrow.io/v4/map/tile/{z}/{x}/{y}/precipitationIntensity/now.png?apikey=${tomorrowKey}`, {
         pane: 'lightningPane', opacity: 0.8
       }).addTo(map.current);
-    }
+    }*/
 
     const updateStormTracks = async () => {
       try {
