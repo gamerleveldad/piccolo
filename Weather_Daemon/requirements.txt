@@ -3,3 +3,4 @@ schedule
 influxdb-client
 feedparser
 google-genai==2.12.1
+psycopg2-binary
