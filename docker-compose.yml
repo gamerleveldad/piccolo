@@ -261,6 +261,10 @@ services:
       - XWEATHER_CLIENT_ID=${XWEATHER_CLIENT_ID}
       - XWEATHER_CLIENT_SECRET=${XWEATHER_CLIENT_SECRET}
       - XWEATHER_API_KEY=${XWEATHER_API_KEY}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=postgres_db
     depends_on:
       - influxdb
     networks:
