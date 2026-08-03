@@ -284,6 +284,10 @@ services:
       - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
       - INFLUXDB_ORG=${INFLUXDB_ORG}
       - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=postgres_db
     depends_on:
       - influxdb
     networks:
@@ -423,7 +427,7 @@ services:
       - ALT=85ft
       - READSB_DEVICE_TYPE=rtlsdr
       - READSB_RTLSDR_DEVICE=0
-      - READSB_RTLSDR_GAIN=autogain  # Automatically measures noise floor and adjusts gain
+      - READSB_GAIN=auto
       - TAR1090_DEFAULTCENTERLAT=${HOME_LATITUDE}
       - TAR1090_DEFAULTCENTERLON=${HOME_LONGITUDE}
       - MLAT_USER=${MLAT_USER:-piccolo_feeder}
