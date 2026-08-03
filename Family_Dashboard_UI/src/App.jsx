@@ -114,7 +114,7 @@ function App() {
             <LightningRadarWidget weather={dashboardState.weather} />
           </div>
 
-          <div className="grid grid-cols-2 gap-3 mt-1 h-full min-h-[160px]">
+          <div className="col-span-2 mt-1 h-full min-h-[160px]">
             <GooglePhotosWidget apiBase={apiBase} />
           </div>
         </div>

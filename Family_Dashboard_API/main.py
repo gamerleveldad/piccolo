@@ -500,7 +500,7 @@ async def get_tasks():
         creds = get_calendar_credentials()
         from googleapiclient.discovery import build as tasks_build
         service = tasks_build('tasks', 'v1', credentials=creds, cache_discovery=False)
-        tasks_result = service.tasks().list(tasklist='@default', showCompleted=False).execute()
+        tasks_result = service.tasks().list(tasklist='Family', showCompleted=False).execute()
         return tasks_result.get('items', [])
     except Exception as e:
         logger.error(f"Google Tasks endpoint error: {e}")

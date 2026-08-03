@@ -40,7 +40,7 @@ export default function LightningRadarWidget({ weather }) {
   const activeRing = weather.strike_trigger_ring;
 
   return (
-    <div className="bg-slate-950 border border-slate-900/60 p-4 rounded-3xl shadow-xl flex flex-col items-center justify-between min-h-[220px] relative overflow-hidden">
+    <div className="col-span-2 bg-slate-950 border border-slate-900/60 p-4 rounded-3xl shadow-xl flex flex-col items-center justify-between min-h-[220px] relative overflow-hidden">
       
       <div className="w-full text-left flex justify-between items-start z-10">
         <div>
