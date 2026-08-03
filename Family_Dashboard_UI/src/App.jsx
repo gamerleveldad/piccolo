@@ -111,7 +111,11 @@ function App() {
             <TemperatureWidget weather={dashboardState.weather} comfort={dashboardState.comfort} pressureDiag={dashboardState.pressure_diag} />
             <ActivityGridWidget activities={dashboardState.activities} weather={dashboardState.weather} dailyForecast={dashboardState.forecast_daily} />
             <RainGaugeWidget weather={dashboardState.weather} rainStatus={dashboardState.rain_status} />
-            <LightningRadarWidget weather={dashboardState.weather} />
+            <LightningRadarWidget 
+              weather={dashboardState.weather} 
+              shows={dashboardState.anime_progress}
+              flights={dashboardState.active_flights}
+            />
           </div>
 
           <div className="col-span-2 mt-1 h-full min-h-[160px]">

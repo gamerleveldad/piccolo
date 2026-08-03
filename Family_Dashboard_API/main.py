@@ -488,20 +488,46 @@ async def get_dashboard_state():
         "daily_verse": rest_cache.get("daily_verse", {})
     }
 
+import datetime
+
 @app.get("/api/tasks")
 async def get_tasks():
-    """Retrieves active tasks from Google Tasks API or mock data if simulating."""
-    if SIMULATION_MODE:
-        return [
-            {"id": "1", "title": "Mock: Wash car", "notes": "", "due_date_str": datetime.date.today().isoformat(), "is_today": True},
-            {"id": "2", "title": "Mock: Buy groceries", "notes": "", "due_date_str": (datetime.date.today() + datetime.timedelta(days=1)).isoformat(), "is_today": False}
-        ]
     try:
         creds = get_calendar_credentials()
         from googleapiclient.discovery import build as tasks_build
         service = tasks_build('tasks', 'v1', credentials=creds, cache_discovery=False)
-        tasks_result = service.tasks().list(tasklist='Family', showCompleted=False).execute()
-        return tasks_result.get('items', [])
+        
+        # 1. Fetch all task lists to find the internal ID for "Family"
+        lists = service.tasklists().list().execute().get('items', [])
+        target_id = '@default'
+        for tl in lists:
+            if tl['title'].strip().lower() == 'family':
+                target_id = tl['id']
+                break
+                
+        # 2. Fetch the tasks using the correct target ID
+        tasks_result = service.tasks().list(tasklist=target_id, showCompleted=False).execute()
+        raw_tasks = tasks_result.get('items', [])
+        
+        # 3. Format the dates so the frontend tags them correctly
+        processed = []
+        for t in raw_tasks:
+            due_str = t.get('due')
+            due_day = None
+            if due_str:
+                due_day = datetime.datetime.fromisoformat(due_str.split('T')[0]).date()
+            
+            processed.append({
+                "id": t.get('id'),
+                "title": t.get('title', 'Unnamed Task'),
+                "notes": t.get('notes', ''),
+                "due_date_str": due_day.isoformat() if due_day else None
+            })
+        
+        # Sort by due date (tasks with no due date go to the bottom)
+        processed.sort(key=lambda x: x["due_date_str"] if x["due_date_str"] else "9999-12-31")
+        return processed
+        
     except Exception as e:
         logger.error(f"Google Tasks endpoint error: {e}")
         return []
