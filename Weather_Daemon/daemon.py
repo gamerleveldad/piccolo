@@ -250,6 +250,32 @@ def fetch_and_store_storm_data():
         conn.commit()
         cursor.close()
         conn.close()
+        # Transition state: We went from clear skies to storms nearby
+        if cells_found and not STORM_NEARBY:
+            alert_msg = "⚠️ **Storm Alert: Convective Activity Within 20 Miles**\n"
+            
+            # If the trigger was a cell, grab the closest one for details
+            if cells_resp.get("success") and cells_resp.get("response"):
+                cell = cells_resp["response"][0]
+                dist = cell.get("relativeTo", {}).get("distanceMI", "Unknown")
+                bearing = cell.get("relativeTo", {}).get("bearing", "")
+                movement = cell.get("ob", {}).get("movement", {})
+                speed = movement.get("speedMPH", "Unknown")
+                direction = movement.get("direction", "Unknown")
+                
+                is_severe = cell.get("traits", {}).get("isSevere", False)
+                severity_text = "🔴 **SEVERE**" if is_severe else "🟡 Standard"
+                
+                alert_msg += f"- **Type:** {severity_text} Cell\n"
+                alert_msg += f"- **Location:** {dist} miles {bearing} of home.\n"
+                alert_msg += f"- **Movement:** Moving {direction} at {speed} mph.\n"
+            else:
+                alert_msg += "- **Type:** Lightning strikes detected in the immediate vicinity.\n"
+            
+            try:
+                requests.post(WEBHOOK_URL, json={"content": alert_msg}, timeout=10)
+            except Exception as e:
+                print(f"Discord webhook failed: {e}")
 
         STORM_NEARBY = cells_found
         status_str = "Active storm/lightning nearby. Polling set to 3 min." if STORM_NEARBY else "No local storms. Polling set to 15 min."
@@ -405,6 +431,28 @@ def fetch_and_store_tropics():
                     regional_outlook.get("gulf_favor"),
                     regional_outlook.get("outlook_2day_pct"),
                     regional_outlook.get("outlook_7day_pct")
+                ))
+                # Guarantee the outlook data is saved even if no storms are active
+                cursor.execute("""
+                    INSERT INTO tropical_storms (
+                        id, timestamp, is_active, 
+                        atlantic_favor, carrib_favor, gulf_favor, 
+                        outlook_2day_pct, outlook_7day_pct
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO UPDATE SET 
+                        timestamp = EXCLUDED.timestamp, 
+                        atlantic_favor = EXCLUDED.atlantic_favor,
+                        carrib_favor = EXCLUDED.carrib_favor,
+                        gulf_favor = EXCLUDED.gulf_favor,
+                        outlook_2day_pct = EXCLUDED.outlook_2day_pct,
+                        outlook_7day_pct = EXCLUDED.outlook_7day_pct
+                """, (
+                    "SYSTEM_OUTLOOK", now, False,
+                    regional_outlook.get("atlantic_favor", "Low"),
+                    regional_outlook.get("carrib_favor", "Low"),
+                    regional_outlook.get("gulf_favor", "Low"),
+                    regional_outlook.get("outlook_2day_pct", 0),
+                    regional_outlook.get("outlook_7day_pct", 0)
                 ))
 
         conn.commit()
