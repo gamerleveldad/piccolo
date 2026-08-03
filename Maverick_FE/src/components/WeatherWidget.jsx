@@ -30,6 +30,8 @@ export default function WeatherWidget() {
   const [dailyForecast, setDailyForecast] = useState([]);
   const [localAlert, setLocalAlert] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [tropicsOutlook, setTropicsOutlook] = useState(null);
+  const [activeStorms, setActiveStorms] = useState([]);
   
   // Tab state for the forecast section
   const [forecastTab, setForecastTab] = useState('hourly'); // 'hourly' | 'daily'
@@ -123,9 +125,21 @@ export default function WeatherWidget() {
       setLoading(false);
     }
   };
+  const fetchTropics = async () => {
+    try {
+      const outlookRes = await fetch(`http://${window.location.hostname}:8004/api/weather/tropics/outlook`);
+      if (outlookRes.ok) setTropicsOutlook(await outlookRes.json());
+
+      const activeRes = await fetch(`http://${window.location.hostname}:8004/api/weather/tropics/active`);
+      if (activeRes.ok) setActiveStorms(await activeRes.json());
+    } catch (err) {
+      console.warn("Tropics fetch failed:", err);
+    }
+  };
 
   useEffect(() => {
     fetchWeatherData();
+    fetchTropics();
     const interval = setInterval(fetchWeatherData, 30000);
     return () => clearInterval(interval);
   }, []);
@@ -236,6 +250,14 @@ export default function WeatherWidget() {
             >
               10-Day
             </button>
+            <button
+              onClick={() => setForecastTab('tropics')}
+              className={`px-3 py-1 rounded-md transition-all ${
+                forecastTab === 'tropics' ? 'bg-slate-700 text-slate-100 font-medium' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Tropics
+            </button>
           </div>
 
           {/* Misery legend (Only visible on hourly tab) */}
@@ -305,6 +327,72 @@ export default function WeatherWidget() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+        {/* TROPICS TAB */}
+        {forecastTab === 'Tropics' && tropicsOutlook && (
+          <div className="flex flex-col gap-4 mt-4 overflow-y-auto pr-2">
+            
+            {/* Outlook Panel */}
+            <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-3">
+              <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Development Probability</h4>
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="bg-slate-900/50 rounded p-2 text-center">
+                  <span className="block text-[10px] text-slate-400 uppercase">48-Hour</span>
+                  <span className="text-lg font-bold text-accentBlue">{tropicsOutlook.development_probabilities['48_hour_pct']}%</span>
+                </div>
+                <div className="bg-slate-900/50 rounded p-2 text-center">
+                  <span className="block text-[10px] text-slate-400 uppercase">7-Day</span>
+                  <span className="text-lg font-bold text-accentBlue">{tropicsOutlook.development_probabilities['7_day_pct']}%</span>
+                </div>
+              </div>
+
+              <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Regional Favorability</h4>
+              <div className="space-y-1.5 text-sm">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-300">Atlantic</span>
+                  <span className={`font-bold ${tropicsOutlook.regional_favorability.atlantic === 'High' ? 'text-red-400' : 'text-slate-400'}`}>
+                    {tropicsOutlook.regional_favorability.atlantic}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-300">Gulf of Mexico</span>
+                  <span className={`font-bold ${tropicsOutlook.regional_favorability.gulf_of_mexico === 'High' ? 'text-red-400' : 'text-slate-400'}`}>
+                    {tropicsOutlook.regional_favorability.gulf_of_mexico}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-300">Caribbean</span>
+                  <span className={`font-bold ${tropicsOutlook.regional_favorability.caribbean === 'High' ? 'text-red-400' : 'text-slate-400'}`}>
+                    {tropicsOutlook.regional_favorability.caribbean}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Active Storms List */}
+            {activeStorms.length > 0 && (
+              <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-3">
+                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Active Systems</h4>
+                <div className="space-y-3">
+                  {activeStorms.map(storm => (
+                    <div key={storm.id} className="bg-slate-900/50 rounded p-3 border-l-2 border-red-500">
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <span className="font-bold text-slate-200">{storm.name}</span>
+                          <span className="text-xs text-slate-400 ml-2">{storm.category}</span>
+                        </div>
+                        <span className="text-xs font-mono text-slate-400">{storm.intensity.wind_speed_mph} mph</span>
+                      </div>
+                      <div className="text-xs text-slate-400 flex justify-between">
+                        <span>Lat: {storm.location.lat} | Lon: {storm.location.lon}</span>
+                        <span>Moving: {storm.movement.heading_deg}° at {storm.movement.speed_mph} mph</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
