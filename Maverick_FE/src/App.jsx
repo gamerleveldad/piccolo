@@ -5,6 +5,7 @@ import MediaWidget from './components/MediaWidget';
 import WeatherWidget from './components/WeatherWidget'; 
 import AdvancedWeatherWidget from './components/AdvancedWeatherWidget'; 
 import InfrastructureWidget from './components/InfrastructureWidget';
+import AircraftTable from './components/AircraftTable';
 
 function App() {
   // Data state variables
@@ -73,6 +74,10 @@ function App() {
           
         </div>
 
+      </div>
+      {/* NEW: Phase 2 Aircraft Table */}
+      <div className="mt-6 w-full">
+        <AircraftTable />
       </div>
     </div>
   );

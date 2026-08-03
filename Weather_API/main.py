@@ -5,6 +5,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync
 import math
+import json
+import asyncpg
 
 app = FastAPI(title="Maverick Weather API")
 
@@ -23,6 +25,24 @@ INFLUXDB_BUCKET = os.environ.get("INFLUXDB_BUCKET", "weatherflow")
 
 def get_async_influx_client() -> InfluxDBClientAsync:
     return InfluxDBClientAsync(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG)
+
+# --- PostgreSQL Configuration ---
+PG_HOST = os.environ.get("POSTGRES_HOST", "postgres_db")
+PG_DB = os.environ.get("POSTGRES_DB")
+PG_USER = os.environ.get("POSTGRES_USER")
+PG_PASS = os.environ.get("POSTGRES_PASSWORD")
+
+async def get_pg_conn():
+    return await asyncpg.connect(
+        host=PG_HOST,
+        database=PG_DB,
+        user=PG_USER,
+        password=PG_PASS
+    )
+
+def safe_float(val) -> float | None:
+    """Helper to convert asyncpg Decimal objects to standard floats for JSON."""
+    return float(val) if val is not None else None
 
 # Unit conversion helpers
 def c_to_f(c_temp: float | None) -> float | None:
@@ -597,5 +617,168 @@ async def get_pool_evaporation() -> Dict[str, Any]:
 
         return results
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/weather/lightning/recent")
+async def get_recent_lightning() -> List[Dict[str, Any]]:
+    """Retrieves lightning strikes recorded within the last 60 minutes."""
+    try:
+        conn = await get_pg_conn()
+        # Querying the last hour of strikes
+        records = await conn.fetch('''
+            SELECT lat, lon, timestamp
+            FROM lightning_strikes
+            WHERE timestamp >= NOW() - INTERVAL '1 hour'
+            ORDER BY timestamp DESC
+        ''')
+        await conn.close()
+        
+        return [
+            {
+                "lat": safe_float(r["lat"]), 
+                "lon": safe_float(r["lon"]), 
+                "timestamp": r["timestamp"].isoformat()
+            } 
+            for r in records
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/weather/stormcells/active")
+async def get_active_stormcells() -> List[Dict[str, Any]]:
+    """
+    Retrieves active storm cells plotted in the last 30 minutes, 
+    complete with movement vectors and forecast cone coordinates.
+    """
+    try:
+        conn = await get_pg_conn()
+        records = await conn.fetch('''
+            SELECT cell_id, lat, lon, heading_deg, speed_kts, tvs, mda, vil, 
+                   height_ft, top_ft, hail_prob, hail_prob_severe, hail_max_size_in, 
+                   forecast_cone_narrow, forecast_cone_wide, traits, timestamp
+            FROM storm_cells
+            WHERE timestamp >= NOW() - INTERVAL '30 minutes'
+        ''')
+        await conn.close()
+
+        cells = []
+        for r in records:
+            # Parse JSONB text strings back into standard Python lists/dicts for Leaflet
+            cone_narrow = json.loads(r["forecast_cone_narrow"]) if r["forecast_cone_narrow"] else None
+            cone_wide = json.loads(r["forecast_cone_wide"]) if r["forecast_cone_wide"] else None
+            traits = json.loads(r["traits"]) if r["traits"] else None
+
+            cells.append({
+                "cell_id": r["cell_id"],
+                "timestamp": r["timestamp"].isoformat(),
+                "location": {
+                    "lat": safe_float(r["lat"]),
+                    "lon": safe_float(r["lon"])
+                },
+                "movement": {
+                    "heading_deg": safe_float(r["heading_deg"]),
+                    "speed_kts": safe_float(r["speed_kts"]),
+                    "speed_mph": ms_to_mph(safe_float(r["speed_kts"]) * 1.15078) if r["speed_kts"] else None
+                },
+                "severity": {
+                    "tornadic_vortex_signature": r["tvs"],
+                    "mesocyclone_mda": safe_float(r["mda"]),
+                    "vertically_integrated_liquid": safe_float(r["vil"]),
+                    "max_hail_size_in": safe_float(r["hail_max_size_in"]),
+                    "hail_prob_pct": safe_float(r["hail_prob"]),
+                    "hail_severe_pct": safe_float(r["hail_prob_severe"])
+                },
+                "structure": {
+                    "base_height_ft": safe_float(r["height_ft"]),
+                    "top_height_ft": safe_float(r["top_ft"])
+                },
+                "forecast_polygons": {
+                    "narrow": cone_narrow,
+                    "wide": cone_wide
+                },
+                "traits": traits
+            })
+        return cells
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/weather/tropics/active")
+async def get_active_tropics() -> List[Dict[str, Any]]:
+    """Retrieves currently active named tropical storms and their forecast tracks."""
+    try:
+        conn = await get_pg_conn()
+        records = await conn.fetch('''
+            SELECT id, name, category, lat, lon, wind_speed_mph, gust_speed_mph, 
+                   pressure_mb, advisory_number, movement_dir_deg, movement_speed_mph, 
+                   wind_radii, forecast_track, breakpoint_alerts, timestamp
+            FROM tropical_storms
+            WHERE is_active = TRUE
+        ''')
+        await conn.close()
+
+        storms = []
+        for r in records:
+            storms.append({
+                "id": r["id"],
+                "name": r["name"],
+                "category": r["category"],
+                "last_updated": r["timestamp"].isoformat(),
+                "advisory_number": r["advisory_number"],
+                "location": {
+                    "lat": safe_float(r["lat"]),
+                    "lon": safe_float(r["lon"])
+                },
+                "intensity": {
+                    "wind_speed_mph": safe_float(r["wind_speed_mph"]),
+                    "gust_speed_mph": safe_float(r["gust_speed_mph"]),
+                    "pressure_mb": safe_float(r["pressure_mb"]),
+                    "pressure_inhg": hpa_to_inhg(safe_float(r["pressure_mb"]))
+                },
+                "movement": {
+                    "heading_deg": safe_float(r["movement_dir_deg"]),
+                    "speed_mph": safe_float(r["movement_speed_mph"])
+                },
+                # JSONB columns parsed to native objects
+                "wind_radii": json.loads(r["wind_radii"]) if r["wind_radii"] else None,
+                "forecast_track": json.loads(r["forecast_track"]) if r["forecast_track"] else [],
+                "breakpoint_alerts": json.loads(r["breakpoint_alerts"]) if r["breakpoint_alerts"] else []
+            })
+        return storms
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/weather/tropics/outlook")
+async def get_tropics_outlook() -> Dict[str, Any]:
+    """Retrieves the latest regional development favorability and outlook probabilities."""
+    try:
+        conn = await get_pg_conn()
+        # Grab the single most recently updated row to retrieve the broader outlook stats
+        record = await conn.fetchrow('''
+            SELECT atlantic_favor, carrib_favor, gulf_favor, 
+                   outlook_2day_pct, outlook_7day_pct, timestamp
+            FROM tropical_storms
+            ORDER BY timestamp DESC
+            LIMIT 1
+        ''')
+        await conn.close()
+
+        if record:
+            return {
+                "regional_favorability": {
+                    "atlantic": record["atlantic_favor"],
+                    "caribbean": record["carrib_favor"],
+                    "gulf_of_mexico": record["gulf_favor"]
+                },
+                "development_probabilities": {
+                    "48_hour_pct": record["outlook_2day_pct"],
+                    "7_day_pct": record["outlook_7day_pct"]
+                },
+                "last_updated": record["timestamp"].isoformat()
+            }
+        return {}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
