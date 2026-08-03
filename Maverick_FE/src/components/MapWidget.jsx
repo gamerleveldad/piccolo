@@ -258,7 +258,7 @@ export default function MapWidget() {
           // 2. Draw the Movement Vector (Arrow Marker)
           if (cell.location && cell.movement) {
             const arrowHtml = `
-              <div style="transform: rotate(${cell.movement.heading_deg}deg); width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.8));">
+              <div style="transform: rotate(${(cell.movement.heading_deg + 180) % 360}deg); width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.8));">
                 <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
                   <line x1="12" y1="19" x2="12" y2="5"></line>
                   <polyline points="5 12 12 5 19 12"></polyline>

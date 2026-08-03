@@ -211,8 +211,8 @@ export default function WeatherWidget() {
           <div className="bg-[#111827] p-2.5 rounded-lg border border-borderSlate flex items-center gap-2">
             <CloudRain className="w-4 h-4 text-cyan-400 shrink-0" />
             <div>
-              <p className="text-slate-500">Rain Rate</p>
-              <p className="font-semibold text-slate-200">{current.precip_in.toFixed(2)} in/hr</p>
+              <p className="text-slate-500">Total Rain</p>
+              <p className="font-semibold text-slate-200">{current.precip_in.toFixed(2)} in</p>
             </div>
           </div>
 
