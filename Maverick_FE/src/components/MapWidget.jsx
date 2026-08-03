@@ -53,6 +53,8 @@ export default function MapWidget() {
   const flightTrails = useRef({});
   const radarLayer = useRef(null);
   const stormLayer = useRef(null);
+  const stormCellLayer = useRef(null);
+  const lightningLayer = useRef(null);
 
   const [selectedFlight, setSelectedFlight] = useState(null);
   const [selectedMetar, setSelectedMetar] = useState(null);
@@ -103,6 +105,23 @@ export default function MapWidget() {
       maxZoom: 19
     }).addTo(map.current);
 
+    
+    const homeLat = import.meta.env.VITE_HOME_LATITUDE;
+    const homeLon = import.meta.env.VITE_HOME_LONGITUDE;
+
+    if (homeLat && homeLon) {
+      L.circle([homeLat, homeLon], {
+        color: '#64748b',       // Slate-500 color to blend with the dark theme
+        weight: 1.5,            // Thin border
+        dashArray: '4, 6',      // Creates a dashed line effect
+        fillColor: '#3b82f6',   // Very subtle blue fill
+        fillOpacity: 0.03,      // Barely visible fill to not obscure the map
+        radius: 32186.8,        // 20 miles in meters
+        interactive: false      // Prevents the circle from capturing mouse clicks
+      }).addTo(map.current);
+    }
+    // ------------------------------------------------
+
     const homeIconHtml = `<div class="flex items-center justify-center w-7 h-7 bg-blue-600 border-2 border-white rounded-full shadow-lg text-white">
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
     </div>`;
@@ -113,6 +132,8 @@ export default function MapWidget() {
     let metarInterval;
     let radarInterval;
     let stormInterval;
+    let stormCellInterval;
+    let lightningInterval;
 
     const updateRadar = async () => {
       try {
@@ -208,6 +229,114 @@ export default function MapWidget() {
     };
     fetchMETARs();
     metarInterval = setInterval(fetchMETARs, 300000); 
+    const updateStormCells = async () => {
+      try {
+        const res = await fetch(`http://${window.location.hostname}:8004/api/weather/stormcells/active`);
+        if (!res.ok) return;
+        
+        const cells = await res.json();
+        
+        // Clear existing storm cell layers if you have a layer group set up
+        // if (stormCellLayer.current) map.current.removeLayer(stormCellLayer.current);
+        // stormCellLayer.current = L.layerGroup().addTo(map.current);
+
+        cells.forEach(cell => {
+          // 1. Draw the Forecast Polygon (Shaded Threat Area)
+          if (cell.forecast_polygons && cell.forecast_polygons.narrow) {
+            // Flip [lon, lat] from your API to [lat, lon] for Leaflet
+            const latLngs = cell.forecast_polygons.narrow.map(coord => [coord[1], coord[0]]);
+            
+            L.polygon(latLngs, {
+              color: '#f59e0b', // Amber border
+              weight: 2,
+              fillColor: '#f59e0b',
+              fillOpacity: 0.25,
+              interactive: false // Allows clicking through the polygon to the map underneath
+            }).addTo(map.current); // Change to stormCellLayer.current if using a layer group
+          }
+
+          // 2. Draw the Movement Vector (Arrow Marker)
+          if (cell.location && cell.movement) {
+            const arrowHtml = `
+              <div style="transform: rotate(${cell.movement.heading_deg}deg); width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.8));">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="12" y1="19" x2="12" y2="5"></line>
+                  <polyline points="5 12 12 5 19 12"></polyline>
+                </svg>
+              </div>
+            `;
+            
+            L.marker([cell.location.lat, cell.location.lon], {
+              icon: L.divIcon({
+                html: arrowHtml,
+                className: '', // Prevents Leaflet from rendering a white square background
+                iconSize: [24, 24],
+                iconAnchor: [12, 12] // Centers the rotation exactly on the cell coordinates
+              })
+            }).addTo(map.current); 
+          }
+        });
+      } catch (err) {
+        console.warn("Storm cell fetch failed:", err);
+      }
+    };
+    updateStormCells();
+    stormCellInterval = setInterval(updateStormCells, 300000);
+
+    const updateLightning = async () => {
+      try {
+        const res = await fetch(`http://${window.location.hostname}:8004/api/weather/lightning/recent`);
+        if (!res.ok) return;
+        const strikes = await res.json();
+        
+        // We MUST clear the layer to prevent drawing 60 duplicate markers per hour, 
+        // but the map will still show the full 1-hour history because the API re-supplies it!
+        if (lightningLayer.current) map.current.removeLayer(lightningLayer.current);
+        lightningLayer.current = L.layerGroup().addTo(map.current);
+
+        const now = new Date();
+
+        strikes.forEach(strike => {
+          const strikeTime = new Date(strike.timestamp);
+          const ageInMinutes = (now - strikeTime) / (1000 * 60);
+
+          // Determine styling based on the age of the strike
+          let opacityClass = 'opacity-40';
+          let pingHtml = '';
+          
+          if (ageInMinutes < 5) {
+            opacityClass = 'opacity-100 drop-shadow-[0_0_8px_rgba(251,191,36,0.8)]';
+            // Only ping the brand new strikes
+            pingHtml = `<span class="absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75 animate-ping" style="animation-iteration-count: 3; animation-duration: 1s;"></span>`;
+          } else if (ageInMinutes < 15) {
+            opacityClass = 'opacity-80';
+          } else if (ageInMinutes < 30) {
+            opacityClass = 'opacity-60';
+          }
+
+          const iconHtml = `
+            <div class="relative flex items-center justify-center w-4 h-4 transition-opacity duration-500">
+              ${pingHtml}
+              <i class="wi wi-lightning relative inline-flex text-amber-400 text-sm ${opacityClass}"></i>
+            </div>
+          `;
+          
+          L.marker([strike.lat, strike.lon], {
+            icon: L.divIcon({
+              html: iconHtml,
+              className: '', 
+              iconSize: [16, 16],
+              iconAnchor: [8, 8] 
+            }),
+            interactive: false 
+          }).addTo(lightningLayer.current);
+        });
+      } catch (err) {
+        console.warn("Lightning fetch failed:", err);
+      }
+    };
+    updateLightning();
+    lightningInterval = setInterval(updateLightning, 300000);
 
     const updateFlights = async () => {
       try {
@@ -329,6 +458,8 @@ export default function MapWidget() {
       if (metarInterval) clearInterval(metarInterval);
       if (radarInterval) clearInterval(radarInterval);
       if (stormInterval) clearInterval(stormInterval);
+      if (stormCellInterval) clearInterval(stormCellInterval);
+      if (lightningInterval) clearInterval(lightningInterval);
       if (map.current) {
         map.current.remove();
         map.current = null;
