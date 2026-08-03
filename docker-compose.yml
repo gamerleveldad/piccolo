@@ -18,20 +18,42 @@ services:
         - ./data/postgres-init/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh
       networks:
         - piccolo_net
-  # --- Family Tactical Dashboard Hub ---
-  family_dashboard:
+ 
+  # --- New Fantasy Football API ---
+  fantasy_football_api:
     build:
-      context: ./Family_Dashboard
+      context: ./Fantasy_Football_API
       dockerfile: Dockerfile
-    container_name: howls-dashboard
+    container_name: fantasy_football_api
     restart: unless-stopped
-    #network_mode: "host"
+    ports:
+      - "8005:8000"
+    environment:
+      - TZ=America/New_York
+      - SLEEPER_LEAGUE_ID=1360812344053071872
+    networks:
+      - piccolo_net
+
+  # --- Updated Family Dashboard API ---
+  family_dashboard_api:
+    build:
+      context: ./Family_Dashboard_API
+      dockerfile: Dockerfile
+    container_name: howls-dashboard-api
+    restart: unless-stopped
     ports:
       - "8000:8000"
       - "50222:50222/udp"
     volumes:
-      - ./Family_Dashboard/assets:/app/assets
+      - ./Family_Dashboard_API/assets:/app/assets
+      - ./Family_Dashboard_API/token.json:/app/token.json
     environment:
+      - LOCAL_MODE=${LOCAL_MODE}
+      - TZ=America/New_York
+      - WEATHER_API_URL=http://weather_api:8000
+      - FLIGHT_API_URL=http://flight_api:8000
+      - CRUNCHYROLL_API_URL=http://crunchyroll_api:8000
+      - FANTASY_API_URL=http://fantasy_football_api:8000
       - LOCAL_MODE=false
       - TZ=America/New_York
       - STATION_ID=${STATION_ID}
@@ -44,8 +66,24 @@ services:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_HOST=postgres_db
     networks:
-        - piccolo_net
+      - piccolo_net
 
+  # --- New Isolated UI Container ---
+  family_dashboard_ui:
+    build:
+      context: ./Family_Dashboard_UI
+      dockerfile: Dockerfile
+      args:
+        - VITE_BACKEND_HOST=192.168.4.55  # --- 192.168.4.55
+        - VITE_BACKEND_PORT=8000
+    container_name: howls-dashboard-ui
+    restart: unless-stopped
+    ports:
+      - "8088:80"
+    depends_on:
+      - family_dashboard_api
+    networks:
+      - piccolo_net
   # --- Agentic Video Game Metadata Microservice ---
   game_scanner_api:
     build:
