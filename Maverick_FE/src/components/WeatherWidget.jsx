@@ -330,7 +330,7 @@ export default function WeatherWidget() {
           </div>
         )}
         {/* TROPICS TAB */}
-        {forecastTab === 'Tropics' && tropicsOutlook && (
+        {forecastTab === 'tropics' && tropicsOutlook && (
           <div className="flex flex-col gap-4 mt-4 overflow-y-auto pr-2">
             
             {/* Outlook Panel */}
