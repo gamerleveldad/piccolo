@@ -234,7 +234,7 @@ def fetch_and_store_storm_data():
                 ))
 
         # 2. Fetch Lightning Flashes within 20 nautical miles
-        lightning_url = f"https://api.aerisapi.com/lightning/closest?p={LAT},{LON}&radius=20nm&limit=50&client_id={XWEATHER_ID}&client_secret={XWEATHER_SECRET}"
+        lightning_url = f"https://api.aerisapi.com/lightning/flash/closest?p={LAT},{LON}&radius=20nm&limit=50&client_id={XWEATHER_ID}&client_secret={XWEATHER_SECRET}"
         light_resp = requests.get(lightning_url, timeout=10).json()
 
         if light_resp.get("success") and light_resp.get("response"):
