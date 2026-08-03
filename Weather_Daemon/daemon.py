@@ -226,7 +226,7 @@ def fetch_and_store_storm_data():
                 """, (
                     now, cell.get("id"), ob.get("cpos", {}).get("lat"), ob.get("cpos", {}).get("long"),
                     movement.get("dirDEG"), movement.get("speedKTS"),
-                    ob.get("tvs"), ob.get("mda"), ob.get("vil"), ob.get("htFT"), ob.get("topFT"),
+                    bool(ob.get("tvs", 0)), ob.get("mda"), ob.get("vil"), ob.get("htFT"), ob.get("topFT"), # <--- Updated this line
                     hail.get("prob"), hail.get("probSevere"), hail.get("maxSizeIN"),
                     json.dumps(forecast.get("cone", {}).get("narrow")),
                     json.dumps(forecast.get("cone", {}).get("wide")),
@@ -326,7 +326,7 @@ def fetch_and_store_tropics():
         regional_outlook = parse_nhc_outlook_with_gemini("\n".join(nhc_entries))
 
         # 2. Fetch Active Cyclones from Xweather
-        trop_url = f"[https://api.aerisapi.com/tropicalcyclones?client_id=](https://api.aerisapi.com/tropicalcyclones?client_id=){XWEATHER_ID}&client_secret={XWEATHER_SECRET}"
+        trop_url = f"https://api.aerisapi.com/tropicalcyclones?client_id={XWEATHER_ID}&client_secret={XWEATHER_SECRET}"
         trop_resp = requests.get(trop_url, timeout=10).json()
 
         if trop_resp.get("success") and trop_resp.get("response"):
