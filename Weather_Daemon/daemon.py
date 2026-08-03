@@ -351,7 +351,41 @@ def fetch_and_store_tropics():
         nhc_entries = get_nhc_data()
         regional_outlook = parse_nhc_outlook_with_gemini("\n".join(nhc_entries))
 
-        # 2. Fetch Active Cyclones from Xweather
+        # Sanitize percentage inputs to guarantee strict integers for Postgres
+        try:
+            p_2day = int(str(regional_outlook.get("outlook_2day_pct", 0)).replace("%", "").strip())
+        except Exception:
+            p_2day = 0
+
+        try:
+            p_7day = int(str(regional_outlook.get("outlook_7day_pct", 0)).replace("%", "").strip())
+        except Exception:
+            p_7day = 0
+
+        # 2. ALWAYS insert/update the system outlook record first (guarantees data exists even with 0 active storms)
+        cursor.execute("""
+            INSERT INTO tropical_storms (
+                id, timestamp, is_active, 
+                atlantic_favor, carrib_favor, gulf_favor, 
+                outlook_2day_pct, outlook_7day_pct
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET 
+                timestamp = EXCLUDED.timestamp, 
+                atlantic_favor = EXCLUDED.atlantic_favor,
+                carrib_favor = EXCLUDED.carrib_favor,
+                gulf_favor = EXCLUDED.gulf_favor,
+                outlook_2day_pct = EXCLUDED.outlook_2day_pct,
+                outlook_7day_pct = EXCLUDED.outlook_7day_pct
+        """, (
+            "SYSTEM_OUTLOOK", now, False,
+            regional_outlook.get("atlantic_favor", "Low"),
+            regional_outlook.get("carrib_favor", "Low"),
+            regional_outlook.get("gulf_favor", "Low"),
+            p_2day,
+            p_7day
+        ))
+
+        # 3. Fetch Active Cyclones from Xweather
         trop_url = f"https://api.aerisapi.com/tropicalcyclones?client_id={XWEATHER_ID}&client_secret={XWEATHER_SECRET}"
         trop_resp = requests.get(trop_url, timeout=10).json()
 
@@ -429,30 +463,8 @@ def fetch_and_store_tropics():
                     regional_outlook.get("atlantic_favor"),
                     regional_outlook.get("carrib_favor"),
                     regional_outlook.get("gulf_favor"),
-                    regional_outlook.get("outlook_2day_pct"),
-                    regional_outlook.get("outlook_7day_pct")
-                ))
-                # Guarantee the outlook data is saved even if no storms are active
-                cursor.execute("""
-                    INSERT INTO tropical_storms (
-                        id, timestamp, is_active, 
-                        atlantic_favor, carrib_favor, gulf_favor, 
-                        outlook_2day_pct, outlook_7day_pct
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (id) DO UPDATE SET 
-                        timestamp = EXCLUDED.timestamp, 
-                        atlantic_favor = EXCLUDED.atlantic_favor,
-                        carrib_favor = EXCLUDED.carrib_favor,
-                        gulf_favor = EXCLUDED.gulf_favor,
-                        outlook_2day_pct = EXCLUDED.outlook_2day_pct,
-                        outlook_7day_pct = EXCLUDED.outlook_7day_pct
-                """, (
-                    "SYSTEM_OUTLOOK", now, False,
-                    regional_outlook.get("atlantic_favor", "Low"),
-                    regional_outlook.get("carrib_favor", "Low"),
-                    regional_outlook.get("gulf_favor", "Low"),
-                    regional_outlook.get("outlook_2day_pct", 0),
-                    regional_outlook.get("outlook_7day_pct", 0)
+                    p_2day,
+                    p_7day
                 ))
 
         conn.commit()
