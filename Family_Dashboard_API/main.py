@@ -19,6 +19,7 @@ from googleapiclient.discovery import build
 import io
 import html
 import re
+from zoneinfo import ZoneInfo
 from googleapiclient.http import MediaIoBaseDownload
 
 # --- LOGGING CONFIGURATION ---
@@ -271,6 +272,34 @@ CALENDAR_TARGETS = {
     "holidays": "en.usa#holiday@group.v.calendar.google.com"
 }
 
+GOOGLE_COLOR_MAP = {
+    "1": "#a4bdfc", "2": "#7ae7bf", "3": "#dbadff", "4": "#ff887c",
+    "5": "#fbd75b", "6": "#ffb878", "7": "#46d6db", "8": "#e1e1e1",
+    "9": "#5484ed", "10": "#51b749", "11": "#dc2127"
+}
+
+def match_event_weather(event_start_iso, hourly_periods):
+    if not hourly_periods: return None
+    try:
+        event_dt = datetime.datetime.fromisoformat(event_start_iso.replace('Z', '+00:00'))
+        event_ts = int(event_dt.timestamp())
+    except Exception:
+        return None
+
+    for period in hourly_periods:
+        try:
+            p_time = int(datetime.datetime.fromisoformat(period["time"].replace('Z', '+00:00')).timestamp())
+            # Check if the event falls within this specific forecasted hour
+            if p_time <= event_ts < (p_time + 3600):
+                return {
+                    "temp": int(period.get("temp_f", 72)),
+                    "icon": period.get("icon", "clear-day"), 
+                    "rain_pct": int(period.get("precip_probability", 0))
+                }
+        except Exception:
+            continue
+    return None
+
 def get_calendar_credentials():
     creds = None
     token_path = os.path.join(BASE_DIR, 'token.json')
@@ -308,14 +337,24 @@ async def poll_calendar_events():
                 for e in events_result.get('items', []):
                     start_data = e['start'].get('dateTime', e['start'].get('date'))
                     is_all_day = 'date' in e['start'] and 'dateTime' not in e['start']
+                    
+                    event_forecast = None
+                    if not is_all_day and start_data:
+                        hourly_data = rest_cache.get("forecast_hourly", [])
+                        event_forecast = match_event_weather(start_data, hourly_data)
+                    
+                    raw_color_id = str(e.get('colorId', ''))
+                    event_color = e.get('backgroundColor', GOOGLE_COLOR_MAP.get(raw_color_id, "#38bdf8"))
+                    
                     aggregated_events.append({
                         "id": e.get('id'),
                         "summary": e.get('summary', 'Untitled Event'),
                         "start": start_data,
                         "location": e.get('location'),
                         "is_all_day": is_all_day,
-                        "color": e.get('backgroundColor', "#38bdf8"),
-                        "source": source_tag
+                        "color": event_color,
+                        "source": source_tag,
+                        "forecast": event_forecast
                     })
             
             await manager.broadcast(json.dumps({
@@ -386,7 +425,41 @@ async def poll_local_microservices():
             async with aiohttp.ClientSession() as session:
                 try:
                     async with session.get(f"{WEATHER_API_URL}/api/weather/current", timeout=5) as resp:
-                        if resp.status == 200: rest_cache["weather"] = await resp.json()
+                        # Fetch extended hourly forecast (10 days) for calendar matching
+                try:
+                    async with session.get(f"{WEATHER_API_URL}/api/weather/forecast/hourly?hours=240", timeout=10) as resp:
+                        if resp.status == 200:
+                            hourly = await resp.json()
+                            rest_cache["forecast_hourly"] = hourly
+                            
+                            buckets = {"morning": [], "afternoon": [], "evening": [], "overnight": []}
+                            local_tz = ZoneInfo("America/New_York")
+                            now_ts = datetime.datetime.now(datetime.timezone.utc).timestamp()
+                            
+                            for h in hourly:
+                                try:
+                                    dt_utc = datetime.datetime.fromisoformat(h["time"].replace('Z', '+00:00'))
+                                    if dt_utc.timestamp() > now_ts + 86400: continue # Only process the next 24 hours
+                                    
+                                    dt_local = dt_utc.astimezone(local_tz)
+                                    hr = dt_local.hour
+                                    prob = int(h.get("precip_probability", 0))
+                                    
+                                    if 6 <= hr < 12: buckets["morning"].append(prob)
+                                    elif 12 <= hr < 18: buckets["afternoon"].append(prob)
+                                    elif 18 <= hr <= 23: buckets["evening"].append(prob)
+                                    else: buckets["overnight"].append(prob)
+                                except Exception:
+                                    pass
+                                    
+                            w_cache = rest_cache.get("weather", {})
+                            w_cache["rain_chance_morning"] = max(buckets["morning"]) if buckets["morning"] else 0
+                            w_cache["rain_chance_afternoon"] = max(buckets["afternoon"]) if buckets["afternoon"] else 0
+                            w_cache["rain_chance_evening"] = max(buckets["evening"]) if buckets["evening"] else 0
+                            w_cache["rain_chance_overnight"] = max(buckets["overnight"]) if buckets["overnight"] else 0
+                            rest_cache["weather"] = w_cache
+                except Exception as h_err:
+                    logger.error(f"Failed fetching hourly blocks: {h_err}")
                 except Exception as w_err: pass
 
                 try:
