@@ -423,9 +423,19 @@ async def poll_local_microservices():
     while True:
         try:
             async with aiohttp.ClientSession() as session:
+                # 1. Current Weather
                 try:
                     async with session.get(f"{WEATHER_API_URL}/api/weather/current", timeout=5) as resp:
-                        # Fetch extended hourly forecast (10 days) for calendar matching
+                        if resp.status == 200: rest_cache["weather"] = await resp.json()
+                except Exception: pass
+
+                # 2. Daily Forecast
+                try:
+                    async with session.get(f"{WEATHER_API_URL}/api/weather/forecast/daily", timeout=5) as resp:
+                        if resp.status == 200: rest_cache["forecast_daily"] = await resp.json()
+                except Exception: pass
+
+                # 3. Extended Hourly Forecast (for Calendar + Rain Buckets)
                 try:
                     async with session.get(f"{WEATHER_API_URL}/api/weather/forecast/hourly?hours=240", timeout=10) as resp:
                         if resp.status == 200:
@@ -439,7 +449,8 @@ async def poll_local_microservices():
                             for h in hourly:
                                 try:
                                     dt_utc = datetime.datetime.fromisoformat(h["time"].replace('Z', '+00:00'))
-                                    if dt_utc.timestamp() > now_ts + 86400: continue # Only process the next 24 hours
+                                    # Only process the next 24 hours for the rain gauge buckets
+                                    if dt_utc.timestamp() > now_ts + 86400: continue
                                     
                                     dt_local = dt_utc.astimezone(local_tz)
                                     hr = dt_local.hour
@@ -460,27 +471,25 @@ async def poll_local_microservices():
                             rest_cache["weather"] = w_cache
                 except Exception as h_err:
                     logger.error(f"Failed fetching hourly blocks: {h_err}")
-                except Exception as w_err: pass
 
-                try:
-                    async with session.get(f"{WEATHER_API_URL}/api/weather/forecast/daily", timeout=5) as resp:
-                        if resp.status == 200: rest_cache["forecast_daily"] = await resp.json()
-                except Exception as f_err: pass
-
+                # 4. Crunchyroll Progress
                 try:
                     async with session.get(f"{CRUNCHYROLL_API_URL}/api/progress", timeout=5) as resp:
                         if resp.status == 200: rest_cache["anime_progress"] = await resp.json()
-                except Exception as c_err: pass
+                except Exception: pass
 
+                # 5. Active Flights
                 try:
                     async with session.get(f"{FLIGHT_API_URL}/api/flights/active", timeout=5) as resp:
                         if resp.status == 200: rest_cache["active_flights"] = await resp.json()
-                except Exception as fl_err: pass
+                except Exception: pass
 
+                # 6. Sleeper Fantasy Football
                 try:
                     async with session.get(f"{FANTASY_API_URL}/api/sleeper", timeout=5) as resp:
                         if resp.status == 200: rest_cache["sleeper"] = await resp.json()
-                except Exception as s_err: pass
+                except Exception: pass
+
         except Exception as e:
             logger.error(f"Microservice aggregation error: {e}")
         await asyncio.sleep(30)
