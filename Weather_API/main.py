@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync
@@ -185,9 +185,16 @@ async def get_daily_forecast() -> List[Dict[str, Any]]:
 @app.get("/api/weather/current")
 async def get_current_weather() -> Dict[str, Any]:
     """
-    Retrieves the latest observation and the current forecast conditions
-    using separate queries to avoid schema collisions, then merges them.
+    Retrieves the latest observation and current forecast conditions, 
+    pulling current hour icon/conditions from hourly forecast to avoid daily text overrides.
     """
+    now = datetime.now(timezone.utc)
+    current_hour_start = now.replace(minute=0, second=0, microsecond=0)
+    current_hour_end = current_hour_start + timedelta(hours=1)
+    
+    start_str = current_hour_start.strftime('%Y-%m-%dT%H:%M:%SZ')
+    stop_str = current_hour_end.strftime('%Y-%m-%dT%H:%M:%SZ')
+
     obs_query = f'''
     from(bucket: "{INFLUXDB_BUCKET}")
       |> range(start: -1h)
@@ -196,10 +203,12 @@ async def get_current_weather() -> Dict[str, Any]:
       |> keep(columns: ["_field", "_value"])
     '''
     
-    forecast_query = f'''
+    # Grab conditions/icon specifically for the active hour
+    hourly_condition_query = f'''
     from(bucket: "{INFLUXDB_BUCKET}")
-      |> range(start: -1h)
-      |> filter(fn: (r) => r["_measurement"] == "weatherflow_forecast_current")
+      |> range(start: {start_str}, stop: {stop_str})
+      |> filter(fn: (r) => r["_measurement"] == "weatherflow_forecast_hourly")
+      |> filter(fn: (r) => r["_field"] == "conditions" or r["_field"] == "icon")
       |> last()
       |> keep(columns: ["_field", "_value"])
     '''
@@ -207,19 +216,18 @@ async def get_current_weather() -> Dict[str, Any]:
     try:
         async with get_async_influx_client() as client:
             query_api = client.query_api()
-            # Await both queries
             obs_tables = await query_api.query(obs_query)
-            forecast_tables = await query_api.query(forecast_query)
+            hourly_tables = await query_api.query(hourly_condition_query)
 
         raw_data = {}
         
-        # Merge observation metrics (floats/ints)
+        # Merge observation metrics
         for table in obs_tables:
             for record in table.records:
                 raw_data[record.get_field()] = record.get_value()
                 
-        # Merge forecast conditions (strings)
-        for table in forecast_tables:
+        # Merge current hour conditions & icon
+        for table in hourly_tables:
             for record in table.records:
                 raw_data[record.get_field()] = record.get_value()
 
@@ -245,17 +253,37 @@ async def get_current_weather() -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/weather/forecast/hourly")
-async def get_hourly_forecast() -> List[Dict[str, Any]]:
+async def get_hourly_forecast(
+    hours: int = 48,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """
-    Retrieves the next 6 hours of forecast data, pivoted into single hourly objects,
-    with units converted to Imperial standard (with dual pressure).
+    Retrieves hourly forecast data. Defaults to 48 hours starting from the current hour.
+    Supports optional `hours`, `start_time` (ISO string), and `end_time` (ISO string) parameters.
     """
     now = datetime.now(timezone.utc)
-    start_time = now.replace(minute=0, second=0, microsecond=0)
-    stop_time = start_time + timedelta(hours=7)
     
-    start_str = start_time.strftime('%Y-%m-%dT%H:%M:%SZ')
-    stop_str = stop_time.strftime('%Y-%m-%dT%H:%M:%SZ')
+    # 1. Determine Start Time
+    if start_time:
+        try:
+            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid start_time format. Use ISO 8601 (e.g. 2026-08-04T00:00:00Z)")
+    else:
+        start_dt = now.replace(minute=0, second=0, microsecond=0)
+
+    # 2. Determine End Time
+    if end_time:
+        try:
+            end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid end_time format. Use ISO 8601 (e.g. 2026-08-06T00:00:00Z)")
+    else:
+        end_dt = start_dt + timedelta(hours=hours)
+
+    start_str = start_dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+    stop_str = end_dt.strftime('%Y-%m-%dT%H:%M:%SZ')
 
     query = f'''
     from(bucket: "{INFLUXDB_BUCKET}")
