@@ -189,8 +189,6 @@ def parse_tempest_packet(raw_packet: dict) -> dict | None:
             "update_type": "rapid_wind",
             "wind_speed_mph": mps_to_mph(ob[1]),
             "wind_direction_deg": ob[2],
-            "icon_api": rest_cache.get("weather", {}).get("icon", "clear-day"),
-            "conditions": rest_cache.get("weather", {}).get("conditions", "Clear")
         }
     elif packet_type == "evt_strike":
         evt = raw_packet.get("evt", [])
@@ -201,6 +199,19 @@ def parse_tempest_packet(raw_packet: dict) -> dict | None:
             "distance_miles": round(distance_km * 0.621371, 1),
             "energy": evt[2],
             "timestamp": raw_packet.get("timestamp")
+        }
+    elif packet_type == "obs_st":
+        obs_list = raw_packet.get("obs", [])
+        if not obs_list or not obs_list[0]: return None
+        obs = obs_list[0]
+        rain_min_mm = obs[12]
+        rain_rate_in_hr = round((rain_min_mm / 25.4) * 60, 2)
+        
+        return {
+            "update_type": "sensor_snapshot",
+            "wind_gust_mph": mps_to_mph(obs[3]),
+            "wind_direction_deg": obs[4],
+            "rain_rate_in_hr": rain_rate_in_hr
         }
     return None
 

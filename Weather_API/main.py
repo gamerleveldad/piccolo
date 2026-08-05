@@ -1,5 +1,6 @@
 import os
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -131,6 +132,7 @@ async def get_daily_forecast() -> List[Dict[str, Any]]:
       |> filter(fn: (r) => r["_field"] == "precip" or r["_field"] == "wind_avg" or r["_field"] == "wind_gust")
       |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
     '''
+    local_tz = ZoneInfo("America/New_York")
 
     try:
         async with get_async_influx_client() as client:
@@ -138,11 +140,12 @@ async def get_daily_forecast() -> List[Dict[str, Any]]:
             daily_tables = await query_api.query(daily_query)
             hourly_tables = await query_api.query(hourly_summary_query)
 
-        # Aggregate missing daily fields from hourly data indexed by date string (YYYY-MM-DD)
+        # Aggregate missing daily fields from hourly data
         hourly_aggregates = {}
         for table in hourly_tables:
             for record in table.records:
-                rec_time = record.get_time()
+                # Convert UTC to Local Time before extracting the date string
+                rec_time = record.get_time().astimezone(local_tz)
                 date_key = rec_time.strftime("%Y-%m-%d")
                 
                 if date_key not in hourly_aggregates:
@@ -160,7 +163,8 @@ async def get_daily_forecast() -> List[Dict[str, Any]]:
         results = []
         for table in daily_tables:
             for record in table.records:
-                rec_time = record.get_time()
+                # Convert UTC to Local Time before extracting the date string
+                rec_time = record.get_time().astimezone(local_tz)
                 date_key = rec_time.strftime("%Y-%m-%d")
                 day_name = rec_time.strftime("%a")
 

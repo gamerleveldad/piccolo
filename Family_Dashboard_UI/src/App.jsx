@@ -63,6 +63,23 @@ function App() {
       console.error("Failed fetching dashboard state:", err);
     }
   };
+  // --- 3A: Lightning Ring Reset Effect ---
+  useEffect(() => {
+    if (dashboardState?.weather?.strike_trigger_ring) {
+      const timer = setTimeout(() => {
+        setDashboardState(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            weather: { ...prev.weather, strike_trigger_ring: null }
+          };
+        });
+      }, 1200);
+      return () => clearTimeout(timer);
+    }
+  }, [dashboardState?.weather?.strike_trigger_ring]);
+
+  // --- 3B: Main Polling & WebSocket Effect ---
   useEffect(() => {
     fetchState();
     const interval = setInterval(fetchState, 30000);
@@ -78,7 +95,36 @@ function App() {
         const msg = JSON.parse(evt.data);
         if (msg.update_type === 'calendar_sync') {
           setEvents(msg.events);
+          return;
         }
+        
+        // Merge real-time telemetry into the main dashboard state
+        setDashboardState(prev => {
+          if (!prev || !prev.weather) return prev;
+          const nextWeather = { ...prev.weather };
+
+          if (msg.update_type === 'rapid_wind' || msg.update_type === 'sensor_snapshot') {
+            if (msg.wind_speed_mph !== undefined) nextWeather.wind_speed_mph = msg.wind_speed_mph;
+            if (msg.wind_direction_deg !== undefined) nextWeather.wind_direction_deg = msg.wind_direction_deg;
+            if (msg.wind_gust_mph !== undefined) nextWeather.wind_gust_mph = msg.wind_gust_mph;
+            if (msg.rain_rate_in_hr !== undefined) nextWeather.rain_rate_in_hr = msg.rain_rate_in_hr;
+            
+          } else if (msg.update_type === 'lightning_strike') {
+            const distance = parseFloat(msg.distance_miles);
+            let targetRing = 30;
+            if (distance <= 5) targetRing = 5;
+            else if (distance <= 10) targetRing = 10;
+            else if (distance <= 15) targetRing = 15;
+            else if (distance <= 20) targetRing = 20;
+            else if (distance <= 25) targetRing = 25;
+
+            nextWeather.last_strike_distance = distance;
+            nextWeather.last_strike_time = Date.now();
+            nextWeather.strike_trigger_ring = targetRing;
+            nextWeather.lightning_strike_id = (nextWeather.lightning_strike_id || 0) + 1;
+          }
+          return { ...prev, weather: nextWeather };
+        });
       };
     };
     connectWs();
