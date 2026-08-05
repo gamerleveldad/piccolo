@@ -258,17 +258,21 @@ def fetch_and_store_storm_data():
             if cells_resp.get("success") and cells_resp.get("response"):
                 cell = cells_resp["response"][0]
                 dist = cell.get("relativeTo", {}).get("distanceMI", "Unknown")
-                bearing = cell.get("relativeTo", {}).get("bearing", "")
+                bearing = cell.get("relativeTo", {}).get("bearing", "Unknown")
+                
+                # Fix: Target the correct stormcell movement keys and convert KTS to MPH
                 movement = cell.get("ob", {}).get("movement", {})
-                speed = movement.get("speedMPH", "Unknown")
-                direction = movement.get("direction", "Unknown")
+                speed_kts = movement.get("speedKTS")
+                speed_mph = round(speed_kts * 1.15078, 1) if speed_kts is not None else "Unknown"
+                dir_deg = movement.get("dirDEG", "Unknown")
                 
+                # Clarify the severity definitions
                 is_severe = cell.get("traits", {}).get("isSevere", False)
-                severity_text = "🔴 **SEVERE**" if is_severe else "🟡 Standard"
+                severity_text = "🔴 **SEVERE Thunderstorm/Cell**" if is_severe else "🟡 General Thunderstorm"
                 
-                alert_msg += f"- **Type:** {severity_text} Cell\n"
-                alert_msg += f"- **Location:** {dist} miles {bearing} of home.\n"
-                alert_msg += f"- **Movement:** Moving {direction} at {speed} mph.\n"
+                alert_msg += f"- **Type:** {severity_text}\n"
+                alert_msg += f"- **Location:** {dist} miles away at direction of {bearing} degrees.\n"
+                alert_msg += f"- **Movement:** Moving {dir_deg} degrees at {speed_mph} mph.\n"
             else:
                 alert_msg += "- **Type:** Lightning strikes detected in the immediate vicinity.\n"
             
