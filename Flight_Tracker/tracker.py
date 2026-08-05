@@ -9,14 +9,9 @@ from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
 
 # --- Configuration (Loaded from Environment Variables) ---
-# Home Coordinates
 HOME_LAT = float(os.environ.get("HOME_LATITUDE", 0.0))
 HOME_LON = float(os.environ.get("HOME_LONGITUDE", 0.0))
-
-# Internal Docker network URL for ultrafeeder (port 80 internally)
 JSON_URL = "http://ultrafeeder:80/data/aircraft.json"
-
-# Webhook
 DISCORD_WEBHOOK_URL = os.environ.get("FLIGHT_DISCORD_WEBHOOK")
 
 # PostgreSQL Settings
@@ -167,10 +162,11 @@ def alert_special_aircraft(aircraft, distance, category):
         
     flight_id = aircraft.get("flight", "").strip() or aircraft.get("r", "Unknown")
     ac_type = aircraft.get("desc") or aircraft.get("t", "Unknown Type")
+    alt = aircraft.get("alt_baro", "Unknown")
     
     message = {
         "content": f"🚨 **{category} Aircraft Alert!** 🚨\n"
-                   f"**{flight_id}** ({ac_type}) is currently **{distance:.1f} miles** away."
+                   f"**{flight_id}** ({ac_type}) is currently **{distance:.1f} miles** away at **{alt} ft**."
     }
     
     try:
@@ -178,6 +174,20 @@ def alert_special_aircraft(aircraft, distance, category):
         alerted_aircraft.add(hex_code)
     except Exception as e:
         print(f"Failed to send Discord alert: {e}")
+
+# Formatting Helpers for the Digest
+def format_special_flight(row):
+    flight = row[0] or row[1] or 'Unknown'
+    ac_type = row[3] or row[2] or 'Unknown Type'
+    time_seen = row[4].strftime("%I:%M %p") if row[4] else "Unknown Time"
+    return f"**{time_seen}** - {flight} ({ac_type})"
+
+def format_extreme(row, unit):
+    if not row: return "N/A"
+    flight = row[0] or 'Unknown'
+    ac_type = row[2] or row[1] or 'Unknown Type'
+    val = row[3]
+    return f"**{val} {unit}** - {flight} ({ac_type})"
 
 def send_daily_digest(cur):
     print("Generating Daily Digest...")
@@ -198,34 +208,60 @@ def send_daily_digest(cur):
     """)
     top_types = cur.fetchall()
 
-    cur.execute("SELECT COUNT(*) FROM daily_flights WHERE is_leo = TRUE")
-    leo_visits = cur.fetchone()[0]
+    # Get detailed LEO flights with timestamps
+    cur.execute("""
+        SELECT flight, registration, type, description, last_seen 
+        FROM daily_flights WHERE is_leo = TRUE ORDER BY last_seen ASC
+    """)
+    leo_flights = cur.fetchall()
 
-    cur.execute("SELECT flight, type, description FROM daily_flights WHERE is_military = TRUE")
+    # Get detailed Military flights with timestamps
+    cur.execute("""
+        SELECT flight, registration, type, description, last_seen 
+        FROM daily_flights WHERE is_military = TRUE ORDER BY last_seen ASC
+    """)
     mil_flights = cur.fetchall()
 
-    cur.execute("SELECT MAX(max_altitude) FROM daily_flights")
-    max_alt = cur.fetchone()[0]
+    # Get specific records for extremes (Flight, Type, Description, Value)
+    cur.execute("""
+        SELECT flight, type, description, max_altitude 
+        FROM daily_flights WHERE max_altitude IS NOT NULL 
+        ORDER BY max_altitude DESC LIMIT 1
+    """)
+    max_alt = cur.fetchone()
 
-    cur.execute("SELECT MIN(min_altitude) FROM daily_flights WHERE closest_distance <= 3.0")
-    min_alt_3m = cur.fetchone()[0]
+    cur.execute("""
+        SELECT flight, type, description, min_altitude 
+        FROM daily_flights WHERE closest_distance <= 3.0 AND min_altitude IS NOT NULL 
+        ORDER BY min_altitude ASC LIMIT 1
+    """)
+    min_alt_3m = cur.fetchone()
     
     cur.execute("""
-        SELECT flight, registration, type, closest_distance 
+        SELECT flight, type, description, closest_distance 
         FROM daily_flights WHERE closest_distance IS NOT NULL
         ORDER BY closest_distance ASC LIMIT 1
     """)
     closest_ac = cur.fetchone()
 
-    cur.execute("SELECT MAX(max_speed) FROM daily_flights")
-    max_spd = cur.fetchone()[0]
+    cur.execute("""
+        SELECT flight, type, description, max_speed 
+        FROM daily_flights WHERE max_speed IS NOT NULL 
+        ORDER BY max_speed DESC LIMIT 1
+    """)
+    max_spd = cur.fetchone()
 
-    cur.execute("SELECT MIN(min_speed) FROM daily_flights WHERE closest_distance <= 3.0")
-    min_spd_3m = cur.fetchone()[0]
+    cur.execute("""
+        SELECT flight, type, description, min_speed 
+        FROM daily_flights WHERE closest_distance <= 3.0 AND min_speed IS NOT NULL 
+        ORDER BY min_speed ASC LIMIT 1
+    """)
+    min_spd_3m = cur.fetchone()
 
     cur.execute("SELECT COUNT(*) FROM daily_flights WHERE closest_distance <= 3.0")
     count_3m = cur.fetchone()[0]
 
+    # Build Embed
     embed = {
         "title": f"📊 Daily Airspace Digest: {date.today()}",
         "color": 3447003,
@@ -237,20 +273,21 @@ def send_daily_digest(cur):
     if top_types:
         embed["fields"].append({"name": "Top 5 Aircraft Types", "value": "\n".join([f"{row[1] or row[0]} ({row[2]})" for row in top_types]), "inline": False})
     
-    embed["fields"].append({"name": "LEO Activity", "value": f"{leo_visits} LEO aircraft detected", "inline": True})
+    leo_text = "\n".join([format_special_flight(row) for row in leo_flights]) if leo_flights else "None"
+    embed["fields"].append({"name": f"LEO Activity ({len(leo_flights)})", "value": leo_text, "inline": False})
     
-    mil_text = "\n".join([f"{row[0] or 'Unknown'} - {row[2] or row[1]}" for row in mil_flights]) if mil_flights else "None"
-    embed["fields"].append({"name": "Military Activity", "value": mil_text, "inline": False})
+    mil_text = "\n".join([format_special_flight(row) for row in mil_flights]) if mil_flights else "None"
+    embed["fields"].append({"name": f"Military Activity ({len(mil_flights)})", "value": mil_text, "inline": False})
     
-    embed["fields"].append({"name": "Highest Altitude (Overall)", "value": f"{max_alt or 'N/A'} ft", "inline": True})
-    embed["fields"].append({"name": "Lowest Altitude (<3mi)", "value": f"{min_alt_3m or 'N/A'} ft", "inline": True})
+    embed["fields"].append({"name": "Highest Altitude (Overall)", "value": format_extreme(max_alt, "ft"), "inline": False})
+    embed["fields"].append({"name": "Lowest Altitude (<3mi)", "value": format_extreme(min_alt_3m, "ft"), "inline": False})
     
-    closest_text = f"{closest_ac[0] or closest_ac[1]} ({closest_ac[2]}) at {closest_ac[3]:.2f} miles" if closest_ac else "N/A"
+    closest_text = f"**{closest_ac[3]:.2f} mi** - {closest_ac[0] or 'Unknown'} ({closest_ac[2] or closest_ac[1]})" if closest_ac else "N/A"
     embed["fields"].append({"name": "Closest Approach", "value": closest_text, "inline": False})
     
-    embed["fields"].append({"name": "Fastest Speed (Overall)", "value": f"{max_spd or 'N/A'} kts", "inline": True})
-    embed["fields"].append({"name": "Slowest Speed (<3mi)", "value": f"{min_spd_3m or 'N/A'} kts", "inline": True})
-    embed["fields"].append({"name": "Total Flights (<3mi)", "value": str(count_3m), "inline": True})
+    embed["fields"].append({"name": "Fastest Speed (Overall)", "value": format_extreme(max_spd, "kts"), "inline": False})
+    embed["fields"].append({"name": "Slowest Speed (<3mi)", "value": format_extreme(min_spd_3m, "kts"), "inline": False})
+    embed["fields"].append({"name": "Total Unique Flights (<3mi)", "value": f"**{count_3m}** flights detected", "inline": False})
 
     message = {"embeds": [embed]}
 
