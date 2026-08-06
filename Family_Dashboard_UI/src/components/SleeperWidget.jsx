@@ -7,7 +7,7 @@ export default function SleeperWidget({ apiBase }) {
   useEffect(() => {
     const fetchSleeperData = async () => {
       try {
-        const res = await fetch(`${apiBase}/api/sleeper`);
+        const res = await fetch(`${apiBase}/api/sleeper/familydynasty`);
         if (res.ok) {
           setData(await res.json());
         }

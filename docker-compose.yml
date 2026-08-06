@@ -19,7 +19,7 @@ services:
       networks:
         - piccolo_net
  
-  # --- New Fantasy Football API ---
+# --- Fantasy Football API Service Update ---
   fantasy_football_api:
     build:
       context: ./Fantasy_Football_API
@@ -30,7 +30,15 @@ services:
       - "8005:8000"
     environment:
       - TZ=America/New_York
-      - SLEEPER_LEAGUE_ID=1360812344053071872
+      - SLEEPER_USERNAME=Gamerleveldad # Insert your Sleeper username here
+      - SLEEPER_SEASON=2026
+      - SLEEPER_DYNASTY_LEAGUE_ID=1360812344053071872 # Renamed from SLEEPER_LEAGUE_ID
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=postgres_db
+    depends_on:
+      - postgres_db
     networks:
       - piccolo_net
 
