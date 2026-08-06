@@ -4,3 +4,5 @@ aiohttp
 asyncpg
 pandas
 numpy
+fastparquet
+pydantic
