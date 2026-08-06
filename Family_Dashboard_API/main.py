@@ -1,556 +1,49 @@
-import argparse
-import asyncio
-import socket
+import os
 import json
 import math
-import random
-import os
-import datetime
-import logging
-import aiohttp
+import asyncpg
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-import io
-import html
-import re
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from googleapiclient.http import MediaIoBaseDownload
+from typing import List, Dict, Any, Optional
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync
 
-# --- LOGGING CONFIGURATION ---
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
-logger = logging.getLogger("dashboard_api")
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# --- Environment Configuration ---
+INFLUXDB_URL = os.environ.get("INFLUXDB_URL", "http://influxdb:8086")
+INFLUXDB_TOKEN = os.environ.get("INFLUXDB_TOKEN", "")
+INFLUXDB_ORG = os.environ.get("INFLUXDB_ORG", "")
+INFLUXDB_BUCKET = os.environ.get("INFLUXDB_BUCKET", "weatherflow")
 
-# --- COMMAND LINE & ENVIRONMENT CONFIGURATION ---
-parser = argparse.ArgumentParser(description="Tactical Weather Dashboard Backend API")
-parser.add_argument('--simulate', action='store_true', help="Run telemetry simulator instead of live hardware feeds.")
-args, _ = parser.parse_known_args()
+PG_HOST = os.environ.get("POSTGRES_HOST", "postgres_db")
+PG_DB = os.environ.get("POSTGRES_DB")
+PG_USER = os.environ.get("POSTGRES_USER")
+PG_PASS = os.environ.get("POSTGRES_PASSWORD")
 
-SIMULATION_MODE = os.getenv("LOCAL_MODE", "false").lower() == "true" or args.simulate
-
-# Internal Microservice Endpoint Definitions
-WEATHER_API_URL = os.getenv("WEATHER_API_URL", "http://weather_api:8000")
-FLIGHT_API_URL = os.getenv("FLIGHT_API_URL", "http://flight_api:8000")
-CRUNCHYROLL_API_URL = os.getenv("CRUNCHYROLL_API_URL", "http://crunchyroll_api:8000")
-FANTASY_API_URL = os.getenv("FANTASY_API_URL", "http://fantasy_football_api:8000")
-
-API_TOKEN_BIBLE = os.getenv("BIBLE_API_TOKEN")
-LATITUDE = float(os.getenv("LATITUDE", 28.66))
-LONGITUDE = float(os.getenv("LONGITUDE", -81.36))
-
-if not SIMULATION_MODE and (not API_TOKEN_BIBLE):
-    logger.warning("CRITICAL: API Tokens are missing from the environment configuration.")
-
-# In-memory REST cache
-rest_cache = {
-    "weather": {},
-    "forecast_daily": [],
-    "alerts": [],
-    "daily_verse": {
-        "reference": "Psalm 119:105",
-        "text": "Your word is a lamp to guide my feet and a light for my path."
-    },
-    "anime_progress": [],
-    "active_flights": [],
-    "sleeper": {"mode": "disabled"}
-}
-
-# --- BUSINESS LOGIC & CALCULATION ENGINE ---
-
-def calculate_comfort_level(dew_point_f: float) -> dict:
-    if dew_point_f is None or dew_point_f == '--.-':
-        return {"text": "Analyzing Air...", "color": "text-slate-500"}
-    dp = float(dew_point_f)
-    if dp < 30: return {"text": "L1: Desert Conditions", "color": "text-cyan-300"}
-    if dp < 40: return {"text": "L2: Low Moisture", "color": "text-teal-400"}
-    if dp < 50: return {"text": "L3: Comfortable", "color": "text-emerald-400"}
-    if dp < 55: return {"text": "L4: Pleasant", "color": "text-green-400"}
-    if dp < 60: return {"text": "L5: Moderate Humidity", "color": "text-yellow-300"}
-    if dp < 65: return {"text": "L6: Humid", "color": "text-amber-400"}
-    if dp < 70: return {"text": "L7: Typical Florida", "color": "text-orange-400"}
-    if dp < 75: return {"text": "L8: High Humidity", "color": "text-orange-600"}
-    if dp < 80: return {"text": "L9: Very Humid", "color": "text-red-500"}
-    return {"text": "L10: Extreme Humidity", "color": "text-purple-500 font-extrabold animate-pulse"}
-
-def calculate_pressure_diagnostics(pressure_inhg: float) -> dict:
-    if pressure_inhg is None:
-        return {"tier": "Unknown", "tierColor": "text-slate-500"}
-    p_val = float(pressure_inhg)
-    if p_val >= 30.20: return {"tier": "High System", "tierColor": "text-cyan-400"}
-    elif p_val < 29.80:
-        if p_val < 28.94: return {"tier": "Major Hurricane", "tierColor": "text-red-500 font-black animate-pulse"}
-        if p_val < 29.23: return {"tier": "Hurricane Depression", "tierColor": "text-orange-500 font-extrabold"}
-        if p_val < 29.53: return {"tier": "Tropical Storm", "tierColor": "text-amber-500 font-bold"}
-        if p_val < 29.71: return {"tier": "Tropical Depression", "tierColor": "text-yellow-400"}
-        return {"tier": "Low Pressure", "tierColor": "text-purple-400"}
-    return {"tier": "Normal Range", "tierColor": "text-slate-300"}
-
-def calculate_rain_status(rain_rate_in_hr: float) -> dict:
-    r = float(rain_rate_in_hr or 0.0)
-    if r == 0: return {"text": "Not Raining", "color": "text-emerald-500"}
-    if r < 0.1: return {"text": "Light Rain", "color": "text-blue-300"}
-    if r < 0.3: return {"text": "Moderate Rain", "color": "text-blue-400"}
-    return {"text": "Heavy Rain", "color": "text-blue-500 font-bold animate-pulse"}
-
-def calculate_activity_ratings(weather_data: dict, daily_forecast: list) -> list:
-    temp = float(weather_data.get("temperature_f", 72.0))
-    feels = float(weather_data.get("feels_like_f", temp))
-    humidity = float(weather_data.get("humidity_pct", 50.0))
-    wind = float(weather_data.get("wind_speed_mph", 0.0))
-    gust = float(weather_data.get("wind_gust_mph", 0.0))
-    rain_accum = float(weather_data.get("rain_accumulation_day_in", 0.0))
-    rain_rate = float(weather_data.get("rain_rate_in_hr", 0.0))
-    lightning_dist = float(weather_data.get("last_strike_distance") or 999.0)
-    
-    fc_day = daily_forecast[0] if daily_forecast else {}
-    fc_temp = (float(fc_day.get("high", temp)) + float(fc_day.get("low", temp))) / 2.0
-    fc_rain_chance = int(fc_day.get("rain_pct", 0))
-    
-    def evaluate(t, f, h, w, g, r_accum, r_rate, l_dist, is_forecast=False):
-        scores = {
-            "Walking": 10, "Airbrushing": 10, "Yard Work": 10, "Video Games": 5,
-            "Basketball": 10, "Football": 10, "Swimming": 10, "Driving": 10
-        }
-        
-        if t < 65: scores["Football"] -= min((65 - t) / 4, 3)
-        if t > 75: scores["Football"] -= min((t - 75) / 3, 4)
-        if f > 100: scores["Football"] = 0
-        if w > 15 or g > 22: scores["Football"] -= 3
-        if r_accum > 0.15: scores["Football"] -= 2.5
-        if is_forecast and fc_rain_chance > 60: scores["Football"] -= (fc_rain_chance / 20)
-
-        if t < 62: scores["Basketball"] -= min((62 - t) / 3, 4)
-        if t > 75: scores["Basketball"] -= min((t - 75) / 3, 4)
-        if f > 98: scores["Basketball"] = 0
-        if w > 8: scores["Basketball"] -= 2;
-        if r_accum > 0.30: scores["Basketball"] = 0
-
-        if t > 90: scores["Yard Work"] -= 4
-        if f > 102: scores["Yard Work"] = 0
-        if w > 25: scores["Yard Work"] -= 3
-        if r_accum > 0.15: scores["Yard Work"] -= 3
-
-        if t < 60 or t > 75: scores["Airbrushing"] -= min(abs(t - 67) / 3, 4)
-        if h > 65: scores["Airbrushing"] -= 2
-        if h > 75: scores["Airbrushing"] -= 3.5
-        if w > 5 or g > 8: scores["Airbrushing"] = 0
-
-        if t > 85 or t < 50: scores["Walking"] -= min(abs(t - 70) / 3, 5)
-        if h > 85: scores["Walking"] -= 2
-        if r_accum > 0.02: scores["Walking"] = 0
-
-        if t < 70 or l_dist <= 20: scores["Swimming"] = 0
-        else: scores["Swimming"] = min(2 + ((t - 70) * 0.4), 10)
-
-        vg = 5
-        if r_rate > 0 or f >= 95 or f <= 35: vg = 10
-        elif t >= 80: vg += (t - 80) * 0.2
-        elif t <= 60: vg += (60 - t) * 0.2
-        if is_forecast and fc_rain_chance > 20: vg += (fc_rain_chance / 15)
-        scores["Video Games"] = vg
-
-        dr = 10
-        if r_rate > 0:
-            if r_rate < 0.1: dr -= 2
-            elif r_rate < 0.5: dr -= 5
-            else: dr -= 9
-        if is_forecast and fc_rain_chance > 20: dr -= (fc_rain_chance / 15)
-        scores["Driving"] = dr
-
-        return {k: min(max(round(v), 0), 10) for k, v in scores.items()}
-
-    current_scores = evaluate(temp, feels, humidity, wind, gust, rain_accum, rain_rate, lightning_dist, False)
-    forecast_scores = evaluate(fc_temp, fc_temp, humidity, wind, gust, rain_accum, rain_rate, lightning_dist, True)
-
-    return [
-        {"name": name, "currentScore": current_scores[name], "forecastScore": forecast_scores[name]}
-        for name in current_scores
-    ]
-
-# --- Simulation Engine for Testing Purposes ---
-def mps_to_mph(mps_speed: float) -> float: return round(mps_speed * 2.23694, 1)
-
-def parse_tempest_packet(raw_packet: dict) -> dict | None:
-    packet_type = raw_packet.get("type")
-    if packet_type == "rapid_wind":
-        ob = raw_packet.get("ob", [])
-        if not ob: return None
-        return {
-            "update_type": "rapid_wind",
-            "wind_speed_mph": mps_to_mph(ob[1]),
-            "wind_direction_deg": ob[2],
-        }
-    elif packet_type == "evt_strike":
-        evt = raw_packet.get("evt", [])
-        if not evt: return None
-        distance_km = float(evt[1])
-        return {
-            "update_type": "lightning_strike",
-            "distance_miles": round(distance_km * 0.621371, 1),
-            "energy": evt[2],
-            "timestamp": raw_packet.get("timestamp")
-        }
-    elif packet_type == "obs_st":
-        obs_list = raw_packet.get("obs", [])
-        if not obs_list or not obs_list[0]: return None
-        obs = obs_list[0]
-        rain_min_mm = obs[12]
-        rain_rate_in_hr = round((rain_min_mm / 25.4) * 60, 2)
-        
-        return {
-            "update_type": "sensor_snapshot",
-            "wind_gust_mph": mps_to_mph(obs[3]),
-            "wind_direction_deg": obs[4],
-            "rain_rate_in_hr": rain_rate_in_hr
-        }
-    return None
-
-async def listen_to_tempest_udp():
-    UDP_IP = ""       
-    UDP_PORT = 50222         
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    sock.bind((UDP_IP, UDP_PORT))
-    sock.setblocking(False)
-    
-    loop = asyncio.get_event_loop()
-    while True:
-        try:
-            data, addr = await loop.sock_recvfrom(sock, 1024)
-            raw_json = json.loads(data.decode('utf-8'))
-            clean_data = parse_tempest_packet(raw_json)
-            if clean_data:
-                await manager.broadcast(json.dumps(clean_data))
-        except Exception as e:
-            logger.error(f"UDP Processing Error: {e}", exc_info=True)
-            await asyncio.sleep(0.1)
-
-async def simulate_weather_stream():
-    logger.info("Simulation Matrix Engine online: 100% Mock Data Generation Active")
-    sim_heading = 270
-    
-    while True:
-        try:
-            sim_heading = (sim_heading + random.randint(-40, 40)) % 360
-            base_wind = round(random.uniform(5.0, 20.0), 1)
-            
-            sim_wind = {
-                "update_type": "rapid_wind",
-                "wind_speed_mph": base_wind,
-                "wind_direction_deg": int(sim_heading),
-                "icon_api": "clear-day",
-                "conditions": "Clear"
-            }
-            await manager.broadcast(json.dumps(sim_wind))
-            await asyncio.sleep(3.0)
-            
-            if random.random() < 0.20:
-                sim_strike = {
-                    "update_type": "lightning_strike", 
-                    "distance_miles": round(random.uniform(2.0, 25.0), 1), 
-                    "energy": random.randint(1000, 15000), 
-                    "timestamp": int(datetime.datetime.now().timestamp())
-                }
-                await manager.broadcast(json.dumps(sim_strike))
-            await asyncio.sleep(2.5)
-            
-        except Exception as e:
-            logger.error(f"Simulator Engine Crash: {e}", exc_info=True)
-            await asyncio.sleep(2)
-
-# --- GOOGLE OAUTH & WORKERS ---
-
-SCOPES = [
-    'https://www.googleapis.com/auth/calendar.readonly',
-    'https://www.googleapis.com/auth/tasks',
-    'https://www.googleapis.com/auth/drive.readonly'
-]
-
-CALENDAR_TARGETS = {
-    "display_board": "810d2e7891b3be1da204c04a0959229aa41467ae7b110d83f72343ec7b1490e0@group.calendar.google.com",
-    "family": "family08995171228833928146@group.calendar.google.com",
-    "holidays": "en.usa#holiday@group.v.calendar.google.com"
-}
-
-GOOGLE_COLOR_MAP = {
-    "1": "#a4bdfc", "2": "#7ae7bf", "3": "#dbadff", "4": "#ff887c",
-    "5": "#fbd75b", "6": "#ffb878", "7": "#46d6db", "8": "#e1e1e1",
-    "9": "#5484ed", "10": "#51b749", "11": "#dc2127"
-}
-
-def match_event_weather(event_start_iso, hourly_periods):
-    if not hourly_periods: return None
-    try:
-        event_dt = datetime.datetime.fromisoformat(event_start_iso.replace('Z', '+00:00'))
-        event_ts = int(event_dt.timestamp())
-    except Exception:
-        return None
-
-    for period in hourly_periods:
-        try:
-            p_time = int(datetime.datetime.fromisoformat(period["time"].replace('Z', '+00:00')).timestamp())
-            # Check if the event falls within this specific forecasted hour
-            if p_time <= event_ts < (p_time + 3600):
-                return {
-                    "temp": int(period.get("temp_f", 72)),
-                    "icon": period.get("icon", "clear-day"), 
-                    "rain_pct": int(period.get("precip_probability", 0))
-                }
-        except Exception:
-            continue
-    return None
-
-def get_calendar_credentials():
-    creds = None
-    token_path = os.path.join(BASE_DIR, 'token.json')
-    if os.path.exists(token_path):
-        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            with open(token_path, 'w') as token:
-                token.write(creds.to_json())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
-            with open(token_path, 'w') as token:
-                token.write(creds.to_json())
-    return creds
-
-async def poll_calendar_events():
-    logger.info("Calendar synchronization worker online.")
-    while True:
-        try:
-            creds = get_calendar_credentials()
-            service = build('calendar', 'v3', credentials=creds, cache_discovery=False)
-            now = datetime.datetime.now(datetime.timezone.utc)
-            time_min = now.isoformat()
-            time_max = (now + datetime.timedelta(days=28)).isoformat()
-            
-            aggregated_events = []
-            for source_tag, cal_id in CALENDAR_TARGETS.items():
-                events_result = service.events().list(
-                    calendarId=cal_id, timeMin=time_min, timeMax=time_max,
-                    singleEvents=True, orderBy='startTime'
-                ).execute()
-                
-                for e in events_result.get('items', []):
-                    start_data = e['start'].get('dateTime', e['start'].get('date'))
-                    is_all_day = 'date' in e['start'] and 'dateTime' not in e['start']
-                    
-                    event_forecast = None
-                    if not is_all_day and start_data:
-                        hourly_data = rest_cache.get("forecast_hourly", [])
-                        event_forecast = match_event_weather(start_data, hourly_data)
-                    
-                    raw_color_id = str(e.get('colorId', ''))
-                    event_color = e.get('backgroundColor', GOOGLE_COLOR_MAP.get(raw_color_id, "#38bdf8"))
-                    
-                    aggregated_events.append({
-                        "id": e.get('id'),
-                        "summary": e.get('summary', 'Untitled Event'),
-                        "start": start_data,
-                        "location": e.get('location'),
-                        "is_all_day": is_all_day,
-                        "color": event_color,
-                        "source": source_tag,
-                        "forecast": event_forecast
-                    })
-            
-            await manager.broadcast(json.dumps({
-                "update_type": "calendar_sync",
-                "events": aggregated_events
-            }))
-        except Exception as err:
-            logger.error(f"Calendar Thread Error: {err}")
-        await asyncio.sleep(300)
-
-async def poll_google_drive_photos():
-    logger.info("Google Drive Photo sync worker online.")
-    photo_dir = os.path.join(BASE_DIR, "assets", "photos")
-    os.makedirs(photo_dir, exist_ok=True)
-    MIME_MAP = {'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp'}
-    
-    def sync_logic():
-        creds = get_calendar_credentials()
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            with open('token.json', 'w') as token:
-                token.write(creds.to_json())
-        
-        service = build('drive', 'v3', credentials=creds, cache_discovery=False)
-        results = service.files().list(q="mimeType='application/vnd.google-apps.folder' and name='DisplayBoard' and trashed=false", fields="files(id, name)").execute()
-        folders = results.get('files', [])
-        if not folders: return
-            
-        folder_id = folders[0]['id']
-        results = service.files().list(q=f"'{folder_id}' in parents and mimeType contains 'image/' and trashed=false", fields="files(id, name, mimeType)").execute()
-        cloud_images = results.get('files', [])
-        
-        cloud_safe_names = {}
-        for img in cloud_images:
-            original_name = img["name"]
-            ext = os.path.splitext(original_name)[1].lower()
-            if not ext:
-                inferred_ext = MIME_MAP.get(img.get("mimeType", ""), ".png")
-                safe_name = f"{original_name}{inferred_ext}"
-            else:
-                safe_name = original_name
-            cloud_safe_names[safe_name] = img
-        
-        local_filenames = set([f for f in os.listdir(photo_dir) if not f.startswith('.')])
-        for local_file in local_filenames:
-            if local_file not in cloud_safe_names:
-                os.remove(os.path.join(photo_dir, local_file))
-                
-        for safe_name, img in cloud_safe_names.items():
-            if safe_name not in local_filenames:
-                request = service.files().get_media(fileId=img['id'])
-                # FIX: Wrap the file IO in a 'with' context manager to guarantee it closes
-                with io.FileIO(os.path.join(photo_dir, safe_name), 'wb') as fh:
-                    downloader = MediaIoBaseDownload(fh, request)
-                    done = False
-                    while done is False:
-                        status, done = downloader.next_chunk()
-
-    while True:
-        try:
-            await asyncio.to_thread(sync_logic)
-        except Exception as e:
-            logger.error(f"Drive Sync error: {e}", exc_info=True)
-        await asyncio.sleep(3600)
-
-async def poll_local_microservices():
-    logger.info("Local microservice aggregation loop online.")
-    # Create the session ONCE outside the loop
-    async with aiohttp.ClientSession() as session:
-        while True:
-            try:
-                # 1. Current Weather
-                try:
-                    async with session.get(f"{WEATHER_API_URL}/api/weather/current", timeout=5) as resp:
-                        if resp.status == 200: rest_cache["weather"] = await resp.json()
-                except Exception: pass
-
-                # 2. Daily Forecast
-                try:
-                    async with session.get(f"{WEATHER_API_URL}/api/weather/forecast/daily", timeout=5) as resp:
-                        if resp.status == 200: rest_cache["forecast_daily"] = await resp.json()
-                except Exception: pass
-
-                # 3. Extended Hourly Forecast
-                try:
-                    async with session.get(f"{WEATHER_API_URL}/api/weather/forecast/hourly?hours=240", timeout=10) as resp:
-                        if resp.status == 200:
-                            hourly = await resp.json()
-                            rest_cache["forecast_hourly"] = hourly
-                            
-                            buckets = {"morning": [], "afternoon": [], "evening": [], "overnight": []}
-                            local_tz = ZoneInfo("America/New_York")
-                            now_ts = datetime.datetime.now(datetime.timezone.utc).timestamp()
-                            
-                            for h in hourly:
-                                try:
-                                    dt_utc = datetime.datetime.fromisoformat(h["time"].replace('Z', '+00:00'))
-                                    if dt_utc.timestamp() > now_ts + 86400: continue
-                                    
-                                    dt_local = dt_utc.astimezone(local_tz)
-                                    hr = dt_local.hour
-                                    prob = int(h.get("precip_probability", 0))
-                                    
-                                    if 6 <= hr < 12: buckets["morning"].append(prob)
-                                    elif 12 <= hr < 18: buckets["afternoon"].append(prob)
-                                    elif 18 <= hr <= 23: buckets["evening"].append(prob)
-                                    else: buckets["overnight"].append(prob)
-                                except Exception:
-                                    pass
-                                    
-                            w_cache = rest_cache.get("weather", {})
-                            w_cache["rain_chance_morning"] = max(buckets["morning"]) if buckets["morning"] else 0
-                            w_cache["rain_chance_afternoon"] = max(buckets["afternoon"]) if buckets["afternoon"] else 0
-                            w_cache["rain_chance_evening"] = max(buckets["evening"]) if buckets["evening"] else 0
-                            w_cache["rain_chance_overnight"] = max(buckets["overnight"]) if buckets["overnight"] else 0
-                            rest_cache["weather"] = w_cache
-                except Exception as h_err:
-                    logger.error(f"Failed fetching hourly blocks: {h_err}")
-
-                # 4. Crunchyroll Progress
-                try:
-                    async with session.get(f"{CRUNCHYROLL_API_URL}/api/progress", timeout=5) as resp:
-                        if resp.status == 200: rest_cache["anime_progress"] = await resp.json()
-                except Exception: pass
-
-                # 5. Active Flights
-                try:
-                    async with session.get(f"{FLIGHT_API_URL}/api/flights/active", timeout=5) as resp:
-                        if resp.status == 200: rest_cache["active_flights"] = await resp.json()
-                except Exception: pass
-
-                # 6. Sleeper Fantasy Football
-                try:
-                    async with session.get(f"{FANTASY_API_URL}/api/sleeper", timeout=5) as resp:
-                        if resp.status == 200: rest_cache["sleeper"] = await resp.json()
-                except Exception: pass
-
-            except Exception as e:
-                logger.error(f"Microservice aggregation error: {e}")
-            
-            await asyncio.sleep(30)
-
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-    async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            try: await connection.send_text(message)
-            except Exception: pass
-
-manager = ConnectionManager()
-
+# --- Lifespan Resource Management (Connection Pooling) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Initializing family_dashboard_api service stack...")
-    sim_task = None
-    cal_task = None
-    microservice_task = None
-    photo_task = None
-    udp_task = None
-    
-    if SIMULATION_MODE:
-        sim_task = asyncio.create_task(simulate_weather_stream())
-        photo_task = asyncio.create_task(poll_google_drive_photos())
-    else:
-        cal_task = asyncio.create_task(poll_calendar_events())
-        microservice_task = asyncio.create_task(poll_local_microservices())
-        photo_task = asyncio.create_task(poll_google_drive_photos())
-        udp_task = asyncio.create_task(listen_to_tempest_udp())
-        
+    # Startup: Create persistent InfluxDB client & Postgres Connection Pool
+    app.state.influx_client = InfluxDBClientAsync(
+        url=INFLUXDB_URL, 
+        token=INFLUXDB_TOKEN, 
+        org=INFLUXDB_ORG
+    )
+    app.state.pg_pool = await asyncpg.create_pool(
+        host=PG_HOST,
+        database=PG_DB,
+        user=PG_USER,
+        password=PG_PASS,
+        min_size=2,
+        max_size=10
+    )
     yield
-    
-    if sim_task: sim_task.cancel()
-    if cal_task: cal_task.cancel()
-    if microservice_task: microservice_task.cancel()
-    if photo_task: photo_task.cancel()
-    if udp_task: udp_task.cancel()
+    # Shutdown: Cleanly close pools and sockets
+    await app.state.influx_client.close()
+    await app.state.pg_pool.close()
 
-app = FastAPI(title="Family Tactical Dashboard API", lifespan=lifespan)
+app = FastAPI(title="Maverick Weather API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -559,91 +52,668 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-assets_path = os.path.join(BASE_DIR, "assets")
-os.makedirs(assets_path, exist_ok=True)
 
-# This exposes the assets folder to the UI container
-app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
-@app.get("/api/dashboard/state")
-async def get_dashboard_state():
-    w = rest_cache.get("weather", {})
-    daily = rest_cache.get("forecast_daily", [])
-    dew_point = w.get("dew_point_f")
-    pressure = w.get("sea_level_pressure_inhg")
-    rain_rate = w.get("precip_in", 0.0)
-    
-    return {
-        "weather": w,
-        "comfort": calculate_comfort_level(dew_point),
-        "pressure_diag": calculate_pressure_diagnostics(pressure),
-        "rain_status": calculate_rain_status(rain_rate),
-        "activities": calculate_activity_ratings(w, daily),
-        "forecast_daily": daily,
-        "anime_progress": rest_cache.get("anime_progress", []),
-        "active_flights": rest_cache.get("active_flights", []),
-        "daily_verse": rest_cache.get("daily_verse", {})
-    }
+# --- Unit & Helper Functions ---
+def safe_float(val) -> float | None:
+    return float(val) if val is not None else None
 
-import datetime
+def c_to_f(c_temp: float | None) -> float | None:
+    return round((c_temp * 9 / 5) + 32, 1) if c_temp is not None else None
 
-@app.get("/api/tasks")
-async def get_tasks():
+def ms_to_mph(ms_speed: float | None) -> float | None:
+    return round(ms_speed * 2.23694, 1) if ms_speed is not None else None
+
+def mm_to_inches(mm_val: float | None) -> float:
+    return round(mm_val / 25.4, 2) if mm_val is not None else 0.0
+
+def hpa_to_inhg(hpa_val: float | None) -> float | None:
+    return round(hpa_val * 0.0295301, 2) if hpa_val is not None else None
+
+def calculate_heat_misery(wbgt_c: float | None) -> int:
+    if wbgt_c is None: return 0
+    wbgt_f = c_to_f(wbgt_c)
+    if wbgt_f is None or wbgt_f <= 70: return 0
+    if wbgt_f >= 90: return 10
+    return round((wbgt_f - 70) / 2.0)
+
+def calculate_humidity_misery(vpd_kpa: float | None) -> int:
+    if vpd_kpa is None or vpd_kpa >= 1.5: return 0
+    if vpd_kpa <= 0.5: return 10
+    return round(10 - ((vpd_kpa - 0.5) * 10))
+
+def calculate_density_altitude(temp_c: float | None, dewpoint_c: float | None, pressure_mb: float | None) -> int | None:
+    if temp_c is None or dewpoint_c is None or pressure_mb is None:
+        return None
     try:
-        creds = get_calendar_credentials()
-        from googleapiclient.discovery import build as tasks_build
-        service = tasks_build('tasks', 'v1', credentials=creds, cache_discovery=False)
-        
-        # 1. Fetch all task lists to find the internal ID for "Family"
-        lists = service.tasklists().list().execute().get('items', [])
-        target_id = '@default'
-        for tl in lists:
-            if tl['title'].strip().lower() == 'family':
-                target_id = tl['id']
-                break
+        e = 6.11 * (10 ** ((7.5 * dewpoint_c) / (237.3 + dewpoint_c)))
+        temp_k = temp_c + 273.15
+        tv_k = temp_k / (1 - (e / pressure_mb) * (1 - 0.622))
+        tv_r = tv_k * 1.8  
+        p_inhg = pressure_mb * 0.0295301  
+        da_ft = 145366 * (1 - ((17.326 * p_inhg) / tv_r) ** 0.235)
+        return int(round(da_ft))
+    except Exception:
+        return None
+
+def calc_vapor_pressure_inhg(temp_c: float | None) -> float | None:
+    if temp_c is None: return None
+    mb = 6.11 * (10 ** ((7.5 * temp_c) / (237.3 + temp_c)))
+    return mb * 0.0295301
+
+def calculate_evaporation_gallons(water_temp_c: float | None, dewpoint_c: float | None, wind_ms: float | None, hours: int) -> float:
+    if water_temp_c is None or dewpoint_c is None or wind_ms is None: 
+        return 0.0
+    pw = calc_vapor_pressure_inhg(water_temp_c)
+    pa = calc_vapor_pressure_inhg(dewpoint_c)
+    if pw is None or pa is None or pw < pa: 
+        return 0.0 
+    wind_mph = ms_to_mph(wind_ms) or 0.0
+    wind_ft_min = wind_mph * 88
+    w_lbs_hr = (450 * (pw - pa) * (95 + 0.425 * wind_ft_min)) / 1050
+    gallons_hr = w_lbs_hr / 8.33
+    return round(gallons_hr * hours, 1)
+
+
+# --- Endpoints ---
+
+@app.get("/health")
+async def health_check() -> Dict[str, str]:
+    health = await app.state.influx_client.health()
+    if health.status == "pass":
+        return {"status": "up", "influxdb": "connected"}
+    raise HTTPException(status_code=503, detail="InfluxDB unhealthy")
+
+
+@app.get("/api/weather/forecast/daily")
+async def get_daily_forecast() -> List[Dict[str, Any]]:
+    daily_query = f'''
+    from(bucket: "{INFLUXDB_BUCKET}")
+      |> range(start: -1d, stop: 10d)
+      |> filter(fn: (r) => r["_measurement"] == "weatherflow_forecast_daily")
+      |> keep(columns: ["_time", "_field", "_value"])
+      |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+      |> sort(columns: ["_time"])
+    '''
+    hourly_summary_query = f'''
+    from(bucket: "{INFLUXDB_BUCKET}")
+      |> range(start: -1d, stop: 10d)
+      |> filter(fn: (r) => r["_measurement"] == "weatherflow_forecast_hourly")
+      |> filter(fn: (r) => r["_field"] == "precip" or r["_field"] == "wind_avg" or r["_field"] == "wind_gust")
+      |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+    '''
+    local_tz = ZoneInfo("America/New_York")
+
+    try:
+        query_api = app.state.influx_client.query_api()
+        daily_tables = await query_api.query(daily_query)
+        hourly_tables = await query_api.query(hourly_summary_query)
+
+        hourly_aggregates = {}
+        for table in hourly_tables:
+            for record in table.records:
+                rec_time = record.get_time().astimezone(local_tz)
+                date_key = rec_time.strftime("%Y-%m-%d")
                 
-        # 2. Fetch the tasks using the correct target ID
-        tasks_result = service.tasks().list(tasklist=target_id, showCompleted=False).execute()
-        raw_tasks = tasks_result.get('items', [])
-        
-        # 3. Format the dates so the frontend tags them correctly
-        processed = []
-        for t in raw_tasks:
-            due_str = t.get('due')
-            due_day = None
-            if due_str:
-                due_day = datetime.datetime.fromisoformat(due_str.split('T')[0]).date()
-            
-            processed.append({
-                "id": t.get('id'),
-                "title": t.get('title', 'Unnamed Task'),
-                "notes": t.get('notes', ''),
-                "due_date_str": due_day.isoformat() if due_day else None
-            })
-        
-        # Sort by due date (tasks with no due date go to the bottom)
-        processed.sort(key=lambda x: x["due_date_str"] if x["due_date_str"] else "9999-12-31")
-        return processed
-        
+                if date_key not in hourly_aggregates:
+                    hourly_aggregates[date_key] = {"precip_accum_mm": 0.0, "max_wind_ms": 0.0}
+                
+                precip = record.values.get("precip", 0.0) or 0.0
+                wind_gust = record.values.get("wind_gust", 0.0) or 0.0
+                wind_avg = record.values.get("wind_avg", 0.0) or 0.0
+                max_wind = max(wind_gust, wind_avg)
+
+                hourly_aggregates[date_key]["precip_accum_mm"] += precip
+                if max_wind > hourly_aggregates[date_key]["max_wind_ms"]:
+                    hourly_aggregates[date_key]["max_wind_ms"] = max_wind
+
+        results = []
+        for table in daily_tables:
+            for record in table.records:
+                rec_time = record.get_time().astimezone(local_tz)
+                date_key = rec_time.strftime("%Y-%m-%d")
+                day_name = rec_time.strftime("%a")
+
+                hourly_data = hourly_aggregates.get(date_key, {"precip_accum_mm": 0.0, "max_wind_ms": 0.0})
+
+                results.append({
+                    "date": date_key,
+                    "day_name": day_name,
+                    "temp_max_f": c_to_f(record.values.get("air_temp_high")),
+                    "temp_min_f": c_to_f(record.values.get("air_temp_low")),
+                    "conditions": record.values.get("conditions", "Unknown"),
+                    "icon": record.values.get("icon", ""),
+                    "precip_probability": record.values.get("precip_probability", 0),
+                    "precip_accum_in": mm_to_inches(hourly_data["precip_accum_mm"]),
+                    "max_wind_speed_mph": ms_to_mph(hourly_data["max_wind_ms"])
+                })
+
+        return results
     except Exception as e:
-        logger.error(f"Google Tasks endpoint error: {e}")
-        return []
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/photos")
-async def get_photos():
-    photo_dir = os.path.join(BASE_DIR, "assets", "photos")
-    if not os.path.exists(photo_dir): os.makedirs(photo_dir)
-    files_on_disk = [f for f in os.listdir(photo_dir) if not f.startswith('.')]
-    urls = [f"/assets/photos/{f}" for f in files_on_disk]
-    return {"urls": urls}
 
-@app.get("/api/sleeper")
-async def get_sleeper_node_data():
-    return rest_cache.get("sleeper", {"mode": "disabled"})
+@app.get("/api/weather/current")
+async def get_current_weather() -> Dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    current_hour_start = now.replace(minute=0, second=0, microsecond=0)
+    current_hour_end = current_hour_start + timedelta(hours=1)
+    
+    start_str = current_hour_start.strftime('%Y-%m-%dT%H:%M:%SZ')
+    stop_str = current_hour_end.strftime('%Y-%m-%dT%H:%M:%SZ')
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
+    obs_query = f'''
+    from(bucket: "{INFLUXDB_BUCKET}")
+      |> range(start: -1h)
+      |> filter(fn: (r) => r["_measurement"] == "weatherflow_obs")
+      |> last()
+      |> keep(columns: ["_field", "_value"])
+    '''
+    
+    hourly_condition_query = f'''
+    from(bucket: "{INFLUXDB_BUCKET}")
+      |> range(start: {start_str}, stop: {stop_str})
+      |> filter(fn: (r) => r["_measurement"] == "weatherflow_forecast_hourly")
+      |> filter(fn: (r) => r["_field"] == "conditions" or r["_field"] == "icon")
+      |> last()
+      |> keep(columns: ["_field", "_value"])
+    '''
+    
     try:
-        while True: await websocket.receive_text()
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        query_api = app.state.influx_client.query_api()
+        obs_tables = await query_api.query(obs_query)
+        hourly_tables = await query_api.query(hourly_condition_query)
+
+        raw_data = {}
+        for table in obs_tables:
+            for record in table.records:
+                raw_data[record.get_field()] = record.get_value()
+                
+        for table in hourly_tables:
+            for record in table.records:
+                raw_data[record.get_field()] = record.get_value()
+
+        return {
+            "time": datetime.now(timezone.utc).isoformat(),
+            "temp_f": c_to_f(raw_data.get("air_temperature")),
+            "feels_like_f": c_to_f(raw_data.get("feels_like")),
+            "dew_point_f": c_to_f(raw_data.get("dew_point")),
+            "relative_humidity": raw_data.get("relative_humidity"),
+            "wind_avg_mph": ms_to_mph(raw_data.get("wind_avg")),
+            "wind_gust_mph": ms_to_mph(raw_data.get("wind_gust")),
+            "wind_direction": raw_data.get("wind_direction_cardinal", ""),
+            "precip_in": mm_to_inches(raw_data.get("precip_accum_local_day")),
+            "sea_level_pressure_inhg": hpa_to_inhg(raw_data.get("calculated_sea_level_pressure")),
+            "uv_index": raw_data.get("uv"),
+            "solar_radiation": raw_data.get("solar_radiation"),
+            "lightning_strike_count": raw_data.get("lightning_strike_count"),
+            "lightning_strike_last_distance": raw_data.get("lightning_strike_last_distance"),
+            "conditions": raw_data.get("conditions", "Unknown"),
+            "icon": raw_data.get("icon", "unknown")
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/weather/forecast/hourly")
+async def get_hourly_forecast(
+    hours: int = 48,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    now = datetime.now(timezone.utc)
+    
+    if start_time:
+        try:
+            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid start_time format ISO 8601")
+    else:
+        start_dt = now.replace(minute=0, second=0, microsecond=0)
+
+    if end_time:
+        try:
+            end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid end_time format ISO 8601")
+    else:
+        end_dt = start_dt + timedelta(hours=hours)
+
+    start_str = start_dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+    stop_str = end_dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    query = f'''
+    from(bucket: "{INFLUXDB_BUCKET}")
+      |> range(start: {start_str}, stop: {stop_str})
+      |> filter(fn: (r) => r["_measurement"] == "weatherflow_forecast_hourly")
+      |> keep(columns: ["_time", "_field", "_value"])
+      |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+      |> sort(columns: ["_time"])
+    '''
+    
+    try:
+        query_api = app.state.influx_client.query_api()
+        tables = await query_api.query(query)
+
+        forecast_data = []
+        for table in tables:
+            for record in table.records:
+                forecast_data.append({
+                    "time": record.get_time().isoformat(),
+                    "temp_f": c_to_f(record.values.get("air_temperature")),
+                    "feels_like_f": c_to_f(record.values.get("feels_like")),
+                    "conditions": record.values.get("conditions", "Unknown"),
+                    "icon": record.values.get("icon", ""),
+                    "precip_probability": record.values.get("precip_probability", 0),
+                    "precip_in": mm_to_inches(record.values.get("precip")),
+                    "wind_avg_mph": ms_to_mph(record.values.get("wind_avg")),
+                    "wind_gust_mph": ms_to_mph(record.values.get("wind_gust")),
+                    "wind_direction": record.values.get("wind_direction_cardinal", ""),
+                    "sea_level_pressure_inhg": hpa_to_inhg(record.values.get("sea_level_pressure")),
+                    "sea_level_pressure_mbar": record.values.get("sea_level_pressure"),
+                    "relative_humidity": record.values.get("relative_humidity"),
+                    "uv": record.values.get("uv")
+                })
+
+        return forecast_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/weather/forecast/accuracy")
+async def get_forecast_accuracy() -> List[Dict[str, Any]]:
+    accuracy_query = f'''
+    obs = from(bucket: "{INFLUXDB_BUCKET}")
+      |> range(start: -14d)
+      |> filter(fn: (r) => r["_measurement"] == "weatherflow_obs")
+      |> filter(fn: (r) => r["_field"] == "air_temperature" or r["_field"] == "feels_like" or r["_field"] == "precip_total_1h")
+      |> aggregateWindow(every: 1d, fn: max, createEmpty: false)
+      |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+
+    forecast = from(bucket: "{INFLUXDB_BUCKET}")
+      |> range(start: -14d)
+      |> filter(fn: (r) => r["_measurement"] == "weatherflow_forecast_hourly")
+      |> filter(fn: (r) => r["_field"] == "air_temperature" or r["_field"] == "feels_like" or r["_field"] == "precip_probability")
+      |> aggregateWindow(every: 1d, fn: max, createEmpty: false)
+      |> pivot(rowKey: ["_time", "number_of_days_out"], columnKey: ["_field"], valueColumn: "_value")
+
+    join(tables: {{obs: obs, fcst: forecast}}, on: ["_time"])
+    '''
+
+    try:
+        query_api = app.state.influx_client.query_api()
+        tables = await query_api.query(accuracy_query)
+
+        lead_metrics = {i: {"temp_diffs": [], "feels_diffs": [], "precip_hits": 0, "total_samples": 0} for i in range(4)}
+
+        for table in tables:
+            for record in table.records:
+                lead_day = record.values.get("number_of_days_out")
+                try:
+                    lead_day = int(lead_day)
+                except (ValueError, TypeError):
+                    continue
+
+                if lead_day not in lead_metrics:
+                    continue
+
+                obs_temp = record.values.get("air_temperature_obs")
+                fcst_temp = record.values.get("air_temperature_fcst")
+                obs_feels = record.values.get("feels_like_obs")
+                fcst_feels = record.values.get("feels_like_fcst")
+                obs_precip = record.values.get("precip_total_1h_obs", 0.0) or 0.0
+                fcst_prob = record.values.get("precip_probability_fcst", 0) or 0
+
+                if obs_temp is not None and fcst_temp is not None:
+                    lead_metrics[lead_day]["temp_diffs"].append(abs(c_to_f(obs_temp) - c_to_f(fcst_temp)))
+
+                if obs_feels is not None and fcst_feels is not None:
+                    lead_metrics[lead_day]["feels_diffs"].append(abs(c_to_f(obs_feels) - c_to_f(fcst_feels)))
+
+                rain_occurred = obs_precip > 0.1
+                predicted_rain = fcst_prob > 30
+                if rain_occurred == predicted_rain:
+                    lead_metrics[lead_day]["precip_hits"] += 1
+                
+                lead_metrics[lead_day]["total_samples"] += 1
+
+        accuracy_results = []
+        for lead_day in range(4):
+            data = lead_metrics[lead_day]
+            samples = data["total_samples"] or 1
+            
+            temp_mae = round(sum(data["temp_diffs"]) / len(data["temp_diffs"]), 1) if data["temp_diffs"] else 0.0
+            feels_mae = round(sum(data["feels_diffs"]) / len(data["feels_diffs"]), 1) if data["feels_diffs"] else 0.0
+            precip_acc = round((data["precip_hits"] / samples) * 100, 1)
+
+            accuracy_results.append({
+                "lead_days": lead_day,
+                "temp_mae_f": temp_mae,
+                "feels_like_mae_f": feels_mae,
+                "precip_accuracy_pct": precip_acc
+            })
+
+        return accuracy_results
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/weather/advanced/current")
+async def get_current_advanced() -> Dict[str, Any]:
+    query = f'''
+    from(bucket: "{INFLUXDB_BUCKET}")
+      |> range(start: -1h)
+      |> filter(fn: (r) => r["_measurement"] == "weatherflow_obs")
+      |> last()
+      |> keep(columns: ["_time", "_field", "_value"])
+      |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+    '''
+    try:
+        tables = await app.state.influx_client.query_api().query(query)
+        for table in tables:
+            for record in table.records:
+                wbgt_c = record.values.get("wet_bulb_globe_temperature")
+                vpd = record.values.get("calculated_vpd")
+                return {
+                    "time": record.get_time().isoformat(),
+                    "wbgt_f": c_to_f(wbgt_c),
+                    "heat_misery_index": calculate_heat_misery(wbgt_c),
+                    "vpd_kpa": vpd,
+                    "humidity_misery_index": calculate_humidity_misery(vpd),
+                    "delta_t_c": record.values.get("delta_t"),
+                    "air_density_kg_m3": record.values.get("air_density"),
+                    "illuminance_lux": record.values.get("illuminance")
+                }
+        return {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/weather/advanced/hourly")
+async def get_hourly_advanced() -> List[Dict[str, Any]]:
+    now = datetime.now(timezone.utc)
+    start_time = now.replace(minute=0, second=0, microsecond=0)
+    stop_time = start_time + timedelta(hours=7)
+    
+    start_str = start_time.strftime('%Y-%m-%dT%H:%M:%SZ')
+    stop_str = stop_time.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    query = f'''
+    from(bucket: "{INFLUXDB_BUCKET}")
+      |> range(start: {start_str}, stop: {stop_str})
+      |> filter(fn: (r) => r["_measurement"] == "weatherflow_forecast_hourly")
+      |> keep(columns: ["_time", "_field", "_value"])
+      |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+      |> sort(columns: ["_time"])
+    '''
+    try:
+        tables = await app.state.influx_client.query_api().query(query)
+        forecast_data = []
+        for table in tables:
+            for record in table.records:
+                feels_c = record.values.get("feels_like")
+                vpd = record.values.get("calculated_vpd")
+                heat_misery = calculate_heat_misery(feels_c)
+                
+                forecast_data.append({
+                    "time": record.get_time().isoformat(),
+                    "heat_misery_index": heat_misery,
+                    "vpd_kpa": vpd,
+                    "humidity_misery_index": calculate_humidity_misery(vpd),
+                })
+        return forecast_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/weather/aviation")
+async def get_aviation_weather() -> Dict[str, Any]:
+    query = f'''
+    from(bucket: "{INFLUXDB_BUCKET}")
+      |> range(start: -1h)
+      |> filter(fn: (r) => r["_measurement"] == "weatherflow_obs")
+      |> last()
+      |> keep(columns: ["_time", "_field", "_value"])
+      |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+    '''
+    try:
+        tables = await app.state.influx_client.query_api().query(query)
+        for table in tables:
+            for record in table.records:
+                temp_c = record.values.get("air_temperature")
+                dewpoint_c = record.values.get("dew_point")
+                pressure_mb = record.values.get("station_pressure")
+                
+                da_ft = calculate_density_altitude(temp_c, dewpoint_c, pressure_mb)
+                return {
+                    "time": record.get_time().isoformat(),
+                    "density_altitude_ft": da_ft,
+                    "station_pressure_inhg": hpa_to_inhg(pressure_mb),
+                    "station_pressure_mb": pressure_mb,
+                    "sea_level_pressure_inhg": hpa_to_inhg(record.values.get("calculated_sea_level_pressure")),
+                    "wind_avg_mph": ms_to_mph(record.values.get("wind_avg")),
+                    "wind_gust_mph": ms_to_mph(record.values.get("wind_gust")),
+                    "wind_direction": record.values.get("wind_direction_cardinal", ""),
+                    "visibility_index": record.values.get("calculated_visibility_index")
+                }
+        return {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/weather/pool")
+async def get_pool_evaporation() -> Dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    start_time = now - timedelta(days=3)
+    start_str = start_time.strftime('%Y-%m-%dT%H:%M:%SZ')
+    
+    # Downsample via aggregateWindow to reduce memory footprint from tens of thousands to ~72 records
+    query = f'''
+    from(bucket: "{INFLUXDB_BUCKET}")
+      |> range(start: {start_str})
+      |> filter(fn: (r) => r["_measurement"] == "weatherflow_obs")
+      |> filter(fn: (r) => r["_field"] == "air_temperature" or r["_field"] == "dew_point" or r["_field"] == "wind_avg" or r["_field"] == "local_daily_rain_accumulation")
+      |> aggregateWindow(every: 1h, fn: mean, createEmpty: false)
+      |> keep(columns: ["_time", "_field", "_value"])
+    '''
+    try:
+        tables = await app.state.influx_client.query_api().query(query)
+
+        data = {
+            1: {"temp": [], "dew": [], "wind": [], "rain_maxes": {}},
+            2: {"temp": [], "dew": [], "wind": [], "rain_maxes": {}},
+            3: {"temp": [], "dew": [], "wind": [], "rain_maxes": {}}
+        }
+
+        for table in tables:
+            for record in table.records:
+                rec_time = record.get_time()
+                field = record.get_field()
+                val = record.get_value()
+                
+                if val is None: continue
+                
+                delta_hours = (now - rec_time).total_seconds() / 3600
+                day_key = rec_time.strftime("%Y-%m-%d")
+
+                windows_to_update = []
+                if delta_hours <= 24: windows_to_update.extend([1, 2, 3])
+                elif delta_hours <= 48: windows_to_update.extend([2, 3])
+                elif delta_hours <= 72: windows_to_update.append(3)
+
+                for w in windows_to_update:
+                    if field == "air_temperature": data[w]["temp"].append(val)
+                    elif field == "dew_point": data[w]["dew"].append(val)
+                    elif field == "wind_avg": data[w]["wind"].append(val)
+                    elif field == "local_daily_rain_accumulation":
+                        current_max = data[w]["rain_maxes"].get(day_key, 0.0)
+                        if val > current_max:
+                            data[w]["rain_maxes"][day_key] = val
+
+        results = {}
+        for days in [1, 2, 3]:
+            w_data = data[days]
+            if not w_data["temp"]: 
+                continue
+                
+            avg_temp = sum(w_data["temp"]) / len(w_data["temp"])
+            avg_dew = sum(w_data["dew"]) / len(w_data["dew"])
+            avg_wind = sum(w_data["wind"]) / len(w_data["wind"])
+            
+            total_rain_mm = sum(w_data["rain_maxes"].values())
+            total_rain_in = total_rain_mm / 25.4
+            
+            rain_gallons = round(total_rain_in * 450 * 0.623, 1)
+            evap_gallons = calculate_evaporation_gallons(avg_temp, avg_dew, avg_wind, days * 24)
+            
+            net_gallons = round(rain_gallons - evap_gallons, 1)
+            net_inches = round(net_gallons / (450 * 0.623), 2)
+            
+            results[f"last_{days}_days"] = {
+                "estimated_water_temp_f": c_to_f(avg_temp),
+                "evaporated_gallons": evap_gallons,
+                "rain_added_gallons": rain_gallons,
+                "net_volume_change_gallons": net_gallons,
+                "net_level_change_inches": net_inches
+            }
+
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/weather/lightning/recent")
+async def get_recent_lightning() -> List[Dict[str, Any]]:
+    # Leak-proof connection borrowing via async with context manager
+    async with app.state.pg_pool.acquire() as conn:
+        records = await conn.fetch('''
+            SELECT lat, lon, timestamp
+            FROM lightning_strikes
+            WHERE timestamp >= NOW() - INTERVAL '1 hour'
+            ORDER BY timestamp DESC
+        ''')
+        return [
+            {
+                "lat": safe_float(r["lat"]), 
+                "lon": safe_float(r["lon"]), 
+                "timestamp": r["timestamp"].isoformat()
+            } 
+            for r in records
+        ]
+
+
+@app.get("/api/weather/stormcells/active")
+async def get_active_stormcells() -> List[Dict[str, Any]]:
+    async with app.state.pg_pool.acquire() as conn:
+        records = await conn.fetch('''
+            SELECT cell_id, lat, lon, heading_deg, speed_kts, tvs, mda, vil, 
+                   height_ft, top_ft, hail_prob, hail_prob_severe, hail_max_size_in, 
+                   forecast_cone_narrow, forecast_cone_wide, traits, timestamp
+            FROM storm_cells
+            WHERE timestamp >= NOW() - INTERVAL '30 minutes'
+        ''')
+
+        cells = []
+        for r in records:
+            cone_narrow = json.loads(r["forecast_cone_narrow"]) if r["forecast_cone_narrow"] else None
+            cone_wide = json.loads(r["forecast_cone_wide"]) if r["forecast_cone_wide"] else None
+            traits = json.loads(r["traits"]) if r["traits"] else None
+
+            cells.append({
+                "cell_id": r["cell_id"],
+                "timestamp": r["timestamp"].isoformat(),
+                "location": {
+                    "lat": safe_float(r["lat"]),
+                    "lon": safe_float(r["lon"])
+                },
+                "movement": {
+                    "heading_deg": safe_float(r["heading_deg"]),
+                    "speed_kts": safe_float(r["speed_kts"]),
+                    "speed_mph": ms_to_mph(safe_float(r["speed_kts"]) * 1.15078) if r["speed_kts"] else None
+                },
+                "severity": {
+                    "tornadic_vortex_signature": r["tvs"],
+                    "mesocyclone_mda": safe_float(r["mda"]),
+                    "vertically_integrated_liquid": safe_float(r["vil"]),
+                    "max_hail_size_in": safe_float(r["hail_max_size_in"]),
+                    "hail_prob_pct": safe_float(r["hail_prob"]),
+                    "hail_severe_pct": safe_float(r["hail_prob_severe"])
+                },
+                "structure": {
+                    "base_height_ft": safe_float(r["height_ft"]),
+                    "top_height_ft": safe_float(r["top_ft"])
+                },
+                "forecast_polygons": {
+                    "narrow": cone_narrow,
+                    "wide": cone_wide
+                },
+                "traits": traits
+            })
+        return cells
+
+
+@app.get("/api/weather/tropics/active")
+async def get_active_tropics() -> List[Dict[str, Any]]:
+    async with app.state.pg_pool.acquire() as conn:
+        records = await conn.fetch('''
+            SELECT id, name, category, lat, lon, wind_speed_mph, gust_speed_mph, 
+                   pressure_mb, advisory_number, movement_dir_deg, movement_speed_mph, 
+                   wind_radii, forecast_track, breakpoint_alerts, timestamp
+            FROM tropical_storms
+            WHERE is_active = TRUE
+        ''')
+
+        storms = []
+        for r in records:
+            storms.append({
+                "id": r["id"],
+                "name": r["name"],
+                "category": r["category"],
+                "last_updated": r["timestamp"].isoformat(),
+                "advisory_number": r["advisory_number"],
+                "location": {
+                    "lat": safe_float(r["lat"]),
+                    "lon": safe_float(r["lon"])
+                },
+                "intensity": {
+                    "wind_speed_mph": safe_float(r["wind_speed_mph"]),
+                    "gust_speed_mph": safe_float(r["gust_speed_mph"]),
+                    "pressure_mb": safe_float(r["pressure_mb"]),
+                    "pressure_inhg": hpa_to_inhg(safe_float(r["pressure_mb"]))
+                },
+                "movement": {
+                    "heading_deg": safe_float(r["movement_dir_deg"]),
+                    "speed_mph": safe_float(r["movement_speed_mph"])
+                },
+                "wind_radii": json.loads(r["wind_radii"]) if r["wind_radii"] else None,
+                "forecast_track": json.loads(r["forecast_track"]) if r["forecast_track"] else [],
+                "breakpoint_alerts": json.loads(r["breakpoint_alerts"]) if r["breakpoint_alerts"] else []
+            })
+        return storms
+
+
+@app.get("/api/weather/tropics/outlook")
+async def get_tropics_outlook() -> Dict[str, Any]:
+    async with app.state.pg_pool.acquire() as conn:
+        record = await conn.fetchrow('''
+            SELECT atlantic_favor, carrib_favor, gulf_favor, 
+                   outlook_2day_pct, outlook_7day_pct, timestamp
+            FROM tropical_storms
+            ORDER BY timestamp DESC
+            LIMIT 1
+        ''')
+
+        if record:
+            return {
+                "regional_favorability": {
+                    "atlantic": record["atlantic_favor"],
+                    "caribbean": record["carrib_favor"],
+                    "gulf_of_mexico": record["gulf_favor"]
+                },
+                "development_probabilities": {
+                    "48_hour_pct": record["outlook_2day_pct"],
+                    "7_day_pct": record["outlook_7day_pct"]
+                },
+                "last_updated": record["timestamp"].isoformat()
+            }
+        return {}
