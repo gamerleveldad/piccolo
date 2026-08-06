@@ -1,7 +1,6 @@
 fastapi
 uvicorn
 aiohttp
-nfl_data_py
 asyncpg
 pandas
 numpy
