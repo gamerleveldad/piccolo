@@ -382,48 +382,50 @@ async def poll_google_drive_photos():
     os.makedirs(photo_dir, exist_ok=True)
     MIME_MAP = {'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp'}
     
+    def sync_logic():
+        creds = get_calendar_credentials()
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            with open('token.json', 'w') as token:
+                token.write(creds.to_json())
+        
+        service = build('drive', 'v3', credentials=creds, cache_discovery=False)
+        results = service.files().list(q="mimeType='application/vnd.google-apps.folder' and name='DisplayBoard' and trashed=false", fields="files(id, name)").execute()
+        folders = results.get('files', [])
+        if not folders: return
+            
+        folder_id = folders[0]['id']
+        results = service.files().list(q=f"'{folder_id}' in parents and mimeType contains 'image/' and trashed=false", fields="files(id, name, mimeType)").execute()
+        cloud_images = results.get('files', [])
+        
+        cloud_safe_names = {}
+        for img in cloud_images:
+            original_name = img["name"]
+            ext = os.path.splitext(original_name)[1].lower()
+            if not ext:
+                inferred_ext = MIME_MAP.get(img.get("mimeType", ""), ".png")
+                safe_name = f"{original_name}{inferred_ext}"
+            else:
+                safe_name = original_name
+            cloud_safe_names[safe_name] = img
+        
+        local_filenames = set([f for f in os.listdir(photo_dir) if not f.startswith('.')])
+        for local_file in local_filenames:
+            if local_file not in cloud_safe_names:
+                os.remove(os.path.join(photo_dir, local_file))
+                
+        for safe_name, img in cloud_safe_names.items():
+            if safe_name not in local_filenames:
+                request = service.files().get_media(fileId=img['id'])
+                # FIX: Wrap the file IO in a 'with' context manager to guarantee it closes
+                with io.FileIO(os.path.join(photo_dir, safe_name), 'wb') as fh:
+                    downloader = MediaIoBaseDownload(fh, request)
+                    done = False
+                    while done is False:
+                        status, done = downloader.next_chunk()
+
     while True:
         try:
-            def sync_logic():
-                creds = get_calendar_credentials()
-                if creds and creds.expired and creds.refresh_token:
-                    creds.refresh(Request())
-                    with open('token.json', 'w') as token:
-                        token.write(creds.to_json())
-                
-                service = build('drive', 'v3', credentials=creds, cache_discovery=False)
-                results = service.files().list(q="mimeType='application/vnd.google-apps.folder' and name='DisplayBoard' and trashed=false", fields="files(id, name)").execute()
-                folders = results.get('files', [])
-                if not folders: return
-                    
-                folder_id = folders[0]['id']
-                results = service.files().list(q=f"'{folder_id}' in parents and mimeType contains 'image/' and trashed=false", fields="files(id, name, mimeType)").execute()
-                cloud_images = results.get('files', [])
-                
-                cloud_safe_names = {}
-                for img in cloud_images:
-                    original_name = img["name"]
-                    ext = os.path.splitext(original_name)[1].lower()
-                    if not ext:
-                        inferred_ext = MIME_MAP.get(img.get("mimeType", ""), ".png")
-                        safe_name = f"{original_name}{inferred_ext}"
-                    else:
-                        safe_name = original_name
-                    cloud_safe_names[safe_name] = img
-                
-                local_filenames = set([f for f in os.listdir(photo_dir) if not f.startswith('.')])
-                for local_file in local_filenames:
-                    if local_file not in cloud_safe_names:
-                        os.remove(os.path.join(photo_dir, local_file))
-                        
-                for safe_name, img in cloud_safe_names.items():
-                    if safe_name not in local_filenames:
-                        request = service.files().get_media(fileId=img['id'])
-                        fh = io.FileIO(os.path.join(photo_dir, safe_name), 'wb')
-                        downloader = MediaIoBaseDownload(fh, request)
-                        done = False
-                        while done is False:
-                            status, done = downloader.next_chunk()
             await asyncio.to_thread(sync_logic)
         except Exception as e:
             logger.error(f"Drive Sync error: {e}", exc_info=True)
@@ -431,9 +433,10 @@ async def poll_google_drive_photos():
 
 async def poll_local_microservices():
     logger.info("Local microservice aggregation loop online.")
-    while True:
-        try:
-            async with aiohttp.ClientSession() as session:
+    # Create the session ONCE outside the loop
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
                 # 1. Current Weather
                 try:
                     async with session.get(f"{WEATHER_API_URL}/api/weather/current", timeout=5) as resp:
@@ -446,7 +449,7 @@ async def poll_local_microservices():
                         if resp.status == 200: rest_cache["forecast_daily"] = await resp.json()
                 except Exception: pass
 
-                # 3. Extended Hourly Forecast (for Calendar + Rain Buckets)
+                # 3. Extended Hourly Forecast
                 try:
                     async with session.get(f"{WEATHER_API_URL}/api/weather/forecast/hourly?hours=240", timeout=10) as resp:
                         if resp.status == 200:
@@ -460,7 +463,6 @@ async def poll_local_microservices():
                             for h in hourly:
                                 try:
                                     dt_utc = datetime.datetime.fromisoformat(h["time"].replace('Z', '+00:00'))
-                                    # Only process the next 24 hours for the rain gauge buckets
                                     if dt_utc.timestamp() > now_ts + 86400: continue
                                     
                                     dt_local = dt_utc.astimezone(local_tz)
@@ -501,9 +503,10 @@ async def poll_local_microservices():
                         if resp.status == 200: rest_cache["sleeper"] = await resp.json()
                 except Exception: pass
 
-        except Exception as e:
-            logger.error(f"Microservice aggregation error: {e}")
-        await asyncio.sleep(30)
+            except Exception as e:
+                logger.error(f"Microservice aggregation error: {e}")
+            
+            await asyncio.sleep(30)
 
 class ConnectionManager:
     def __init__(self):
