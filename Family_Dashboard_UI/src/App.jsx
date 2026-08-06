@@ -19,6 +19,7 @@ function App() {
   const backendHost = import.meta.env.VITE_BACKEND_HOST || window.location.hostname;
   const backendPort = import.meta.env.VITE_BACKEND_PORT || '8000';
   const apiBase = `http://${backendHost}:${backendPort}`;
+  const FANTASY_API_URL = import.meta.env.VITE_FANTASY_API_URL || 'http://192.168.4.55:8005';
 
   const fetchState = async () => {
     try {
@@ -178,7 +179,7 @@ function App() {
               <TasksWidget apiBase={apiBase} />
             </div>
             <div className="flex-1 h-full relative">
-              <SleeperWidget apiBase={apiBase} />
+              <SleeperWidget apiBase={FANTASY_API_URL} />
             </div>
           </div>
         </div>
