@@ -307,7 +307,7 @@ async def get_custom_board(board_type: str):
     try:
         # Fetch team unit rankings
         team_rows = await conn.fetch("SELECT * FROM team_unit_rankings")
-        team_ranks_map = {r["team_abbr"]: dict(r) for r in team_rows}
+        team_ranks_map = {r['team_abbr']: dict(r) for r in team_rows}
 
         # Fetch base player metrics
         player_rows = await conn.fetch("SELECT * FROM player_ti")
@@ -321,7 +321,7 @@ async def get_custom_board(board_type: str):
 
         draft_board = []
         for p in player_rows:
-            player_team = p.get("team_abbr")
+            player_team = p.get('team_abbr')
             unit_ranks = team_ranks_map.get(player_team, {})
 
             # Calculate raw TI Score details
@@ -347,7 +347,7 @@ async def get_custom_board(board_type: str):
             draft_board.append({
                 "player_id": p_id,
                 "player_name": p["player_name"],
-                "position": p["position"],
+                "position": p['position'],
                 "team": player_team,
                 "effective_rank": effective_rank,
                 "is_pinned": is_pinned,
