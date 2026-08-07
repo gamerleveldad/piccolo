@@ -341,7 +341,7 @@ async def get_custom_board(board_type: str):
                 is_pinned = custom_order_map[p_id][1]
             else:
                 # Higher TI scores should rank earlier (lower rank number)
-                effective_rank = 1000.0 - score_data["ti"]
+                effective_rank = 1000.0 - score_data["ti_score"]
                 is_pinned = False
 
             draft_board.append({

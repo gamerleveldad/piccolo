@@ -72,7 +72,6 @@ def calculate_ti_score(
     """
     Computes the composite TI score for a given player.
     """
-    # Sanitize inputs to prevent NoneType errors from DB NULL values
     projected_pts = projected_pts if projected_pts is not None else 0.0
     historical_pts = historical_pts if historical_pts is not None else 0.0
 
@@ -84,19 +83,20 @@ def calculate_ti_score(
             "team": 0.10
         }
 
-    # 1. Historical Fallback (Rookies or missing history default to current projection)
-    hist_value = historical_pts if historical_pts > 0 else projected_pts
-    hist_ratio = hist_value / projected_pts if projected_pts > 0 else 1.0
+    # --- NEW: Establish a functional base if projections are 0 ---
+    base_pts = projected_pts if projected_pts > 0 else historical_pts
+    
+    hist_value = historical_pts if historical_pts > 0 else base_pts
+    
+    # Prevent division by zero if a player somehow has 0 for both
+    hist_ratio = hist_value / base_pts if base_pts > 0 else 1.0
 
-    # 2. Consistency Modifier
     baseline_cv = 0.40
     cv_score = coefficient_of_variation if coefficient_of_variation is not None else baseline_cv
     consistency_multiplier = 1.0 + (baseline_cv - cv_score)
 
-    # 3. Team Synergy Modifier
     team_synergy_mult = calculate_team_synergy_multiplier(position, team_ranks)
 
-    # 4. Weighted Aggregate TI Multiplier
     composite_multiplier = (
         (weights["proj"] * 1.0) +
         (weights["hist"] * hist_ratio) +
@@ -104,7 +104,8 @@ def calculate_ti_score(
         (weights["team"] * team_synergy_mult)
     )
 
-    ti_final = round(projected_pts * composite_multiplier, 2)
+    # --- NEW: Apply the multiplier to the active base_pts ---
+    ti_final = round(base_pts * composite_multiplier, 2)
 
     return {
         "ti_score": ti_final,

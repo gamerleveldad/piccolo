@@ -16,14 +16,13 @@ POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres_db")
 
 async def fetch_and_process_historical_data(seasons=[2023, 2024, 2025]):
     """
-    Downloads weekly NFL player data directly from the nflverse GitHub releases,
-    computes 1-3 year average PPG, and calculates CV for the consistency score.
+    Downloads weekly NFL player data directly from the nflverse GitHub releases.
+    Computes averages, CV, and extracts the most recent team and position.
     """
     logger.info(f"Downloading weekly data for seasons: {seasons}")
     
     dfs = []
     for year in seasons:
-        # Direct URL to the nflverse data release, bypassing the broken library
         url = f"https://github.com/nflverse/nflverse-data/releases/download/player_stats/player_stats_{year}.parquet"
         try:
             logger.info(f"Fetching {year} data...")
@@ -36,15 +35,17 @@ async def fetch_and_process_historical_data(seasons=[2023, 2024, 2025]):
         raise ValueError("Could not fetch any historical data.")
 
     weekly_df = pd.concat(dfs, ignore_index=True)
-    
-    # Filter out low snap / low target outlier games
     weekly_df = weekly_df[weekly_df['fantasy_points_ppr'] > 0]
 
-    # Handle naming discrepancies across seasons (player_name vs player_display_name)
     if 'player_name' not in weekly_df.columns and 'player_display_name' in weekly_df.columns:
         weekly_df['player_name'] = weekly_df['player_display_name']
 
-    # Group by player to compute average points and consistency (CV)
+    # --- NEW: Extract the most recent team and position for each player ---
+    # Sort chronologically to ensure the 'last' record is their most recent team
+    weekly_df = weekly_df.sort_values(by=['season', 'week'])
+    latest_info = weekly_df.drop_duplicates(subset=['player_id'], keep='last')[['player_id', 'recent_team', 'position']]
+
+    # Group by player to compute mathematical averages
     player_stats = weekly_df.groupby(['player_id', 'player_name']).agg(
         total_games=('fantasy_points_ppr', 'count'),
         avg_ppg=('fantasy_points_ppr', 'mean'),
@@ -53,24 +54,31 @@ async def fetch_and_process_historical_data(seasons=[2023, 2024, 2025]):
 
     # Calculate Coefficient of Variation (std_dev / mean)
     player_stats['cv'] = player_stats['std_dev'] / player_stats['avg_ppg']
-    # Fill missing or NaN values for single-game samples
     player_stats['cv'] = player_stats['cv'].fillna(0.40)
+
+    # --- NEW: Merge the recent team and position back into the final dataframe ---
+    player_stats = player_stats.merge(latest_info, on='player_id', how='left')
 
     logger.info(f"Processed {len(player_stats)} historical player records.")
     return player_stats
 
 async def sync_historicals_to_db():
-    """Connects to PostgreSQL and upserts calculated historical stats."""
+    """Connects to PostgreSQL and upserts calculated stats and metadata."""
     db_url = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:5432/{POSTGRES_DB}"
     conn = await asyncpg.connect(db_url)
     
     try:
         stats_df = await fetch_and_process_historical_data()
         
+        # --- NEW: Added position and team_abbr to the UPSERT query ---
         upsert_query = """
-            INSERT INTO player_ti (player_id, player_name, historical_avg_points, consistency_score)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO player_ti (
+                player_id, player_name, position, team_abbr, historical_avg_points, consistency_score
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (player_id) DO UPDATE SET
+                position = EXCLUDED.position,
+                team_abbr = EXCLUDED.team_abbr,
                 historical_avg_points = EXCLUDED.historical_avg_points,
                 consistency_score = EXCLUDED.consistency_score,
                 updated_at = CURRENT_TIMESTAMP;
@@ -81,6 +89,8 @@ async def sync_historicals_to_db():
                 upsert_query,
                 str(row['player_id']),
                 str(row['player_name']),
+                str(row['position']) if pd.notna(row['position']) else 'UNK',
+                str(row['recent_team']) if pd.notna(row['recent_team']) else 'FA',
                 float(row['avg_ppg']),
                 float(row['cv'])
             )
