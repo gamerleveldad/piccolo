@@ -21,6 +21,7 @@ import html
 import re
 from zoneinfo import ZoneInfo
 from googleapiclient.http import MediaIoBaseDownload
+import aiomqtt
 
 # --- LOGGING CONFIGURATION ---
 logging.basicConfig(
@@ -177,64 +178,24 @@ def calculate_activity_ratings(weather_data: dict, daily_forecast: list) -> list
         for name in current_scores
     ]
 
-# --- Simulation Engine for Testing Purposes ---
-def mps_to_mph(mps_speed: float) -> float: return round(mps_speed * 2.23694, 1)
+MQTT_BROKER = os.getenv("MQTT_BROKER", "mosquitto")
 
-def parse_tempest_packet(raw_packet: dict) -> dict | None:
-    packet_type = raw_packet.get("type")
-    if packet_type == "rapid_wind":
-        ob = raw_packet.get("ob", [])
-        if not ob: return None
-        return {
-            "update_type": "rapid_wind",
-            "wind_speed_mph": mps_to_mph(ob[1]),
-            "wind_direction_deg": ob[2],
-        }
-    elif packet_type == "evt_strike":
-        evt = raw_packet.get("evt", [])
-        if not evt: return None
-        distance_km = float(evt[1])
-        return {
-            "update_type": "lightning_strike",
-            "distance_miles": round(distance_km * 0.621371, 1),
-            "energy": evt[2],
-            "timestamp": raw_packet.get("timestamp")
-        }
-    elif packet_type == "obs_st":
-        obs_list = raw_packet.get("obs", [])
-        if not obs_list or not obs_list[0]: return None
-        obs = obs_list[0]
-        rain_min_mm = obs[12]
-        rain_rate_in_hr = round((rain_min_mm / 25.4) * 60, 2)
-        
-        return {
-            "update_type": "sensor_snapshot",
-            "wind_gust_mph": mps_to_mph(obs[3]),
-            "wind_direction_deg": obs[4],
-            "rain_rate_in_hr": rain_rate_in_hr
-        }
-    return None
-
-async def listen_to_tempest_udp():
-    UDP_IP = ""       
-    UDP_PORT = 50222         
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    sock.bind((UDP_IP, UDP_PORT))
-    sock.setblocking(False)
-    
-    loop = asyncio.get_event_loop()
+async def listen_to_mqtt():
+    logger.info("MQTT Subscriber Thread starting...")
     while True:
         try:
-            data, addr = await loop.sock_recvfrom(sock, 1024)
-            raw_json = json.loads(data.decode('utf-8'))
-            clean_data = parse_tempest_packet(raw_json)
-            if clean_data:
-                await manager.broadcast(json.dumps(clean_data))
+            async with aiomqtt.Client(MQTT_BROKER) as client:
+                await client.subscribe("weather/tempest/live")
+                logger.info("Subscribed to MQTT stream: weather/tempest/live")
+                
+                async for message in client.messages:
+                    payload_str = message.payload.decode()
+                    # Instantly push the MQTT message down to the frontend WebSockets
+                    await manager.broadcast(payload_str)
+                    
         except Exception as e:
-            logger.error(f"UDP Processing Error: {e}", exc_info=True)
-            await asyncio.sleep(0.1)
+            logger.error(f"MQTT Connection Error: {e}. Reconnecting in 5 seconds...")
+            await asyncio.sleep(5)
 
 async def simulate_weather_stream():
     logger.info("Simulation Matrix Engine online: 100% Mock Data Generation Active")
@@ -531,7 +492,7 @@ async def lifespan(app: FastAPI):
     cal_task = None
     microservice_task = None
     photo_task = None
-    udp_task = None
+    mqtt_task = None  # Replaced udp_task
     
     if SIMULATION_MODE:
         sim_task = asyncio.create_task(simulate_weather_stream())
@@ -540,7 +501,7 @@ async def lifespan(app: FastAPI):
         cal_task = asyncio.create_task(poll_calendar_events())
         microservice_task = asyncio.create_task(poll_local_microservices())
         photo_task = asyncio.create_task(poll_google_drive_photos())
-        udp_task = asyncio.create_task(listen_to_tempest_udp())
+        mqtt_task = asyncio.create_task(listen_to_mqtt()) # New MQTT listener
         
     yield
     
@@ -548,7 +509,7 @@ async def lifespan(app: FastAPI):
     if cal_task: cal_task.cancel()
     if microservice_task: microservice_task.cancel()
     if photo_task: photo_task.cancel()
-    if udp_task: udp_task.cancel()
+    if mqtt_task: mqtt_task.cancel() # Cancel MQTT on shutdown
 
 app = FastAPI(title="Family Tactical Dashboard API", lifespan=lifespan)
 

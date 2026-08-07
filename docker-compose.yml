@@ -51,7 +51,6 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
-      - "50222:50222/udp"
     volumes:
       - ./Family_Dashboard_API/assets:/app/assets
       - ./Family_Dashboard_API/token.json:/app/token.json
@@ -511,5 +510,35 @@ services:
       - "8087:80"
     volumes:
       - ./Map_Preview/html:/usr/share/nginx/html:ro
+    networks:
+      - piccolo_net
+  # --- MQTT Message Broker ---
+  mosquitto:
+    image: eclipse-mosquitto:latest
+    container_name: mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    command: mosquitto -c /mosquitto-no-auth.conf
+    # This command allows anonymous internal connections without needing a config file
+    environment:
+      - MOSQUITTO_ALLOW_ANONYMOUS=true
+      - MOSQUITTO_LISTENER=1883
+    networks:
+      - piccolo_net
+
+  # --- UDP to MQTT Bridge ---
+  tempest_bridge:
+    build:
+      context: ./Tempest_Bridge
+      dockerfile: Dockerfile
+    container_name: tempest_bridge
+    restart: unless-stopped
+    environment:
+      - MQTT_BROKER=mosquitto
+    depends_on:
+      - mosquitto
+    ports:
+      - "50222:50222/udp" 
     networks:
       - piccolo_net
