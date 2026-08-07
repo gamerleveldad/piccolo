@@ -227,11 +227,11 @@ async def get_master_draft_board():
             
             # Run TI Calculation
             score_data = calculate_ti_score(
-                projected_pts=p.get('projected_points', 0.0),
-                historical_pts=p.get('historical_avg_points', 0.0),
-                coefficient_of_variation=p.get('consistency_score'),
+                projected_pts=p.get("projected_points") or 0.0,
+                historical_pts=p.get("historical_avg_points") or 0.0,
+                coefficient_of_variation=p.get("consistency_score"),
                 team_ranks=unit_ranks,
-                position=p.get('position', 'WR')
+                position=p.get("position") or "WR"
             )
 
             draft_board.append({
@@ -326,11 +326,11 @@ async def get_custom_board(board_type: str):
 
             # Calculate raw TI Score details
             score_data = calculate_ti_score(
-                projected_pts=p.get("projected_points", 0.0),
-                historical_pts=p.get("historical_avg_points", 0.0),
+                projected_pts=p.get("projected_points") or 0.0,
+                historical_pts=p.get("historical_avg_points") or 0.0,
                 coefficient_of_variation=p.get("consistency_score"),
                 team_ranks=unit_ranks,
-                position=p.get("position", "WR")
+                position=p.get("position") or "WR"
             )
 
             p_id = p["player_id"]
