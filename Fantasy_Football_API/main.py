@@ -239,7 +239,7 @@ async def get_master_draft_board():
                 "player_name": p['player_name'],
                 "position": p['position'],
                 "team": player_team,
-                "ti": score_data['ti'],
+                "ti": score_data['ti_score'],
                 "details": score_data
             })
 
@@ -351,7 +351,7 @@ async def get_custom_board(board_type: str):
                 "team": player_team,
                 "effective_rank": effective_rank,
                 "is_pinned": is_pinned,
-                "ti_score": score_data["ti"],
+                "ti_score": score_data["ti_score"],
                 "details": score_data
             })
 
