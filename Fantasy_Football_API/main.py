@@ -325,40 +325,39 @@ class ReorderRequest(BaseModel):
 
 
 @app.get("/api/ti/board/{board_type}")
-async def get_custom_board(board_type: str):
+async def get_draft_board(board_type: str = "standard"):
     """
-    Fetches the draft board for a specific board type (e.g., 'standard', 'dynasty', 'chopped').
-    Merges calculated TI scores with persistent manual rank overrides.
+    Fetches the draft board (standard, dynasty, or chopped),
+    applies TI score calculations, depth chart penalties,
+    filters inactive/teamless players, and sorts by effective rank.
     """
     conn = await get_db_connection()
     try:
-        # Fetch team unit rankings
-        team_rows = await conn.fetch("SELECT * FROM team_unit_rankings")
-        team_ranks_map = {r['team_abbr']: dict(r) for r in team_rows}
+        # 1. Fetch current team unit rankings
+        unit_ranks = await fetch_team_unit_ranks(conn)
 
-        # Fetch base player metrics
-        # SQL Query: Filter out Free Agents and Inactive/Retired players
+        # 2. Query active players (excluding Free Agents, UNK, and Inactive/Retired players)
         query = """
             SELECT * FROM player_ti
             WHERE team_abbr IS NOT NULL 
-            AND team_abbr NOT IN ('FA', 'UNK', 'None', '')
-            AND (status IS NULL OR LOWER(status) NOT IN ('inactive', 'retired', 'cut'))
+              AND team_abbr NOT IN ('FA', 'UNK', 'None', '')
+              AND (status IS NULL OR LOWER(status) NOT IN ('inactive', 'retired', 'cut'))
         """
-        player_rows = await conn.fetch(query)
+        rows = await conn.fetch(query)
 
-        # Fetch custom manual board order overrides for this specific board type
-        order_rows = await conn.fetch(
-            "SELECT player_id, manual_rank, is_pinned FROM board_player_order WHERE board_type = $1",
-            board_type
-        )
-        custom_order_map = {r["player_id"]: (r["manual_rank"], r["is_pinned"]) for r in order_rows}
+        # 3. Check for manual board pins/overrides if table exists
+        pinned_dict = {}
+        try:
+            pins = await conn.fetch("SELECT player_id, manual_rank FROM board_pins WHERE board_type = $1", board_type)
+            pinned_dict = {p["player_id"]: p["manual_rank"] for p in pins}
+        except Exception:
+            pass  # Fallback if board_pins table hasn't been instantiated yet
 
         draft_board = []
-        for p in player_rows:
-            player_team = p.get('team_abbr')
-            unit_ranks = team_ranks_map.get(player_team, {})
+        for p in rows:
+            p_id = p["player_id"]
 
-            # Calculate raw TI Score details
+            # Compute TI Scores
             score_data = calculate_ti_score(
                 projected_pts=p.get("projected_points") or 0.0,
                 historical_pts=p.get("historical_avg_points") or 0.0,
@@ -369,19 +368,13 @@ async def get_custom_board(board_type: str):
                 depth_chart_order=p.get("depth_chart_order")
             )
 
-            p_id = p["player_id"]
+            is_pinned = p_id in pinned_dict
             
-            # Determine rank: use custom manual rank if pinned, otherwise default to TI score calculation
-            if p_id in custom_order_map:
-                effective_rank = custom_order_map[p_id][0]
-                is_pinned = custom_order_map[p_id][1]
-            else:
-                # Higher TI scores should rank earlier (lower rank number)
-                effective_rank = 1000.0 - score_data["ti_score"]
-                is_pinned = False
+            # Select target score based on requested board type
+            target_score = score_data["ti_score_dynasty"] if board_type == "dynasty" else score_data["ti_score"]
 
             draft_board.append({
-                "player_id": p["player_id"],
+                "player_id": p_id,
                 "player_name": p["player_name"],
                 "position": p["position"],
                 "team": p["team_abbr"],
@@ -389,24 +382,33 @@ async def get_custom_board(board_type: str):
                 "bye_week": p.get("bye_week"),
                 "depth_chart_position": p.get("depth_chart_position"),
                 "depth_chart_order": p.get("depth_chart_order"),
+                "is_pinned": is_pinned,
+                "manual_rank": pinned_dict.get(p_id),
                 "ti_score": score_data["ti_score"],
                 "ti_score_dynasty": score_data["ti_score_dynasty"],
+                "target_score": target_score,
                 "projected_points": p.get("projected_points") or 0.0,
                 "projected_next_game": p.get("projected_next_game") or 0.0,
                 "projected_next_4": p.get("projected_next_4") or 0.0,
                 "details": score_data
             })
 
-        # Sort board by effective rank ascending
+        # Sort by mathematical score descending
+        draft_board.sort(key=lambda x: x["target_score"], reverse=True)
+
+        # Calculate effective_rank for each player (honoring manual pins)
+        for idx, item in enumerate(draft_board):
+            if item["is_pinned"] and item["manual_rank"] is not None:
+                item["effective_rank"] = float(item["manual_rank"])
+            else:
+                item["effective_rank"] = float(idx + 1)
+
+        # Final sort by effective rank ascending
         draft_board.sort(key=lambda x: x["effective_rank"])
 
-        # Normalize display index for easy UI rendering
-        for idx, item in enumerate(draft_board, start=1):
-            item["display_rank"] = idx
-
         return {
-            "board_type": board_type,
             "count": len(draft_board),
+            "board_type": board_type,
             "draft_board": draft_board
         }
     finally:
