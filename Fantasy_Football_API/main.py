@@ -469,3 +469,29 @@ async def reset_board_order(board_type: str):
         return {"status": "success", "message": f"Board {board_type} reset to default TI order."}
     finally:
         await conn.close()
+
+# --- Insert in Fantasy_Football_API/main.py near existing team-units endpoint ---
+
+@app.get("/api/rankings/team-units")
+async def get_team_unit_rankings():
+    """
+    Fetches all stored 1-32 team unit rankings from PostgreSQL.
+    Returns a dictionary keyed by team abbreviation.
+    """
+    conn = await get_db_connection()
+    try:
+        rows = await conn.fetch("SELECT * FROM team_unit_rankings")
+        rankings = {}
+        for r in rows:
+            rankings[r["team_abbr"]] = {
+                "oline_rank": r["oline_rank"],
+                "qb_rank": r["qb_rank"],
+                "wr_rank": r["wr_rank"],
+                "te_rank": r["te_rank"],
+                "rb_rank": r["rb_rank"],
+                "def_rank": r["def_rank"],
+                "off_rank": r["off_rank"]
+            }
+        return {"rankings": rankings}
+    finally:
+        await conn.close()

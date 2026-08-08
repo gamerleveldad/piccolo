@@ -118,3 +118,91 @@ body {
 .stat-box label { display: block; font-size: 0.75rem; color: #888; text-transform: uppercase; margin-bottom: 4px; }
 .stat-box div { font-weight: bold; font-size: 1.1rem; }
 .main-stat div { color: #0056b3; font-size: 1.3rem; }
+
+.team-rankings-container {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.rankings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.save-btn {
+  background-color: #28a745;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.save-btn:hover {
+  background-color: #218838;
+}
+
+.save-status-msg {
+  padding: 8px 12px;
+  background-color: #e2e3e5;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.unit-category-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.unit-tab {
+  padding: 8px 14px;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.unit-tab.active {
+  background: #0056b3;
+  color: white;
+  border-color: #0056b3;
+}
+
+.team-rankings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.team-rank-row {
+  display: flex;
+  align-items: center;
+  padding: 10px 16px;
+  background: #ffffff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  cursor: grab;
+  gap: 15px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.team-rank-row:active {
+  cursor: grabbing;
+}
+
+.team-rank-number {
+  font-weight: bold;
+  font-size: 1.1rem;
+  width: 40px;
+  color: #555;
+}
+
+.team-abbr-text {
+  font-weight: 600;
+  font-size: 1rem;
+}
