@@ -612,16 +612,28 @@ async def upload_projections_csv(file: UploadFile = File(...)):
 # --- Append to Fantasy_Football_API/main.py ---
 import aiohttp
 
-@app.get("/api/sleeper/leagues/{user_id}")
-async def get_sleeper_leagues(user_id: str, year: str = "2026"):
+@app.get("/api/sleeper/leagues/{user_identifier}")
+async def get_sleeper_leagues(user_identifier: str, year: str = "2026"):
     """
-    Fetches all NFL leagues for a specific Sleeper username or user ID.
+    Fetches all NFL leagues for a Sleeper user.
+    Automatically resolves text usernames to numeric user_ids.
     """
-    url = f"https://api.sleeper.app/v1/user/{user_id}/leagues/nfl/{year}"
     async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            if resp.status == 200:
-                return await resp.json()
+        # Step 1: Resolve the numeric user_id if a username is passed
+        if not user_identifier.isdigit():
+            user_url = f"https://api.sleeper.app/v1/user/{user_identifier}"
+            async with session.get(user_url) as user_resp:
+                if user_resp.status == 200:
+                    user_data = await user_resp.json()
+                    user_identifier = user_data.get("user_id", user_identifier)
+                else:
+                    return [] # Username not found
+
+        # Step 2: Fetch the leagues using the numeric user_id
+        leagues_url = f"https://api.sleeper.app/v1/user/{user_identifier}/leagues/nfl/{year}"
+        async with session.get(leagues_url) as leagues_resp:
+            if leagues_resp.status == 200:
+                return await leagues_resp.json()
             return []
 
 @app.get("/api/sleeper/league/{league_id}/drafts")
