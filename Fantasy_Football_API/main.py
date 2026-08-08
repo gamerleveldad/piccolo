@@ -745,38 +745,33 @@ def check_bye_constraint(pos: str, player_bye: int, my_roster_byes: dict) -> dic
             
     return {"blocked": False, "status": "CLEAR", "message": None}
 
+# --- Update in Fantasy_Football_API/main.py ---
+
 @app.get("/api/draft/recommendations")
 async def get_live_recommendations(draft_id: str, user_id: str, format: str = "snake"):
     """
-    Core Live Sync Endpoint:
-    1. Fetches current draft state (who is taken, user's roster, budget).
-    2. Filters available players from PostgreSQL.
-    3. Calculates TI Scores and Bye Week constraints.
-    4. Computes Auction Max Bids based on remaining budget.
+    Live Sync Recommendation Endpoint with VORP (Value Over Replacement) sorting.
     """
-    # 1. Fetch live draft state
     draft_state = await get_draft_state(draft_id, user_id)
-    drafted_ids = draft_state["drafted_player_ids"]
-    my_roster_pids = draft_state["my_roster"]["ALL"]
+    drafted_set = set(str(pid) for pid in draft_state["drafted_player_ids"])
+    my_roster_pids = [str(pid) for pid in draft_state["my_roster"]["ALL"]]
     
     conn = await get_db_connection()
     try:
         unit_ranks = await fetch_team_unit_ranks(conn)
         
-        # 2. Extract my roster's bye weeks
-        # 2. Extract my roster's bye weeks
+        # 1. Fetch user roster's bye weeks
         my_roster_byes = {"QB": [], "RB": [], "WR": [], "TE": [], "DEF": [], "K": []}
         if my_roster_pids:
             placeholders = ",".join(f"'{pid}'" for pid in my_roster_pids)
-            # --- FIXED: Query sleeper_id instead of player_id ---
-            roster_query = f"SELECT position, bye_week FROM player_ti WHERE sleeper_id IN ({placeholders}) AND bye_week IS NOT NULL"
+            roster_query = f"SELECT position, bye_week FROM player_ti WHERE sleeper_id::text IN ({placeholders}) AND bye_week IS NOT NULL"
             my_roster_data = await conn.fetch(roster_query)
             for r in my_roster_data:
                 pos = r["position"].upper() if r["position"] else "ALL"
                 if pos in my_roster_byes:
                     my_roster_byes[pos].append(r["bye_week"])
                     
-        # 3. Query all available active players
+        # 2. Fetch active available players
         query = """
             SELECT * FROM player_ti
             WHERE team_abbr IS NOT NULL 
@@ -786,11 +781,11 @@ async def get_live_recommendations(draft_id: str, user_id: str, format: str = "s
         all_players = await conn.fetch(query)
 
         available_players = []
-        pos_ti_sums = {"QB": [], "RB": [], "WR": [], "TE": []}
+        positional_scores = {"QB": [], "RB": [], "WR": [], "TE": []}
         
         for p in all_players:
-            # Skip players already drafted
-            if str(p.get("sleeper_id")) in drafted_ids:
+            s_id = str(p.get("sleeper_id") or "")
+            if s_id in drafted_set:
                 continue
                 
             score_data = calculate_ti_score(
@@ -803,17 +798,17 @@ async def get_live_recommendations(draft_id: str, user_id: str, format: str = "s
                 depth_chart_order=p.get("depth_chart_order")
             )
             
-            # Ensure consistency score defaults safely
             c_score = p.get("consistency_score")
             consistency_val = round(c_score, 3) if c_score is not None else 0.400
             
-            # Check Bye Week Constraints
             bye_check = check_bye_constraint(p.get("position", "WR"), p.get("bye_week"), my_roster_byes)
             
+            pos = p.get("position", "WR").upper()
             p_dict = {
                 "player_id": p["player_id"],
+                "sleeper_id": s_id,
                 "player_name": p["player_name"],
-                "position": p.get("position", "WR"),
+                "position": pos,
                 "team": p["team_abbr"],
                 "age": p.get("age"),
                 "bye_week": p.get("bye_week"),
@@ -826,61 +821,67 @@ async def get_live_recommendations(draft_id: str, user_id: str, format: str = "s
                 "is_starter": score_data["is_starter"],
                 "bye_status": bye_check["status"],
                 "bye_message": bye_check["message"],
+                "vorp_score": 0.0,
                 "auction_max_bid": 0 
             }
             available_players.append(p_dict)
             
-            # Store scores to calculate positional averages for Auction math
-            pos = p_dict["position"].upper()
-            if pos in pos_ti_sums and p_dict["is_starter"] and not bye_check["blocked"]:
-                pos_ti_sums[pos].append(p_dict["ti_score"])
+            if pos in positional_scores and not bye_check["blocked"]:
+                positional_scores[pos].append(score_data["ti_score"])
+
+        # 3. Positional Replacement Baselines (VORP Math)
+        # Ranks: QB12, RB24, WR30, TE12
+        replacement_cutoffs = {"QB": 12, "RB": 24, "WR": 30, "TE": 12}
+        baselines = {}
+        
+        for pos, scores in positional_scores.items():
+            scores.sort(reverse=True)
+            cutoff_idx = replacement_cutoffs.get(pos, 12) - 1
+            if len(scores) > cutoff_idx:
+                baselines[pos] = scores[cutoff_idx]
+            elif len(scores) > 0:
+                baselines[pos] = scores[-1]
+            else:
+                baselines[pos] = 10.0
+
+        for player in available_players:
+            pos = player["position"]
+            base = baselines.get(pos, 10.0)
+            player["vorp_score"] = round(player["ti_score"] - base, 2)
 
         # 4. Auction "Don't Go Over" Calculation
         if format.lower() == "auction":
             rem_budget = draft_state["remaining_budget"]
-            # Target 16 total spots
-            open_spots = draft_state["total_roster_spots"] - len(my_roster_pids)
-            if open_spots < 1: open_spots = 1
-            
+            open_spots = max(1, draft_state["total_roster_spots"] - len(my_roster_pids))
             absolute_max_bid = rem_budget - (open_spots - 1)
             
-            # Find average TI for top 24 available players at each skill position to create a baseline
-            pos_avg = {}
-            for pos, scores in pos_ti_sums.items():
-                top_scores = sorted(scores, reverse=True)[:24]
-                pos_avg[pos] = (sum(top_scores) / len(top_scores)) if len(top_scores) > 0 else 1.0
-
-            # Target percentage allocation per position
             target_allocation = {"QB": 0.15, "RB": 0.35, "WR": 0.35, "TE": 0.10}
 
             for player in available_players:
-                pos = player["position"].upper()
-                if pos not in pos_avg or player["bye_status"] == "BLOCKED":
+                pos = player["position"]
+                if pos not in baselines or player["bye_status"] == "BLOCKED":
                     continue
                     
-                baseline = pos_avg[pos]
+                baseline = baselines[pos]
                 allocation = target_allocation.get(pos, 0.05)
                 
-                # Math: (Player TI / Pos Avg TI) * Target Allocation % * Remaining Budget
                 bid_calc = (player["ti_score"] / baseline) * allocation * rem_budget
                 recommended_bid = round(bid_calc)
-                
-                # Cannot exceed absolute max capacity
                 player["auction_max_bid"] = min(recommended_bid, absolute_max_bid) if recommended_bid > 0 else 1
 
-        # 5. Sort Board: Preferred clear players first, highest TI Score descending
+        # 5. Sort Recommendations by VORP (Positional Scarcity)
         def sort_key(x):
-            # Sort penalty: Blocked = 0, Warning = 1, Clear = 2
             status_weight = 2
             if x["bye_status"] == "BLOCKED": status_weight = 0
             elif x["bye_status"] == "WARNING": status_weight = 1
-            return (status_weight, x["ti_score"])
+            return (status_weight, x["vorp_score"])
 
         available_players.sort(key=sort_key, reverse=True)
 
         return {
             "draft_state": draft_state,
             "my_roster_byes": my_roster_byes,
+            "baselines": baselines,
             "board": available_players
         }
     finally:

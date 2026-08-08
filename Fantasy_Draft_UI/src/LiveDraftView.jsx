@@ -251,10 +251,18 @@ const LiveDraftView = () => {
               </div>
             </div>
 
+            {/* Inside LiveDraftView.jsx card-body */}
             <div className="card-body">
               <div className="stat-box main-stat">
                 <label>TI Score</label>
                 <div>{player.ti_score}</div>
+              </div>
+
+              <div className="stat-box highlight-stat">
+                <label>Value Above Base (VORP)</label>
+                <div style={{ color: player.vorp_score >= 0 ? '#28a745' : '#dc3545', fontWeight: 'bold' }}>
+                  {player.vorp_score >= 0 ? `+${player.vorp_score}` : player.vorp_score}
+                </div>
               </div>
 
               <div className="stat-box">
