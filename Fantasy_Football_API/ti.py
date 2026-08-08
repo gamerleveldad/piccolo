@@ -67,51 +67,53 @@ def calculate_ti_score(
     coefficient_of_variation: float,
     team_ranks: dict,
     position: str,
-    weights: dict = None
+    age: int = None,
+    weights: dict = None,
+    dynasty_weights: dict = None
 ) -> dict:
-    """
-    Computes the composite TI score for a given player.
-    """
+    
     projected_pts = projected_pts if projected_pts is not None else 0.0
     historical_pts = historical_pts if historical_pts is not None else 0.0
 
     if weights is None:
-        weights = {
-            "proj": 0.50,
-            "hist": 0.25,
-            "cons": 0.15,
-            "team": 0.10
-        }
+        weights = {"proj": 0.50, "hist": 0.25, "cons": 0.15, "team": 0.10}
+    if dynasty_weights is None:
+        dynasty_weights = {"proj": 0.50, "hist": 0.15, "cons": 0.15, "age": 0.10, "team": 0.10}
 
-    # --- NEW: Establish a functional base if projections are 0 ---
     base_pts = projected_pts if projected_pts > 0 else historical_pts
-    
     hist_value = historical_pts if historical_pts > 0 else base_pts
-    
-    # Prevent division by zero if a player somehow has 0 for both
     hist_ratio = hist_value / base_pts if base_pts > 0 else 1.0
 
     baseline_cv = 0.40
     cv_score = coefficient_of_variation if coefficient_of_variation is not None else baseline_cv
     consistency_multiplier = 1.0 + (baseline_cv - cv_score)
-
     team_synergy_mult = calculate_team_synergy_multiplier(position, team_ranks)
 
-    composite_multiplier = (
+    # Standard TI Calculation
+    std_multiplier = (
         (weights["proj"] * 1.0) +
         (weights["hist"] * hist_ratio) +
         (weights["cons"] * consistency_multiplier) +
         (weights["team"] * team_synergy_mult)
     )
+    ti_final = round(base_pts * std_multiplier, 2)
 
-    # --- NEW: Apply the multiplier to the active base_pts ---
-    ti_final = round(base_pts * composite_multiplier, 2)
+    # Dynasty TI Calculation
+    # Neutral age is 26. Every year younger adds 5% value, every year older subtracts 5%.
+    player_age = age if age is not None else 26
+    age_multiplier = 1.0 + ((26 - player_age) * 0.05)
+
+    dyn_multiplier = (
+        (dynasty_weights["proj"] * 1.0) +
+        (dynasty_weights["hist"] * hist_ratio) +
+        (dynasty_weights["cons"] * consistency_multiplier) +
+        (dynasty_weights["age"] * age_multiplier) +
+        (dynasty_weights["team"] * team_synergy_mult)
+    )
+    ti_dynasty_final = round(base_pts * dyn_multiplier, 2)
 
     return {
         "ti_score": ti_final,
-        "projected_pts": projected_pts,
-        "historical_pts": hist_value,
-        "consistency_multiplier": round(consistency_multiplier, 3),
-        "team_synergy_multiplier": round(team_synergy_mult, 3),
-        "composite_multiplier": round(composite_multiplier, 3)
+        "ti_score_dynasty": ti_dynasty_final,
+        # ... return other tracking variables as needed
     }

@@ -542,3 +542,19 @@ services:
       - "50222:50222/udp" 
     networks:
       - piccolo_net
+# --- New Fantasy Draft UI ---
+  fantasy_draft_ui:
+    build:
+      context: ./Fantasy_Draft_UI
+      dockerfile: Dockerfile
+      args:
+        # Bake the API URL into the React build process
+        - VITE_API_BASE_URL=http://192.168.4.55:8005
+    container_name: fantasy_draft_ui
+    restart: unless-stopped
+    ports:
+      - "8089:80"
+    depends_on:
+      - fantasy_football_api
+    networks:
+      - piccolo_net

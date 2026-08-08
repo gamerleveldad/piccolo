@@ -1,0 +1,120 @@
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: #f4f7f6;
+  color: #333;
+}
+
+.app-container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.app-header h1 { margin-top: 0; }
+
+.tabs {
+  display: flex;
+  gap: 10px;
+  border-bottom: 2px solid #ddd;
+  margin-bottom: 20px;
+}
+
+.tab {
+  padding: 10px 20px;
+  text-decoration: none;
+  color: #666;
+  font-weight: 500;
+  border-radius: 4px 4px 0 0;
+}
+
+.tab.active {
+  color: #0056b3;
+  border-bottom: 3px solid #0056b3;
+  background: #eef2f5;
+}
+
+.board-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.view-toggles button {
+  padding: 6px 12px;
+  margin-left: 8px;
+  border: 1px solid #ccc;
+  background: #fff;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.view-toggles button.active {
+  background: #0056b3;
+  color: white;
+  border-color: #0056b3;
+}
+
+.player-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.player-row {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  cursor: grab;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.player-row:active { cursor: grabbing; }
+
+/* Compact View Styles */
+.compact {
+  display: flex;
+  align-items: center;
+  padding: 10px 15px;
+  gap: 15px;
+}
+
+.team-logo-small { width: 24px; height: 24px; object-fit: contain; }
+.rank-col { font-weight: bold; width: 30px; }
+.name-col { flex-grow: 1; }
+.stat-col { width: 80px; text-align: right; color: #555; }
+
+/* Grid View Styles */
+.grid-card {
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 10px;
+}
+
+.header-left { display: flex; align-items: center; gap: 15px; }
+.grid-rank { font-size: 1.2rem; font-weight: bold; color: #888; }
+.team-logo-large { width: 40px; height: 40px; object-fit: contain; }
+.header-names h3 { margin: 0 0 4px 0; font-size: 1.1rem; }
+.header-names span { color: #666; font-size: 0.9rem; }
+
+.header-right { display: flex; gap: 10px; }
+.badge { background: #eef2f5; padding: 4px 8px; border-radius: 12px; font-size: 0.85rem; font-weight: 500; }
+
+.card-body {
+  display: flex;
+  justify-content: space-between;
+}
+
+.stat-box { text-align: center; }
+.stat-box label { display: block; font-size: 0.75rem; color: #888; text-transform: uppercase; margin-bottom: 4px; }
+.stat-box div { font-weight: bold; font-size: 1.1rem; }
+.main-stat div { color: #0056b3; font-size: 1.3rem; }

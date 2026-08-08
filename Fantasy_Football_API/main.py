@@ -56,13 +56,39 @@ async def lifespan(app: FastAPI):
                 player_name VARCHAR(100),
                 position VARCHAR(10),
                 team_abbr VARCHAR(5),
+                age INT,
+                bye_week INT,
+                adp FLOAT,
+                consensus_rank INT,
                 projected_points FLOAT,
+                projected_next_game FLOAT,
+                projected_next_4 FLOAT,
                 historical_avg_points FLOAT,
                 consistency_score FLOAT,
                 team_synergy_multiplier FLOAT,
                 ti_score FLOAT,
+                ti_score_dynasty FLOAT,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+        """)
+
+        # Safely append new metadata columns to the existing table
+        await conn.execute("""
+            ALTER TABLE player_ti 
+            ADD COLUMN IF NOT EXISTS practice_participation VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS depth_chart_position VARCHAR(20),
+            ADD COLUMN IF NOT EXISTS status VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS depth_chart_order INT,
+            ADD COLUMN IF NOT EXISTS years_exp INT,
+            ADD COLUMN IF NOT EXISTS fantasy_positions VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS practice_description VARCHAR(255),
+            ADD COLUMN IF NOT EXISTS injury_body_part VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS search_rank INT,
+            ADD COLUMN IF NOT EXISTS sleeper_id VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS espn_id VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS yahoo_id VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS sportradar_id VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS rotowire_id VARCHAR(50);
         """)
 
         # Create board_player_order table for custom drag-and-drop overrides
@@ -231,7 +257,8 @@ async def get_master_draft_board():
                 historical_pts=p.get("historical_avg_points") or 0.0,
                 coefficient_of_variation=p.get("consistency_score"),
                 team_ranks=unit_ranks,
-                position=p.get("position") or "WR"
+                position=p.get("position") or "WR",
+                age=p.get("age")
             )
 
             draft_board.append({
@@ -330,7 +357,8 @@ async def get_custom_board(board_type: str):
                 historical_pts=p.get("historical_avg_points") or 0.0,
                 coefficient_of_variation=p.get("consistency_score"),
                 team_ranks=unit_ranks,
-                position=p.get("position") or "WR"
+                position=p.get("position") or "WR",
+                age=p.get("age")
             )
 
             p_id = p["player_id"]
@@ -347,11 +375,17 @@ async def get_custom_board(board_type: str):
             draft_board.append({
                 "player_id": p_id,
                 "player_name": p["player_name"],
-                "position": p['position'],
+                "position": p["position"],
                 "team": player_team,
+                "age": p.get("age"),
+                "bye_week": p.get("bye_week"),
                 "effective_rank": effective_rank,
                 "is_pinned": is_pinned,
                 "ti_score": score_data["ti_score"],
+                "ti_score_dynasty": score_data["ti_score_dynasty"],
+                "projected_points": p.get("projected_points") or 0.0,
+                "projected_next_game": p.get("projected_next_game") or 0.0,
+                "projected_next_4": p.get("projected_next_4") or 0.0,
                 "details": score_data
             })
 
