@@ -26,7 +26,31 @@ const BoardView = () => {
     };
     fetchBoard();
   }, [boardType, apiBase]);
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
 
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await fetch(`${apiBase}/api/projections/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+      
+      const result = await res.json();
+      if (res.ok) {
+        alert(`Successfully updated ${result.updated} player projections!`);
+        // Refresh the board to recalculate the TI scores
+        window.location.reload(); 
+      } else {
+        alert(`Upload failed: ${result.message}`);
+      }
+    } catch (err) {
+      console.error('Upload failed', err);
+    }
+  };
   const handleDragEnd = async (event) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -60,6 +84,12 @@ const BoardView = () => {
       <div className="board-controls">
         <h2>{boardType.charAt(0).toUpperCase() + boardType.slice(1)} Rankings</h2>
         <div className="view-toggles">
+          <input 
+            type="file" 
+            accept=".csv" 
+            onChange={handleFileUpload} 
+            style={{ marginRight: '15px' }}
+          />
           <button 
             className={viewMode === 'compact' ? 'active' : ''} 
             onClick={() => setViewMode('compact')}

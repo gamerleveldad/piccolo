@@ -495,3 +495,75 @@ async def get_team_unit_rankings():
         return {"rankings": rankings}
     finally:
         await conn.close()
+
+# --- Append to Fantasy_Football_API/main.py ---
+from fastapi import UploadFile, File
+import pandas as pd
+import io
+
+@app.post("/api/projections/upload")
+async def upload_projections_csv(file: UploadFile = File(...)):
+    """
+    Accepts a CSV file downloaded from a projections site,
+    parses the Player and FPTS columns, and updates the database.
+    """
+    content = await file.read()
+    
+    try:
+        # Read the CSV into a pandas DataFrame
+        df = pd.read_csv(io.StringIO(content.decode('utf-8')))
+        
+        # Standardize column names to uppercase for easy matching
+        df.columns = [str(c).upper().strip() for c in df.columns]
+        
+        conn = await get_db_connection()
+        updated_count = 0
+        
+        try:
+            update_query = """
+                UPDATE player_ti 
+                SET projected_points = $1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE LOWER(player_name) LIKE LOWER($2);
+            """
+            
+            for _, row in df.iterrows():
+                # Find the player name and fantasy points columns dynamically
+                player_col = next((col for col in df.columns if 'PLAYER' in col), None)
+                fpts_col = next((col for col in df.columns if 'FPTS' in col or 'POINTS' in col), None)
+                
+                if not player_col or not fpts_col:
+                    continue 
+                    
+                raw_name = str(row[player_col]).split('(')[0].strip()
+                
+                # Strip out team abbreviations if they are appended to the name string
+                name_parts = raw_name.split()
+                if len(name_parts) > 1 and len(name_parts[-1]) in [2, 3] and name_parts[-1].isupper():
+                    player_name = " ".join(name_parts[:-1])
+                else:
+                    player_name = raw_name
+                
+                try:
+                    proj_pts = float(row[fpts_col])
+                    # Convert full season projections to PPG (17 games)
+                    proj_ppg = round(proj_pts / 17.0, 2)
+                    
+                    # Use wildcard matching to handle slight name variations (e.g. "Patrick Mahomes II")
+                    short_name = f"%{player_name}%"
+                    
+                    result = await conn.execute(update_query, proj_ppg, short_name)
+                    if result != "UPDATE 0":
+                        updated_count += 1
+                        
+                except ValueError:
+                    continue
+                    
+            return {"status": "success", "updated": updated_count}
+            
+        finally:
+            await conn.close()
+            
+    except Exception as e:
+        logger.error(f"CSV Upload failed: {e}")
+        return {"status": "error", "message": str(e)}
