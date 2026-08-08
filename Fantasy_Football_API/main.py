@@ -337,7 +337,14 @@ async def get_custom_board(board_type: str):
         team_ranks_map = {r['team_abbr']: dict(r) for r in team_rows}
 
         # Fetch base player metrics
-        player_rows = await conn.fetch("SELECT * FROM player_ti")
+        # SQL Query: Filter out Free Agents and Inactive/Retired players
+        query = """
+            SELECT * FROM player_ti
+            WHERE team_abbr IS NOT NULL 
+            AND team_abbr NOT IN ('FA', 'UNK', 'None', '')
+            AND (status IS NULL OR LOWER(status) NOT IN ('inactive', 'retired', 'cut'))
+        """
+        player_rows = await conn.fetch(query)
 
         # Fetch custom manual board order overrides for this specific board type
         order_rows = await conn.fetch(
@@ -358,7 +365,8 @@ async def get_custom_board(board_type: str):
                 coefficient_of_variation=p.get("consistency_score"),
                 team_ranks=unit_ranks,
                 position=p.get("position") or "WR",
-                age=p.get("age")
+                age=p.get("age"),
+                depth_chart_order=p.get("depth_chart_order")
             )
 
             p_id = p["player_id"]
@@ -373,14 +381,14 @@ async def get_custom_board(board_type: str):
                 is_pinned = False
 
             draft_board.append({
-                "player_id": p_id,
+                "player_id": p["player_id"],
                 "player_name": p["player_name"],
                 "position": p["position"],
-                "team": player_team,
+                "team": p["team_abbr"],
                 "age": p.get("age"),
                 "bye_week": p.get("bye_week"),
-                "effective_rank": effective_rank,
-                "is_pinned": is_pinned,
+                "depth_chart_position": p.get("depth_chart_position"),
+                "depth_chart_order": p.get("depth_chart_order"),
                 "ti_score": score_data["ti_score"],
                 "ti_score_dynasty": score_data["ti_score_dynasty"],
                 "projected_points": p.get("projected_points") or 0.0,

@@ -35,6 +35,7 @@ const SortablePlayerRow = ({ player, displayRank, viewMode }) => {
   }
 
   // Grid View
+  // Grid View
   return (
     <div ref={setNodeRef} style={style} className="player-row grid-card" {...attributes} {...listeners}>
       <div className="card-header">
@@ -47,10 +48,16 @@ const SortablePlayerRow = ({ player, displayRank, viewMode }) => {
           </div>
         </div>
         <div className="header-right">
+          {player.depth_chart_order && (
+            <span className="badge depth-badge">
+              Depth: {player.position}{player.depth_chart_order}
+            </span>
+          )}
           <span className="badge">Age: {player.age || '-'}</span>
           <span className="badge">Bye: {player.bye_week || '-'}</span>
         </div>
       </div>
+      
       <div className="card-body">
         <div className="stat-box main-stat">
           <label>TI Score</label>

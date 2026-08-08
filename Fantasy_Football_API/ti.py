@@ -68,6 +68,7 @@ def calculate_ti_score(
     team_ranks: dict,
     position: str,
     age: int = None,
+    depth_chart_order: int = None,
     weights: dict = None,
     dynasty_weights: dict = None
 ) -> dict:
@@ -89,17 +90,16 @@ def calculate_ti_score(
     consistency_multiplier = 1.0 + (baseline_cv - cv_score)
     team_synergy_mult = calculate_team_synergy_multiplier(position, team_ranks)
 
-    # Standard TI Calculation
+    # 1. Standard TI
     std_multiplier = (
         (weights["proj"] * 1.0) +
         (weights["hist"] * hist_ratio) +
         (weights["cons"] * consistency_multiplier) +
         (weights["team"] * team_synergy_mult)
     )
-    ti_final = round(base_pts * std_multiplier, 2)
+    ti_final = base_pts * std_multiplier
 
-    # Dynasty TI Calculation
-    # Neutral age is 26. Every year younger adds 5% value, every year older subtracts 5%.
+    # 2. Dynasty TI
     player_age = age if age is not None else 26
     age_multiplier = 1.0 + ((26 - player_age) * 0.05)
 
@@ -110,10 +110,28 @@ def calculate_ti_score(
         (dynasty_weights["age"] * age_multiplier) +
         (dynasty_weights["team"] * team_synergy_mult)
     )
-    ti_dynasty_final = round(base_pts * dyn_multiplier, 2)
+    ti_dynasty_final = base_pts * dyn_multiplier
+
+    # --- Depth Chart Backup Penalty ---
+    # Divide score by 10 if player is not in a starting role
+    is_starter = True
+    if depth_chart_order is not None and depth_chart_order > 0:
+        pos_upper = (position or "").upper()
+        if pos_upper == "QB" and depth_chart_order >= 2:
+            is_starter = False
+        elif pos_upper == "RB" and depth_chart_order >= 3:
+            is_starter = False
+        elif pos_upper == "WR" and depth_chart_order >= 4:
+            is_starter = False
+        elif pos_upper == "TE" and depth_chart_order >= 2:
+            is_starter = False
+
+    if not is_starter:
+        ti_final = ti_final / 10.0
+        ti_dynasty_final = ti_dynasty_final / 10.0
 
     return {
-        "ti_score": ti_final,
-        "ti_score_dynasty": ti_dynasty_final,
-        # ... return other tracking variables as needed
+        "ti_score": round(ti_final, 2),
+        "ti_score_dynasty": round(ti_dynasty_final, 2),
+        "is_starter": is_starter
     }
