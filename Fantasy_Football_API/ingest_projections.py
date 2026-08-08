@@ -59,7 +59,7 @@ def fetch_fantasypros_projections():
     all_projections = []
 
     for pos in POSITIONS:
-        url = f"https://www.fantasypros.com/nfl/projections/{pos}.php?max-results=all"
+        url = f"https://www.fantasypros.com/nfl/projections/{pos}.php?week=draft"
         logger.info(f"Fetching consensus projections for {pos.upper()}...")
         
         response = requests.get(url, headers=HEADERS)
@@ -119,12 +119,14 @@ def fetch_fantasypros_projections():
             if not found_pts:
                 proj_pts = calculate_ppr_points(row, pos)
 
+            # --- Convert full season projected points to Points Per Game (17 games) ---
+            proj_ppg = round(proj_pts / 17.0, 2)
+
             all_projections.append({
                 "player_name": player_name,
                 "position": pos.upper(),
-                "projected_points": proj_pts
+                "projected_points": proj_ppg
             })
-
     logger.info(f"Successfully scraped {len(all_projections)} player projections.")
     return all_projections
 
