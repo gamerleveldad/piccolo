@@ -60,8 +60,9 @@ async def sync_sleeper_to_db():
                 practice_description = $9,
                 injury_body_part = $10,
                 search_rank = $11,
-                sleeper_id = $12
-            WHERE player_id = $13;
+                sleeper_id = $12,
+                team_abbr = $13      -- NEW
+            WHERE player_id = $14;   -- Shifted to 14
         """
 
         # Fallback match by Name + Position
@@ -78,8 +79,9 @@ async def sync_sleeper_to_db():
                 practice_description = $9,
                 injury_body_part = $10,
                 search_rank = $11,
-                sleeper_id = $12
-            WHERE LOWER(player_name) = LOWER($13) AND position = $14;
+                sleeper_id = $12,
+                team_abbr = $13      -- NEW
+            WHERE LOWER(player_name) = LOWER($14) AND position = $15; -- Shifted to 14 & 15
         """
 
         updated_count = 0
@@ -104,21 +106,22 @@ async def sync_sleeper_to_db():
                 p.get("practice_description"),
                 p.get("injury_body_part"),
                 p.get("search_rank"),
-                str(sleeper_id)
+                str(sleeper_id),
+                p.get("team")
             )
 
             # Attempt 1: Match by GSIS ID
             gsis_id = p.get("gsis_id")
             matched = False
             if gsis_id:
-                res = await conn.execute(update_by_id, *params, str(gsis_id))
+                res = await conn.execute(update_by_id, *params, str(gsis_id)) # str(gsis_id) is now $14
                 if res != "UPDATE 0":
                     matched = True
                     updated_count += 1
 
             # Attempt 2: Fallback match by Name + Position
             if not matched and pos:
-                res = await conn.execute(update_by_name, *params, full_name, pos)
+                res = await conn.execute(update_by_name, *params, full_name, pos) # full_name is $14, pos is $15
                 if res != "UPDATE 0":
                     updated_count += 1
 
