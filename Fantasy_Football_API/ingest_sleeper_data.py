@@ -28,6 +28,24 @@ async def sync_sleeper_to_db():
     conn = await asyncpg.connect(db_url)
 
     try:
+        # Guarantee all required metadata columns exist in player_ti
+        await conn.execute("""
+            ALTER TABLE player_ti 
+            ADD COLUMN IF NOT EXISTS age INT,
+            ADD COLUMN IF NOT EXISTS bye_week INT,
+            ADD COLUMN IF NOT EXISTS practice_participation VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS depth_chart_position VARCHAR(20),
+            ADD COLUMN IF NOT EXISTS status VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS depth_chart_order INT,
+            ADD COLUMN IF NOT EXISTS years_exp INT,
+            ADD COLUMN IF NOT EXISTS fantasy_positions VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS practice_description VARCHAR(255),
+            ADD COLUMN IF NOT EXISTS injury_body_part VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS search_rank INT,
+            ADD COLUMN IF NOT EXISTS sleeper_id VARCHAR(50);
+        """)
+        logger.info("Verified player_ti table schema for Sleeper metadata.")
+
         # Match by GSIS ID first
         update_by_id = """
             UPDATE player_ti SET
@@ -76,7 +94,7 @@ async def sync_sleeper_to_db():
 
             params = (
                 p.get("age"),
-                p.get("number"), # or bye week from team
+                p.get("bye_week"),
                 p.get("practice_participation"),
                 p.get("depth_chart_position"),
                 p.get("status"),
