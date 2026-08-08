@@ -658,7 +658,15 @@ async def get_draft_state(draft_id: str, user_id: str = None):
     picks_url = f"https://api.sleeper.app/v1/draft/{draft_id}/picks"
     
     async with aiohttp.ClientSession() as session:
-        # 1. Fetch draft metadata (to map user_id to draft slot/roster)
+        # --- NEW: Resolve the numeric user_id if a username is passed ---
+        if user_id and not user_id.isdigit():
+            user_url = f"https://api.sleeper.app/v1/user/{user_id}"
+            async with session.get(user_url) as user_resp:
+                if user_resp.status == 200:
+                    user_data = await user_resp.json()
+                    user_id = user_data.get("user_id", user_id)
+                    
+        # 1. Fetch draft metadata
         async with session.get(draft_url) as draft_resp:
             draft_meta = await draft_resp.json() if draft_resp.status == 200 else {}
             
@@ -682,10 +690,8 @@ async def get_draft_state(draft_id: str, user_id: str = None):
         if not pid:
             continue
             
-        # Log every taken player so the UI can hide them
         drafted_player_ids.append(pid)
         
-        # If this pick belongs to the user, add it to their roster tracker
         is_my_pick = False
         if pick.get("picked_by") == user_id:
             is_my_pick = True
@@ -710,7 +716,7 @@ async def get_draft_state(draft_id: str, user_id: str = None):
     return {
         "draft_id": draft_id,
         "status": draft_meta.get("status"),
-        "draft_type": draft_meta.get("type"), # 'snake' or 'auction'
+        "draft_type": draft_meta.get("type"), 
         "budget": total_budget,
         "total_roster_spots": draft_meta.get("settings", {}).get("roster_size", 16),
         "drafted_player_ids": drafted_player_ids,
@@ -758,11 +764,12 @@ async def get_live_recommendations(draft_id: str, user_id: str, format: str = "s
         unit_ranks = await fetch_team_unit_ranks(conn)
         
         # 2. Extract my roster's bye weeks
+        # 2. Extract my roster's bye weeks
         my_roster_byes = {"QB": [], "RB": [], "WR": [], "TE": [], "DEF": [], "K": []}
         if my_roster_pids:
-            # Safely inject IDs into query using unnest
             placeholders = ",".join(f"'{pid}'" for pid in my_roster_pids)
-            roster_query = f"SELECT position, bye_week FROM player_ti WHERE player_id IN ({placeholders}) AND bye_week IS NOT NULL"
+            # --- FIXED: Query sleeper_id instead of player_id ---
+            roster_query = f"SELECT position, bye_week FROM player_ti WHERE sleeper_id IN ({placeholders}) AND bye_week IS NOT NULL"
             my_roster_data = await conn.fetch(roster_query)
             for r in my_roster_data:
                 pos = r["position"].upper() if r["position"] else "ALL"
@@ -783,7 +790,7 @@ async def get_live_recommendations(draft_id: str, user_id: str, format: str = "s
         
         for p in all_players:
             # Skip players already drafted
-            if p["player_id"] in drafted_ids:
+            if str(p.get("sleeper_id")) in drafted_ids:
                 continue
                 
             score_data = calculate_ti_score(
