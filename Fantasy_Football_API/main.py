@@ -718,3 +718,163 @@ async def get_draft_state(draft_id: str, user_id: str = None):
         "amount_spent": amount_spent,
         "remaining_budget": total_budget - amount_spent
     }
+
+def check_bye_constraint(pos: str, player_bye: int, my_roster_byes: dict) -> dict:
+    """Evaluates a player's bye week against the user's drafted roster."""
+    if not player_bye:
+        return {"blocked": False, "status": "CLEAR", "message": None}
+        
+    pos = pos.upper()
+    current_byes = my_roster_byes.get(pos, [])
+    
+    if pos in ['QB', 'TE']:
+        if player_bye in current_byes:
+            return {"blocked": True, "status": "BLOCKED", "message": f"{pos} bye overlap (Wk {player_bye})"}
+    elif pos in ['RB', 'WR']:
+        count = current_byes.count(player_bye)
+        if count >= 2:
+            return {"blocked": True, "status": "BLOCKED", "message": f"Max (2) {pos} bye overlap (Wk {player_bye})"}
+        elif count == 1:
+            return {"blocked": False, "status": "WARNING", "message": f"Warning: 1 {pos} shares Wk {player_bye} bye"}
+            
+    return {"blocked": False, "status": "CLEAR", "message": None}
+
+@app.get("/api/draft/recommendations")
+async def get_live_recommendations(draft_id: str, user_id: str, format: str = "snake"):
+    """
+    Core Live Sync Endpoint:
+    1. Fetches current draft state (who is taken, user's roster, budget).
+    2. Filters available players from PostgreSQL.
+    3. Calculates TI Scores and Bye Week constraints.
+    4. Computes Auction Max Bids based on remaining budget.
+    """
+    # 1. Fetch live draft state
+    draft_state = await get_draft_state(draft_id, user_id)
+    drafted_ids = draft_state["drafted_player_ids"]
+    my_roster_pids = draft_state["my_roster"]["ALL"]
+    
+    conn = await get_db_connection()
+    try:
+        unit_ranks = await fetch_team_unit_ranks(conn)
+        
+        # 2. Extract my roster's bye weeks
+        my_roster_byes = {"QB": [], "RB": [], "WR": [], "TE": [], "DEF": [], "K": []}
+        if my_roster_pids:
+            # Safely inject IDs into query using unnest
+            placeholders = ",".join(f"'{pid}'" for pid in my_roster_pids)
+            roster_query = f"SELECT position, bye_week FROM player_ti WHERE player_id IN ({placeholders}) AND bye_week IS NOT NULL"
+            my_roster_data = await conn.fetch(roster_query)
+            for r in my_roster_data:
+                pos = r["position"].upper() if r["position"] else "ALL"
+                if pos in my_roster_byes:
+                    my_roster_byes[pos].append(r["bye_week"])
+                    
+        # 3. Query all available active players
+        query = """
+            SELECT * FROM player_ti
+            WHERE team_abbr IS NOT NULL 
+              AND team_abbr NOT IN ('FA', 'UNK', 'None', '')
+              AND (status IS NULL OR LOWER(status) NOT IN ('inactive', 'retired', 'cut'))
+        """
+        all_players = await conn.fetch(query)
+
+        available_players = []
+        pos_ti_sums = {"QB": [], "RB": [], "WR": [], "TE": []}
+        
+        for p in all_players:
+            # Skip players already drafted
+            if p["player_id"] in drafted_ids:
+                continue
+                
+            score_data = calculate_ti_score(
+                projected_pts=p.get("projected_points") or 0.0,
+                historical_pts=p.get("historical_avg_points") or 0.0,
+                coefficient_of_variation=p.get("consistency_score"),
+                team_ranks=unit_ranks,
+                position=p.get("position") or "WR",
+                age=p.get("age"),
+                depth_chart_order=p.get("depth_chart_order")
+            )
+            
+            # Ensure consistency score defaults safely
+            c_score = p.get("consistency_score")
+            consistency_val = round(c_score, 3) if c_score is not None else 0.400
+            
+            # Check Bye Week Constraints
+            bye_check = check_bye_constraint(p.get("position", "WR"), p.get("bye_week"), my_roster_byes)
+            
+            p_dict = {
+                "player_id": p["player_id"],
+                "player_name": p["player_name"],
+                "position": p.get("position", "WR"),
+                "team": p["team_abbr"],
+                "age": p.get("age"),
+                "bye_week": p.get("bye_week"),
+                "depth_chart_position": p.get("depth_chart_position"),
+                "depth_chart_order": p.get("depth_chart_order"),
+                "ti_score": score_data["ti_score"],
+                "ti_score_dynasty": score_data["ti_score_dynasty"],
+                "consistency_score": consistency_val,
+                "projected_points": p.get("projected_points") or 0.0,
+                "is_starter": score_data["is_starter"],
+                "bye_status": bye_check["status"],
+                "bye_message": bye_check["message"],
+                "auction_max_bid": 0 
+            }
+            available_players.append(p_dict)
+            
+            # Store scores to calculate positional averages for Auction math
+            pos = p_dict["position"].upper()
+            if pos in pos_ti_sums and p_dict["is_starter"] and not bye_check["blocked"]:
+                pos_ti_sums[pos].append(p_dict["ti_score"])
+
+        # 4. Auction "Don't Go Over" Calculation
+        if format.lower() == "auction":
+            rem_budget = draft_state["remaining_budget"]
+            # Target 16 total spots
+            open_spots = draft_state["total_roster_spots"] - len(my_roster_pids)
+            if open_spots < 1: open_spots = 1
+            
+            absolute_max_bid = rem_budget - (open_spots - 1)
+            
+            # Find average TI for top 24 available players at each skill position to create a baseline
+            pos_avg = {}
+            for pos, scores in pos_ti_sums.items():
+                top_scores = sorted(scores, reverse=True)[:24]
+                pos_avg[pos] = (sum(top_scores) / len(top_scores)) if len(top_scores) > 0 else 1.0
+
+            # Target percentage allocation per position
+            target_allocation = {"QB": 0.15, "RB": 0.35, "WR": 0.35, "TE": 0.10}
+
+            for player in available_players:
+                pos = player["position"].upper()
+                if pos not in pos_avg or player["bye_status"] == "BLOCKED":
+                    continue
+                    
+                baseline = pos_avg[pos]
+                allocation = target_allocation.get(pos, 0.05)
+                
+                # Math: (Player TI / Pos Avg TI) * Target Allocation % * Remaining Budget
+                bid_calc = (player["ti_score"] / baseline) * allocation * rem_budget
+                recommended_bid = round(bid_calc)
+                
+                # Cannot exceed absolute max capacity
+                player["auction_max_bid"] = min(recommended_bid, absolute_max_bid) if recommended_bid > 0 else 1
+
+        # 5. Sort Board: Preferred clear players first, highest TI Score descending
+        def sort_key(x):
+            # Sort penalty: Blocked = 0, Warning = 1, Clear = 2
+            status_weight = 2
+            if x["bye_status"] == "BLOCKED": status_weight = 0
+            elif x["bye_status"] == "WARNING": status_weight = 1
+            return (status_weight, x["ti_score"])
+
+        available_players.sort(key=sort_key, reverse=True)
+
+        return {
+            "draft_state": draft_state,
+            "my_roster_byes": my_roster_byes,
+            "board": available_players
+        }
+    finally:
+        await conn.close()
