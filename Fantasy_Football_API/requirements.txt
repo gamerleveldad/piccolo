@@ -6,3 +6,6 @@ pandas
 numpy
 fastparquet
 pydantic
+requests
+beautifulsoup4
+lxml
