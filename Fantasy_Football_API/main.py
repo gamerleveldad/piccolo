@@ -539,35 +539,29 @@ async def upload_projections_csv(file: UploadFile = File(...)):
                 if pd.isna(row[player_col]) or pd.isna(row[fpts_col]):
                     continue
                     
+                # Clean full name from CSV (e.g. "Josh Allen" or "Josh Allen BUF")
                 raw_name = str(row[player_col]).split('(')[0].strip()
-                
-                # --- NEW: Abort if the extracted name is blank to prevent '%%' wildcards ---
                 if not raw_name:
                     continue
                 
-                # Strip out team abbreviations if they are appended to the name string
                 name_parts = raw_name.split()
                 if len(name_parts) > 1 and len(name_parts[-1]) in [2, 3] and name_parts[-1].isupper():
-                    player_name = " ".join(name_parts[:-1])
+                    clean_name = " ".join(name_parts[:-1])
                 else:
-                    player_name = raw_name
+                    clean_name = raw_name
                 
                 try:
                     proj_pts = float(row[fpts_col])
-                    
-                    # --- NEW: Final safeguard to prevent NaN injection ---
                     if pd.isna(proj_pts):
                         continue
                         
-                    # Convert full season projections to PPG (17 games)
                     proj_ppg = round(proj_pts / 17.0, 2)
                     
-                    # Use wildcard matching to handle slight name variations
-                    short_name = f"%{player_name}%"
+                    # Direct full-name matching against PostgreSQL full names
+                    search_pattern = f"%{clean_name}%"
                     
-                    result = await conn.execute(update_query, proj_ppg, short_name)
+                    result = await conn.execute(update_query, proj_ppg, search_pattern)
                     
-                    # --- NEW: Extract the actual number of rows updated from the result tag ---
                     if result.startswith("UPDATE"):
                         count = int(result.split(" ")[1])
                         updated_count += count

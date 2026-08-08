@@ -52,39 +52,42 @@ async def sync_sleeper_to_db():
         """)
         logger.info("Verified player_ti table schema for Sleeper metadata.")
 
+        # Update query inside sync_sleeper_to_db() in ingest_sleeper_data.py
         update_query = """
             UPDATE player_ti SET
-                age = $1,
-                practice_participation = $2,
-                depth_chart_position = $3,
-                status = $4,
-                depth_chart_order = $5,
-                years_exp = $6,
-                fantasy_positions = $7,
-                practice_description = $8,
-                injury_body_part = $9,
-                search_rank = $10,
-                sleeper_id = $11,
-                espn_id = $12,
-                yahoo_id = $13,
-                sportradar_id = $14,
-                rotowire_id = $15
-            WHERE player_id = $16;
+                player_name = $1,
+                age = $2,
+                practice_participation = $3,
+                depth_chart_position = $4,
+                status = $5,
+                depth_chart_order = $6,
+                years_exp = $7,
+                fantasy_positions = $8,
+                practice_description = $9,
+                injury_body_part = $10,
+                search_rank = $11,
+                sleeper_id = $12,
+                espn_id = $13,
+                yahoo_id = $14,
+                sportradar_id = $15,
+                rotowire_id = $16
+            WHERE player_id = $17;
         """
         
         updated_count = 0
         for sleeper_id, p in players_data.items():
-            # Match using the official NFL GSIS ID format
             gsis_id = p.get("gsis_id")
             if not gsis_id:
                 continue
                 
+            full_name = p.get("full_name") or f"{p.get('first_name', '')} {p.get('last_name', '')}".strip()
             f_pos = p.get("fantasy_positions")
             fantasy_positions_str = ",".join(f_pos) if isinstance(f_pos, list) else None
             
             result = await conn.execute(
                 update_query,
-                p.get("age"),
+                full_name, # $1
+                p.get("age"), # $2
                 p.get("practice_participation"),
                 p.get("depth_chart_position"),
                 p.get("status"),
@@ -99,7 +102,7 @@ async def sync_sleeper_to_db():
                 str(p.get("yahoo_id")) if p.get("yahoo_id") else None,
                 str(p.get("sportradar_id")) if p.get("sportradar_id") else None,
                 str(p.get("rotowire_id")) if p.get("rotowire_id") else None,
-                gsis_id
+                gsis_id # $17
             )
             
             if result != "UPDATE 0":
