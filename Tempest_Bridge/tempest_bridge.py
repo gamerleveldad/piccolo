@@ -46,7 +46,23 @@ async def listen_and_bridge():
                     
                     elif packet_type == "obs_st":
                         obs = raw_json.get("obs", [[]])[0]
-                        if obs: payload = {"update_type": "sensor_snapshot", "wind_gust_mph": mps_to_mph(obs[3]), "wind_direction_deg": obs[4], "rain_rate_in_hr": round((obs[12] / 25.4) * 60, 2)}
+                        if obs: 
+                            # Extract Tempest Indices
+                            temp_c = float(obs[7])
+                            rh = float(obs[8])
+                            lux = int(obs[9])
+                            temp_f = round((temp_c * 9/5) + 32, 1)
+                            
+                            payload = {
+                                "update_type": "sensor_snapshot",
+                                "temp_f": temp_f,
+                                "humidity": rh,
+                                "lux": lux,
+                                "wind_gust_mph": mps_to_mph(obs[3]),
+                                "wind_direction_deg": obs[4],
+                                "rain_rate_in_hr": round((obs[12] / 25.4) * 60, 2)
+                                # Note: index 18 is local daily rain accumulation, but only exists on newer firmware
+                            }
                     
                     # Publish to MQTT
                     if payload:

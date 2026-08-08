@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Wind, Droplets, CloudRain, Zap, TriangleAlert, Info } from 'lucide-react';
+import { Wind, Droplets, CloudRain, Zap } from 'lucide-react';
+import mqtt from 'mqtt';
 
 const ICON_MAP = {
   'clear-day': 'wi wi-day-sunny',
@@ -33,8 +34,18 @@ export default function WeatherWidget() {
   const [tropicsOutlook, setTropicsOutlook] = useState(null);
   const [activeStorms, setActiveStorms] = useState([]);
   
+  // Real-time telemetry via MQTT WebSockets
+  const [liveTelemetry, setLiveTelemetry] = useState({
+    temp_f: null,
+    humidity: null,
+    wind_avg_mph: null,
+    wind_gust_mph: null,
+    wind_direction_deg: null,
+    rain_rate_in_hr: 0
+  });
+
   // Tab state for the forecast section
-  const [forecastTab, setForecastTab] = useState('hourly'); // 'hourly' | 'daily'
+  const [forecastTab, setForecastTab] = useState('hourly'); // 'hourly' | 'daily' | 'tropics'
 
   const host = window.location.hostname;
   const CURRENT_URL = `http://${host}:8004/api/weather/current`;
@@ -44,9 +55,49 @@ export default function WeatherWidget() {
   const ACCURACY_URL = `http://${host}:8004/api/weather/forecast/accuracy`;
   const NWS_ALERTS_URL = `https://api.weather.gov/alerts/active?point=28.6611,-81.3884`;
 
+  // MQTT Listener for Tempest UDP Broadcast Stream
+  useEffect(() => {
+    const client = mqtt.connect(`ws://${host}:9001`);
+
+    client.on('connect', () => {
+      client.subscribe('weather/tempest/live');
+    });
+
+    client.on('message', (topic, message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        setLiveTelemetry(prev => {
+          if (data.update_type === 'rapid_wind') {
+            return {
+              ...prev,
+              wind_avg_mph: data.wind_speed_mph,
+              wind_direction_deg: data.wind_direction_deg
+            };
+          }
+          if (data.update_type === 'sensor_snapshot') {
+            return {
+              ...prev,
+              temp_f: data.temp_f,
+              humidity: data.humidity,
+              wind_gust_mph: data.wind_gust_mph,
+              rain_rate_in_hr: data.rain_rate_in_hr
+            };
+          }
+          return prev;
+        });
+      } catch (err) {
+        console.warn("MQTT Parse Error:", err);
+      }
+    });
+
+    return () => {
+      if (client) client.end();
+    };
+  }, [host]);
+
   const fetchWeatherData = async () => {
     try {
-      // 1. Fetch Current
+      // 1. Fetch Current REST State
       const curRes = await fetch(CURRENT_URL);
       if (curRes.ok) setCurrent(await curRes.json());
 
@@ -85,9 +136,7 @@ export default function WeatherWidget() {
         let accData = [];
         if (accRes.ok) accData = await accRes.json();
 
-        // Slice first 10 days for a perfect 2x5 grid
         const parsedDaily = dailyData.slice(0, 10).map((day, idx) => {
-          // idx aligns with lead_days (0 to 9)
           const accuracy = accData.find((a) => a.lead_days === idx);
           return {
             ...day,
@@ -125,12 +174,13 @@ export default function WeatherWidget() {
       setLoading(false);
     }
   };
+
   const fetchTropics = async () => {
     try {
-      const outlookRes = await fetch(`http://${window.location.hostname}:8004/api/weather/tropics/outlook`);
+      const outlookRes = await fetch(`http://${host}:8004/api/weather/tropics/outlook`);
       if (outlookRes.ok) setTropicsOutlook(await outlookRes.json());
 
-      const activeRes = await fetch(`http://${window.location.hostname}:8004/api/weather/tropics/active`);
+      const activeRes = await fetch(`http://${host}:8004/api/weather/tropics/active`);
       if (activeRes.ok) setActiveStorms(await activeRes.json());
     } catch (err) {
       console.warn("Tropics fetch failed:", err);
@@ -140,7 +190,10 @@ export default function WeatherWidget() {
   useEffect(() => {
     fetchWeatherData();
     fetchTropics();
-    const interval = setInterval(fetchWeatherData, 30000);
+    const interval = setInterval(() => {
+      fetchWeatherData();
+      fetchTropics();
+    }, 60000);
     return () => clearInterval(interval);
   }, []);
 
@@ -148,28 +201,32 @@ export default function WeatherWidget() {
     return <div className="bg-cardBg border border-borderSlate rounded-xl p-5 animate-pulse text-slate-500">Loading weather telemetry...</div>;
   }
 
+  // Value resolution prioritizing UDP live stream over API polling
+  const displayTemp = liveTelemetry.temp_f ?? current.temp_f;
+  const displayHumidity = liveTelemetry.humidity ?? current.relative_humidity;
+  const displayWindAvg = liveTelemetry.wind_avg_mph ?? current.wind_avg_mph;
+  const displayWindGust = liveTelemetry.wind_gust_mph ?? current.wind_gust_mph;
   const currentIconClass = ICON_MAP[current.icon] || 'wi wi-day-sunny';
 
   return (
     <div className="bg-cardBg border border-borderSlate rounded-xl p-5 shadow-lg flex flex-col gap-6 relative overflow-hidden">
       
-      {/* CHECK ENGINE LIGHT BANNER */}
-      {localAlert && (
-        <div className={`absolute top-0 left-0 w-full p-2 flex items-center justify-center gap-2 text-sm font-bold shadow-md z-10
-          ${localAlert.isWarning ? 'bg-red-600/90 text-white animate-pulse' : 'bg-yellow-500/90 text-slate-900'}
-        `}>
-          {localAlert.isWarning ? <TriangleAlert className="w-4 h-4" /> : <Info className="w-4 h-4" />}
-          {localAlert.event.toUpperCase()}
-        </div>
-      )}
-
       {/* CURRENT CONDITIONS HEADER */}
-      <div className={localAlert ? 'mt-6' : ''}>
+      <div>
         <div className="flex justify-between items-center mb-4">
           <div>
-            <h2 className="text-sm font-medium text-slate-400">Local Telemetry</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-medium text-slate-400">Local Telemetry</h2>
+              {localAlert && (
+                <i 
+                  className={`wi wi-thunderstorm text-xl animate-pulse ${localAlert.isWarning ? 'text-red-500' : 'text-amber-400'}`} 
+                  title={localAlert.event}
+                />
+              )}
+            </div>
+
             <div className="flex items-center gap-3 mt-1">
-              <span className="text-4xl font-bold text-slate-100">{Math.round(current.temp_f)}°F</span>
+              <span className="text-4xl font-bold text-slate-100">{Math.round(displayTemp)}°F</span>
               
               <div className="flex items-center gap-2 pl-2 border-l border-slate-700">
                 <i className={`${currentIconClass} text-3xl text-amber-400`} />
@@ -180,10 +237,6 @@ export default function WeatherWidget() {
               </div>
             </div>
           </div>
-
-          <span className="text-xs px-2 py-1 bg-slate-800 text-slate-300 rounded-md border border-slate-700">
-            Live (30s)
-          </span>
         </div>
 
         {/* Telemetry Grid */}
@@ -193,7 +246,7 @@ export default function WeatherWidget() {
             <div>
               <p className="text-slate-500">Humidity / Dew</p>
               <p className="font-semibold text-slate-200">
-                {current.relative_humidity}% / {Math.round(current.dew_point_f)}°F
+                {displayHumidity}% / {Math.round(current.dew_point_f)}°F
               </p>
             </div>
           </div>
@@ -203,7 +256,7 @@ export default function WeatherWidget() {
             <div>
               <p className="text-slate-500">Wind / Gust</p>
               <p className="font-semibold text-slate-200">
-                {current.wind_avg_mph} <span className="text-slate-400">({current.wind_gust_mph})</span> mph
+                {displayWindAvg} <span className="text-slate-400">({displayWindGust})</span> mph
               </p>
             </div>
           </div>
@@ -211,8 +264,11 @@ export default function WeatherWidget() {
           <div className="bg-[#111827] p-2.5 rounded-lg border border-borderSlate flex items-center gap-2">
             <CloudRain className="w-4 h-4 text-cyan-400 shrink-0" />
             <div>
-              <p className="text-slate-500">Total Rain</p>
-              <p className="font-semibold text-slate-200">{current.precip_in.toFixed(2)} in</p>
+              <p className="text-slate-500">Rain (Today / Rate)</p>
+              <p className="font-semibold text-slate-200">
+                {current.precip_in != null ? current.precip_in.toFixed(2) : '0.00'} in
+                <span className="text-slate-400 text-xs font-normal"> / {liveTelemetry.rain_rate_in_hr ?? 0} in/hr</span>
+              </p>
             </div>
           </div>
 
@@ -228,11 +284,10 @@ export default function WeatherWidget() {
         </div>
       </div>
 
-      {/* --- FORECAST TABS & GRID --- */}
+      {/* FORECAST TABS & GRID */}
       <div className="border-t border-borderSlate pt-4">
         <div className="flex justify-between items-center mb-4">
           
-          {/* Tab Switcher */}
           <div className="flex bg-[#111827] p-1 rounded-lg border border-borderSlate gap-1 text-xs">
             <button
               onClick={() => setForecastTab('hourly')}
@@ -260,7 +315,6 @@ export default function WeatherWidget() {
             </button>
           </div>
 
-          {/* Misery legend (Only visible on hourly tab) */}
           {forecastTab === 'hourly' && (
             <div className="flex items-center gap-3 text-[10px] text-slate-500">
               <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Heat</span>
@@ -329,11 +383,10 @@ export default function WeatherWidget() {
             ))}
           </div>
         )}
+
         {/* TROPICS TAB */}
         {forecastTab === 'tropics' && tropicsOutlook && (
           <div className="flex flex-col gap-4 mt-4 overflow-y-auto pr-2">
-            
-            {/* Outlook Panel */}
             <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-3">
               <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Development Probability</h4>
               <div className="grid grid-cols-2 gap-4 mb-4">
@@ -370,7 +423,6 @@ export default function WeatherWidget() {
               </div>
             </div>
 
-            {/* Active Storms List */}
             {activeStorms.length > 0 && (
               <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-3">
                 <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Active Systems</h4>

@@ -512,20 +512,21 @@ services:
       - ./Map_Preview/html:/usr/share/nginx/html:ro
     networks:
       - piccolo_net
-  # --- MQTT Message Broker ---
+      
+# --- MQTT Message Broker ---
   mosquitto:
     image: eclipse-mosquitto:latest
     container_name: mosquitto
     restart: unless-stopped
     ports:
       - "1883:1883"
-    command: mosquitto -c /mosquitto-no-auth.conf
-    # This command allows anonymous internal connections without needing a config file
-    environment:
-      - MOSQUITTO_ALLOW_ANONYMOUS=true
-      - MOSQUITTO_LISTENER=1883
+      - "9001:9001"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
     networks:
       - piccolo_net
+    # Note: We removed the custom `command` and `environment` variables 
+    # because the container natively looks for the config file at the path we just mounted.
 
   # --- UDP to MQTT Bridge ---
   tempest_bridge:
