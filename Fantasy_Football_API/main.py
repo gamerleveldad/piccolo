@@ -608,3 +608,101 @@ async def upload_projections_csv(file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"CSV Upload failed: {e}")
         return {"status": "error", "message": str(e)}
+
+# --- Append to Fantasy_Football_API/main.py ---
+import aiohttp
+
+@app.get("/api/sleeper/leagues/{user_id}")
+async def get_sleeper_leagues(user_id: str, year: str = "2026"):
+    """
+    Fetches all NFL leagues for a specific Sleeper username or user ID.
+    """
+    url = f"https://api.sleeper.app/v1/user/{user_id}/leagues/nfl/{year}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            if resp.status == 200:
+                return await resp.json()
+            return []
+
+@app.get("/api/sleeper/league/{league_id}/drafts")
+async def get_sleeper_drafts(league_id: str):
+    """
+    Fetches all drafts associated with a specific Sleeper league.
+    """
+    url = f"https://api.sleeper.app/v1/league/{league_id}/drafts"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            if resp.status == 200:
+                return await resp.json()
+            return []
+
+@app.get("/api/sleeper/draft/{draft_id}/state")
+async def get_draft_state(draft_id: str, user_id: str = None):
+    """
+    Fetches the live picks for a draft and returns the active state,
+    including all drafted player IDs, and the specific roster/budget for the requested user.
+    """
+    draft_url = f"https://api.sleeper.app/v1/draft/{draft_id}"
+    picks_url = f"https://api.sleeper.app/v1/draft/{draft_id}/picks"
+    
+    async with aiohttp.ClientSession() as session:
+        # 1. Fetch draft metadata (to map user_id to draft slot/roster)
+        async with session.get(draft_url) as draft_resp:
+            draft_meta = await draft_resp.json() if draft_resp.status == 200 else {}
+            
+        # 2. Fetch live picks
+        async with session.get(picks_url) as picks_resp:
+            picks = await picks_resp.json() if picks_resp.status == 200 else []
+
+    # Map user_id to their specific team slot in this draft
+    user_draft_slot = None
+    if user_id and draft_meta.get("draft_order"):
+        user_draft_slot = draft_meta["draft_order"].get(user_id)
+
+    drafted_player_ids = []
+    my_roster = {
+        "QB": [], "RB": [], "WR": [], "TE": [], "DEF": [], "K": [], "ALL": []
+    }
+    amount_spent = 0
+    
+    for pick in picks:
+        pid = pick.get("player_id")
+        if not pid:
+            continue
+            
+        # Log every taken player so the UI can hide them
+        drafted_player_ids.append(pid)
+        
+        # If this pick belongs to the user, add it to their roster tracker
+        is_my_pick = False
+        if pick.get("picked_by") == user_id:
+            is_my_pick = True
+        elif user_draft_slot and pick.get("roster_id") == user_draft_slot:
+            is_my_pick = True
+            
+        if is_my_pick:
+            metadata = pick.get("metadata", {})
+            pos = metadata.get("position", "ALL")
+            amount = metadata.get("amount", 0)
+            
+            my_roster["ALL"].append(pid)
+            if pos in my_roster:
+                my_roster[pos].append(pid)
+            try:
+                amount_spent += int(amount)
+            except ValueError:
+                pass
+
+    total_budget = draft_meta.get("settings", {}).get("budget", 200)
+
+    return {
+        "draft_id": draft_id,
+        "status": draft_meta.get("status"),
+        "draft_type": draft_meta.get("type"), # 'snake' or 'auction'
+        "budget": total_budget,
+        "total_roster_spots": draft_meta.get("settings", {}).get("roster_size", 16),
+        "drafted_player_ids": drafted_player_ids,
+        "my_roster": my_roster,
+        "amount_spent": amount_spent,
+        "remaining_budget": total_budget - amount_spent
+    }
