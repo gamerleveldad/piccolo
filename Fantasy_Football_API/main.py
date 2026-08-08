@@ -534,8 +534,16 @@ async def upload_projections_csv(file: UploadFile = File(...)):
                 
                 if not player_col or not fpts_col:
                     continue 
+                
+                # --- NEW: Skip completely empty rows or NaN values ---
+                if pd.isna(row[player_col]) or pd.isna(row[fpts_col]):
+                    continue
                     
                 raw_name = str(row[player_col]).split('(')[0].strip()
+                
+                # --- NEW: Abort if the extracted name is blank to prevent '%%' wildcards ---
+                if not raw_name:
+                    continue
                 
                 # Strip out team abbreviations if they are appended to the name string
                 name_parts = raw_name.split()
@@ -546,15 +554,23 @@ async def upload_projections_csv(file: UploadFile = File(...)):
                 
                 try:
                     proj_pts = float(row[fpts_col])
+                    
+                    # --- NEW: Final safeguard to prevent NaN injection ---
+                    if pd.isna(proj_pts):
+                        continue
+                        
                     # Convert full season projections to PPG (17 games)
                     proj_ppg = round(proj_pts / 17.0, 2)
                     
-                    # Use wildcard matching to handle slight name variations (e.g. "Patrick Mahomes II")
+                    # Use wildcard matching to handle slight name variations
                     short_name = f"%{player_name}%"
                     
                     result = await conn.execute(update_query, proj_ppg, short_name)
-                    if result != "UPDATE 0":
-                        updated_count += 1
+                    
+                    # --- NEW: Extract the actual number of rows updated from the result tag ---
+                    if result.startswith("UPDATE"):
+                        count = int(result.split(" ")[1])
+                        updated_count += count
                         
                 except ValueError:
                     continue
