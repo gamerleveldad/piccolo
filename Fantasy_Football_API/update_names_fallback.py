@@ -52,19 +52,20 @@ async def update_names_fallback():
             possible_matches = []
             
             for sleeper_id, sp in players_data.items():
-                sp_first = sp.get("first_name", "").lower()
-                sp_last = sp.get("last_name", "").lower()
-                sp_pos = sp.get("position", "")
-                sp_status = sp.get("status", "").lower()
+                # Safety net: Use ( ... or "" ) to catch explicit None/null values from the API
+                sp_first = (sp.get("first_name") or "").lower()
+                sp_last = (sp.get("last_name") or "").lower()
+                sp_pos = sp.get("position") or ""
+                sp_status = (sp.get("status") or "").lower()
                 
                 clean_sp_last = sp_last.replace("'", "").replace(" ", "").replace("-", "")
                 
                 if sp_first.startswith(first_initial) and clean_sp_last == clean_db_last and sp_pos == db_pos:
-                    full = sp.get("full_name") or f"{sp.get('first_name', '')} {sp.get('last_name', '')}".strip()
+                    full = sp.get("full_name") or f"{sp.get('first_name') or ''} {sp.get('last_name') or ''}".strip()
                     possible_matches.append({
                         "name": full,
                         "status": sp_status,
-                        "team": sp.get("team", "")
+                        "team": sp.get("team") or ""
                     })
             
             match_found = None
