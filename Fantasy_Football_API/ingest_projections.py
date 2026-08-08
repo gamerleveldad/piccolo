@@ -1,6 +1,7 @@
 import os
 import asyncpg
 import requests
+import io
 import pandas as pd
 from bs4 import BeautifulSoup
 import logging
@@ -74,7 +75,7 @@ def fetch_fantasypros_projections():
             continue
 
         # Parse HTML table into pandas DataFrame
-        df = pd.read_html(str(table))[0]
+        df = pd.read_html(io.StringIO(str(table)))[0]
         
         # Flatten multi-level column headers if present
         if isinstance(df.columns, pd.MultiIndex):
