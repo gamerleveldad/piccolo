@@ -31,6 +31,27 @@ async def sync_sleeper_to_db():
     conn = await asyncpg.connect(db_url)
     
     try:
+        # Ensure all metadata columns exist in player_ti before attempting updates
+        await conn.execute("""
+            ALTER TABLE player_ti 
+            ADD COLUMN IF NOT EXISTS age INT,
+            ADD COLUMN IF NOT EXISTS practice_participation VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS depth_chart_position VARCHAR(20),
+            ADD COLUMN IF NOT EXISTS status VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS depth_chart_order INT,
+            ADD COLUMN IF NOT EXISTS years_exp INT,
+            ADD COLUMN IF NOT EXISTS fantasy_positions VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS practice_description VARCHAR(255),
+            ADD COLUMN IF NOT EXISTS injury_body_part VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS search_rank INT,
+            ADD COLUMN IF NOT EXISTS sleeper_id VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS espn_id VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS yahoo_id VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS sportradar_id VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS rotowire_id VARCHAR(50);
+        """)
+        logger.info("Verified player_ti table schema for Sleeper metadata.")
+
         update_query = """
             UPDATE player_ti SET
                 age = $1,
@@ -53,7 +74,7 @@ async def sync_sleeper_to_db():
         
         updated_count = 0
         for sleeper_id, p in players_data.items():
-            # Match the NFLverse player_id format
+            # Match using the official NFL GSIS ID format
             gsis_id = p.get("gsis_id")
             if not gsis_id:
                 continue
