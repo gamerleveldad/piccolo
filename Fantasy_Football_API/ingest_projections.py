@@ -74,27 +74,49 @@ def fetch_fantasypros_projections():
             logger.warning(f"No data table found for position {pos}")
             continue
 
-        # Parse HTML table into pandas DataFrame
-        df = pd.read_html(io.StringIO(str(table)))[0]
+        # Parse HTML table into pandas DataFrame using StringIO
+        dfs = pd.read_html(io.StringIO(str(table)))
+        if not dfs:
+            continue
+        df = dfs[0]
         
         # Flatten multi-level column headers if present
         if isinstance(df.columns, pd.MultiIndex):
-            df.columns = [f"{col[0]}_{col[1]}" if "Unnamed" not in col[0] else col[1] for col in df.columns]
+            df.columns = [
+                f"{col[0]}_{col[1]}" if ("Unnamed" not in str(col[0]) and str(col[0]) != "") else str(col[1])
+                for col in df.columns
+            ]
+
+        # Standardize column headers
+        df.columns = [str(c).upper() for c in df.columns]
 
         for _, row in df.iterrows():
-            player_raw = str(row.columns[0]) if len(row) > 0 else ""
-            # Extract player name (first column usually contains Name and Team)
-            player_name = str(row.iloc[0]).split("(")[0].strip()
+            # Get first cell string containing player name and team
+            raw_player_val = str(row.iloc[0]) if len(row) > 0 else ""
             
-            if not player_name or player_name == "nan":
+            if not raw_player_val or raw_player_val == "nan":
                 continue
 
-            # Check for total points column or compute manually
-            if "MISC_FPTS" in row:
-                proj_pts = float(row["MISC_FPTS"])
-            elif "FPTS" in row:
-                proj_pts = float(row["FPTS"])
+            # Extract player name (e.g., "Jalen Hurts PHI" -> "Jalen Hurts")
+            name_parts = raw_player_val.split("(")[0].strip().split()
+            if len(name_parts) > 1 and len(name_parts[-1]) in [2, 3] and name_parts[-1].isupper():
+                player_name = " ".join(name_parts[:-1])
             else:
+                player_name = " ".join(name_parts)
+
+            # Check for fantasy points column or fallback to calculation
+            proj_pts = 0.0
+            found_pts = False
+            for col_name in row.index:
+                if "FPTS" in str(col_name).upper():
+                    try:
+                        proj_pts = float(row[col_name])
+                        found_pts = True
+                        break
+                    except (ValueError, TypeError):
+                        pass
+
+            if not found_pts:
                 proj_pts = calculate_ppr_points(row, pos)
 
             all_projections.append({
