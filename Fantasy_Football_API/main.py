@@ -323,7 +323,28 @@ class ReorderRequest(BaseModel):
     target_above_player_id: Optional[str] = None
     target_below_player_id: Optional[str] = None
 
-
+async def fetch_team_unit_ranks(conn) -> dict:
+    """
+    Fetches all 1-32 team unit rankings from PostgreSQL.
+    Returns a dictionary keyed by team abbreviation.
+    """
+    try:
+        rows = await conn.fetch("SELECT * FROM team_unit_rankings")
+        rankings = {}
+        for r in rows:
+            rankings[r["team_abbr"]] = {
+                "oline_rank": r.get("oline_rank", 16),
+                "qb_rank": r.get("qb_rank", 16),
+                "wr_rank": r.get("wr_rank", 16),
+                "te_rank": r.get("te_rank", 16),
+                "rb_rank": r.get("rb_rank", 16),
+                "def_rank": r.get("def_rank", 16),
+                "off_rank": r.get("off_rank", 16)
+            }
+        return rankings
+    except Exception as e:
+        logger.warning(f"Could not load team unit rankings: {e}")
+        return {}
 @app.get("/api/ti/board/{board_type}")
 async def get_draft_board(board_type: str = "standard"):
     """
