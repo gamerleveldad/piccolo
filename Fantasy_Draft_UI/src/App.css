@@ -1,8 +1,9 @@
 /* ==========================================================================
-   Dolphins "Dark Waters" Rivalries Theme - Complete Layout & Size Fix
+   Dolphins "Dark Waters" Rivalries Theme - Refined Component Stylesheet
    ========================================================================== */
 
 :root {
+  /* Official Dolphins Rivalries Palette */
   --pitch-blue: #0A1526;
   --pitch-blue-card: #12223D;
   --pitch-blue-hover: #1B3054;
@@ -12,6 +13,7 @@
   --aqua-light: #66E0E8;
   --text-muted: #8BB2C9;
   
+  /* Status Colors */
   --danger-bg: #4A0E17;
   --danger-border: #FF4D4D;
   --warning-bg: #4D3300;
@@ -28,8 +30,8 @@
 body {
   background-color: var(--pitch-blue) !important;
   color: var(--dolphins-aqua) !important;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  line-height: 1.4;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  line-height: 1.5;
 }
 
 .app-container {
@@ -39,33 +41,24 @@ body {
   flex-direction: column;
 }
 
-/* GLOBAL LOGO / SVG SIZE CLAMP */
+/* Global Image / Logo Dimensions Constraint */
 img, svg {
   max-width: 100%;
   height: auto;
 }
 
-/* Force all NFL logos across all views to constrained dimensions */
-img[src*="espncdn"],
-.team-logo,
-.team-logo-large,
-.team-logo-small,
-.header-left img,
-.compact-row img,
-.player-row img,
-.team-rank-card img,
-.grid-card img {
-  width: 36px !important;
-  height: 36px !important;
-  max-width: 36px !important;
-  max-height: 36px !important;
-  min-width: 36px !important;
-  min-height: 36px !important;
+.team-logo-small, .team-logo-large {
+  width: 32px !important;
+  height: 32px !important;
+  max-width: 32px !important;
+  max-height: 32px !important;
+  min-width: 32px !important;
+  min-height: 32px !important;
   object-fit: contain !important;
-  display: block;
+  display: inline-block;
 }
 
-/* Header & Tab Controls */
+/* Header & Main Navigation */
 .app-header {
   background-color: var(--pitch-blue-card);
   border-bottom: 3px solid var(--dolphins-orange);
@@ -77,6 +70,7 @@ img[src*="espncdn"],
   color: var(--dolphins-aqua);
   font-size: 2.2rem;
   font-weight: 800;
+  letter-spacing: 1px;
   margin-bottom: 12px;
   text-shadow: 0 0 10px rgba(0, 181, 193, 0.3);
 }
@@ -97,7 +91,7 @@ img[src*="espncdn"],
   text-decoration: none;
   font-weight: 700;
   font-size: 0.95rem;
-  transition: all 0.2s ease;
+  transition: all 0.2s ease-in-out;
 }
 
 .tab:hover, .tab.active {
@@ -108,149 +102,135 @@ img[src*="espncdn"],
 
 /* Content Container */
 .board-content {
-  max-width: 1400px;
+  max-width: 1200px;
   width: 100%;
   margin: 0 auto;
   padding: 20px;
   flex: 1;
-  background-color: var(--pitch-blue) !important;
 }
 
-/* Control Panels & Settings Cards */
-.draft-control-panel, 
-.team-rankings-container, 
-.board-header,
-.rankings-header {
-  background-color: var(--pitch-blue-card) !important;
+/* Board Header Controls */
+.board-header {
+  background-color: var(--pitch-blue-card);
   border: 1px solid var(--dolphins-orange);
   border-radius: 8px;
-  padding: 15px 18px;
-  margin-bottom: 15px;
-  color: var(--dolphins-aqua) !important;
-}
-
-.control-row {
+  padding: 15px 20px;
+  margin-bottom: 20px;
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
 }
 
-.control-group {
+.board-header h2 {
+  font-size: 1.5rem;
+  color: var(--dolphins-aqua);
+}
+
+.header-controls {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
 }
 
-.control-group label {
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: var(--text-muted);
-  text-transform: uppercase;
+/* View Mode Buttons */
+.view-toggle {
+  display: flex;
+  gap: 8px;
 }
 
-.control-group input, 
-.control-group select {
+.view-btn {
   background-color: var(--pitch-blue);
-  color: #FFFFFF;
+  color: var(--dolphins-aqua);
   border: 1px solid var(--dolphins-aqua);
+  padding: 6px 14px;
   border-radius: 6px;
-  padding: 8px 12px;
-  font-size: 0.9rem;
-}
-
-button {
-  background-color: var(--dolphins-orange);
-  color: var(--pitch-blue);
-  border: none;
-  border-radius: 6px;
-  padding: 8px 16px;
-  font-weight: 800;
+  font-weight: 700;
   cursor: pointer;
 }
 
-button:hover {
-  background-color: var(--dolphins-orange-hover);
+.view-btn.active {
+  background-color: var(--dolphins-orange);
+  color: var(--pitch-blue);
+  border-color: var(--dolphins-orange);
 }
 
 /* ==========================================================================
-   COMPACT VIEW STYLING (Single-Line Ultra-Dense Rows)
+   1. FIX: COMPACT VIEW STYLING (Spacious Full-Width Vertical List)
    ========================================================================== */
 
-.board-container, .rankings-list, .sortable-list {
-  background-color: var(--pitch-blue) !important;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.board-container, .sortable-list, .player-list {
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  gap: 8px !important;
 }
 
-/* Compact Row Formatting */
-.compact-row, .player-row.compact, div[class*="compact"] {
-  background-color: var(--pitch-blue-card) !important;
-  border: 1px solid var(--dolphins-orange);
-  border-radius: 6px;
-  padding: 6px 14px;
+.player-row.compact {
+  width: 100% !important;
   display: flex !important;
   flex-direction: row !important;
   align-items: center !important;
   justify-content: space-between !important;
-  height: 48px !important;
-  color: #FFFFFF !important;
+  background-color: var(--pitch-blue-card) !important;
+  border: 1px solid var(--dolphins-orange) !important;
+  border-radius: 6px !important;
+  padding: 10px 18px !important;
+  min-height: 50px !important;
+  gap: 15px !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  transition: background-color 0.15s ease;
 }
 
-.compact-row:hover {
+.player-row.compact:hover {
   background-color: var(--pitch-blue-hover) !important;
 }
 
-.compact-row .rank, .compact-row .grid-rank {
-  font-size: 1rem;
+.rank-col {
+  font-size: 1.1rem;
   font-weight: 800;
   color: var(--dolphins-orange);
-  width: 35px;
+  min-width: 35px;
+  text-align: left;
 }
 
-.compact-row .player-info, .compact-row .header-names {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.name-col {
   flex: 1;
-}
-
-.compact-row .player-name {
-  font-size: 0.95rem;
-  font-weight: 800;
+  font-size: 1rem;
   color: #FFFFFF;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.compact-row .player-meta {
-  font-size: 0.82rem;
-  color: var(--text-muted);
-}
-
-.compact-row .stat-group {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-
-.compact-row .stat-value {
-  font-size: 0.95rem;
+.name-col strong {
+  color: #FFFFFF;
   font-weight: 800;
+}
+
+.stat-col {
+  min-width: 90px;
+  text-align: right;
+  font-size: 0.92rem;
   color: var(--dolphins-aqua);
+  font-weight: 700;
 }
 
 /* ==========================================================================
    GRID VIEW / EXPANDED CARD STYLING
    ========================================================================== */
 
-.grid-card, .live-player-card, .player-row.grid {
+.player-row.grid-card {
   background-color: var(--pitch-blue-card) !important;
-  border: 1px solid var(--dolphins-orange);
+  border: 1px solid var(--dolphins-orange) !important;
   border-radius: 8px;
-  padding: 12px 16px;
+  padding: 15px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .card-header {
@@ -258,7 +238,7 @@ button:hover {
   justify-content: space-between;
   align-items: center;
   border-bottom: 1px solid rgba(0, 181, 193, 0.2);
-  padding-bottom: 8px;
+  padding-bottom: 10px;
 }
 
 .header-left {
@@ -267,8 +247,15 @@ button:hover {
   gap: 12px;
 }
 
+.grid-rank {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--dolphins-orange);
+  min-width: 35px;
+}
+
 .header-names h3 {
-  font-size: 1.15rem;
+  font-size: 1.2rem;
   font-weight: 800;
   color: #FFFFFF;
 }
@@ -278,13 +265,19 @@ button:hover {
   color: var(--text-muted);
 }
 
+.header-right {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .badge {
   background-color: var(--pitch-blue);
   color: var(--dolphins-aqua);
   border: 1px solid var(--dolphins-aqua);
-  padding: 3px 8px;
+  padding: 4px 10px;
   border-radius: 4px;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   font-weight: 700;
 }
 
@@ -296,11 +289,11 @@ button:hover {
 
 .card-body {
   display: flex;
-  gap: 12px;
+  gap: 15px;
   justify-content: space-between;
   align-items: center;
   background-color: var(--pitch-blue) !important;
-  padding: 10px 14px;
+  padding: 12px;
   border-radius: 6px;
 }
 
@@ -312,13 +305,13 @@ button:hover {
 }
 
 .stat-box label {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
   text-transform: uppercase;
 }
 
 .stat-box div {
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   font-weight: 800;
   color: #FFFFFF;
 }
@@ -327,65 +320,214 @@ button:hover {
   color: var(--dolphins-aqua);
 }
 
-.stat-box.highlight-stat div,
-.stat-box.auction-stat div {
-  color: var(--dolphins-orange);
+/* ==========================================================================
+   2. FIX: TEAM UNIT BUTTONS STYLING
+   ========================================================================== */
+
+.team-rankings-container {
+  background-color: var(--pitch-blue-card);
+  border: 1px solid var(--dolphins-orange);
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.rankings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.rankings-header h2 {
+  font-size: 1.4rem;
+  color: var(--dolphins-aqua);
+}
+
+.save-btn {
+  background-color: var(--dolphins-orange);
+  color: var(--pitch-blue);
+  border: none;
+  border-radius: 6px;
+  padding: 10px 20px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.save-btn:hover {
+  background-color: var(--dolphins-orange-hover);
+}
+
+.save-status-msg {
+  color: var(--dolphins-aqua);
+  font-weight: 700;
+  margin-bottom: 15px;
+}
+
+.unit-category-tabs {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  justify-content: center !important;
+  gap: 12px !important;
+  margin: 15px 0 25px 0 !important;
+  padding: 12px !important;
+  background-color: var(--pitch-blue) !important;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 181, 193, 0.2);
+}
+
+.unit-tab {
+  background-color: var(--pitch-blue-card) !important;
+  color: var(--dolphins-aqua) !important;
+  border: 1px solid var(--dolphins-aqua) !important;
+  padding: 10px 18px !important;
+  border-radius: 6px !important;
+  font-weight: 700 !important;
+  font-size: 0.9rem !important;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.unit-tab:hover {
+  background-color: var(--pitch-blue-hover) !important;
+  border-color: var(--dolphins-orange) !important;
+}
+
+.unit-tab.active {
+  background-color: var(--dolphins-orange) !important;
+  color: var(--pitch-blue) !important;
+  border-color: var(--dolphins-orange) !important;
+  font-weight: 800 !important;
+  box-shadow: 0 0 10px rgba(252, 76, 2, 0.5);
 }
 
 /* ==========================================================================
-   TEAM UNIT RANKINGS VIEW STYLING (Compact Grid)
+   3. FIX: TEAM UNIT RANKINGS ROWS STYLING
    ========================================================================== */
 
-.team-rankings-grid, .unit-ranks-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 10px;
+.team-rankings-list {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
 }
 
-.team-rank-card, .unit-rank-row {
+.team-rank-row {
   background-color: var(--pitch-blue-card) !important;
-  border: 1px solid var(--dolphins-orange);
-  border-radius: 6px;
-  padding: 8px 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 52px;
+  border: 1px solid var(--dolphins-orange) !important;
+  border-radius: 8px !important;
+  padding: 12px 20px !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 20px !important;
+  width: 100% !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+  cursor: grab;
 }
 
-.team-rank-card img {
-  width: 32px !important;
-  height: 32px !important;
-  max-width: 32px !important;
-  max-height: 32px !important;
+.team-rank-row:hover {
+  background-color: var(--pitch-blue-hover) !important;
+  border-color: var(--dolphins-aqua) !important;
 }
 
-.team-rank-card .team-info {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.team-rank-card .rank-num {
-  font-size: 1rem;
+.team-rank-number {
+  font-size: 1.2rem;
   font-weight: 800;
   color: var(--dolphins-orange);
-  width: 28px;
+  min-width: 45px;
+  text-align: left;
 }
 
-.team-rank-card .team-name {
-  font-size: 0.92rem;
-  font-weight: 700;
+.team-abbr-text {
+  font-size: 1.1rem;
+  font-weight: 800;
   color: #FFFFFF;
+  letter-spacing: 1px;
 }
 
-.team-rank-card .rank-input {
-  width: 50px;
+/* Live Assistant Controls & Summaries */
+.draft-control-panel {
+  background-color: var(--pitch-blue-card);
+  border: 1px solid var(--dolphins-orange);
+  border-radius: 8px;
+  padding: 18px;
+  margin-bottom: 20px;
+}
+
+.control-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 15px;
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.control-group label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.control-group input, .control-group select {
   background-color: var(--pitch-blue);
+  color: #FFFFFF;
+  border: 1px solid var(--dolphins-aqua);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 0.9rem;
+}
+
+.draft-summary-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  background-color: var(--pitch-blue-card);
+  border: 1px solid var(--dolphins-aqua);
+  border-radius: 8px;
+  padding: 15px 20px;
+  margin-bottom: 20px;
+}
+
+.summary-stat label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.summary-stat span {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--dolphins-aqua);
+}
+
+.position-filter-bar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.pos-tab {
+  background-color: var(--pitch-blue-card);
   color: var(--dolphins-aqua);
   border: 1px solid var(--dolphins-aqua);
-  border-radius: 4px;
-  padding: 4px;
-  text-align: center;
-  font-weight: 800;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pos-tab.active {
+  background-color: var(--dolphins-orange);
+  color: var(--pitch-blue);
+  border-color: var(--dolphins-orange);
 }
