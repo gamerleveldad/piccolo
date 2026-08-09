@@ -656,8 +656,9 @@ async def get_sleeper_drafts(league_id: str):
 @app.get("/api/sleeper/draft/{draft_id}/state")
 async def get_draft_state(draft_id: str, user_id: str = None):
     """
-    Fetches live picks for a draft, tracking drafted player IDs,
+    Fetches live picks for a draft, tracks drafted player IDs,
     user roster positions, and auction budget remaining.
+    Includes advanced tracing to map User IDs to mock draft Roster IDs.
     """
     draft_url = f"https://api.sleeper.app/v1/draft/{draft_id}"
     picks_url = f"https://api.sleeper.app/v1/draft/{draft_id}/picks"
@@ -677,12 +678,19 @@ async def get_draft_state(draft_id: str, user_id: str = None):
         async with session.get(picks_url) as picks_resp:
             picks = await picks_resp.json() if picks_resp.status == 200 else []
 
-    user_draft_slot = None
-    if user_id and draft_meta.get("draft_order"):
-        user_draft_slot = draft_meta["draft_order"].get(user_id)
-
     user_id_str = str(user_id) if user_id is not None else None
-    user_slot_str = str(user_draft_slot) if user_draft_slot is not None else None
+    user_roster_id_str = None
+
+    # Step 1: Trace User ID -> Draft Slot -> Roster ID (Crucial for Mock Drafts)
+    if user_id_str and draft_meta:
+        draft_order = draft_meta.get("draft_order") or {}
+        # Find which slot the user is assigned to
+        d_slot = draft_order.get(user_id_str)
+        
+        if d_slot:
+            # Map the slot to the actual roster/team ID
+            slot_to_roster = draft_meta.get("slot_to_roster_id") or {}
+            user_roster_id_str = str(slot_to_roster.get(str(d_slot), d_slot))
 
     drafted_player_ids = []
     my_roster = {"QB": [], "RB": [], "WR": [], "TE": [], "DEF": [], "K": [], "ALL": []}
@@ -698,21 +706,24 @@ async def get_draft_state(draft_id: str, user_id: str = None):
         picked_by = str(pick.get("picked_by") or "")
         roster_id = str(pick.get("roster_id") or "")
         
-        # Robust string matching for auction pick ownership
+        # Step 2: Validate ownership against both picked_by and roster_id
         is_my_pick = False
-        if user_id_str and (picked_by == user_id_str or (user_slot_str and roster_id == user_slot_str)):
+        if user_id_str and picked_by == user_id_str:
+            is_my_pick = True
+        elif user_roster_id_str and roster_id == user_roster_id_str:
             is_my_pick = True
             
         if is_my_pick:
             metadata = pick.get("metadata", {})
             pos = metadata.get("position", "ALL")
             
-            # Extract auction cost from pick or metadata payload
+            # Step 3: Extract auction amount
             amount_val = metadata.get("amount") or pick.get("amount") or 0
             
             my_roster["ALL"].append(pid)
             if pos in my_roster:
                 my_roster[pos].append(pid)
+                
             try:
                 amount_spent += int(amount_val)
             except (ValueError, TypeError):
@@ -756,8 +767,8 @@ def format_consistency_score(cv: float) -> dict:
     if cv is None:
         cv = 0.40
     
-    # Normalize CV: 0.20 or lower = 100 (Rock Solid), 0.65 or higher = 0 (Boom/Bust)
-    rating = int(max(0.0, min(100.0, ((0.65 - cv) / 0.45) * 100.0)))
+    # Softened curve: 0.20 or lower = 100 (Rock Solid), 0.75 or higher = 0 (Boom/Bust)
+    rating = int(max(0.0, min(100.0, ((0.75 - cv) / 0.55) * 100.0)))
     
     if rating >= 80:
         label = f"{rating} (Rock Solid)"
