@@ -744,14 +744,30 @@ def check_bye_constraint(pos: str, player_bye: int, my_roster_byes: dict) -> dic
             return {"blocked": False, "status": "WARNING", "message": f"Warning: 1 {pos} shares Wk {player_bye} bye"}
             
     return {"blocked": False, "status": "CLEAR", "message": None}
-
+def calculate_roster_need_multiplier(pos: str, drafted_count: int) -> float:
+    """
+    Calculates diminishing marginal utility as roster slots fill up for a given position.
+    """
+    pos = pos.upper()
+    if pos == "QB":
+        if drafted_count == 1: return 0.30
+        if drafted_count >= 2: return 0.05
+    elif pos == "TE":
+        if drafted_count == 1: return 0.30
+        if drafted_count >= 2: return 0.05
+    elif pos == "RB":
+        if drafted_count == 2: return 0.85  # 3rd RB (1st bench RB)
+        if drafted_count == 3: return 0.65  # 4th RB
+        if drafted_count >= 4: return 0.40  # 5th+ RB
+    elif pos == "WR":
+        if drafted_count == 3: return 0.90  # 4th WR (1st bench WR)
+        if drafted_count == 4: return 0.75  # 5th WR
+        if drafted_count >= 5: return 0.50  # 6th+ WR
+    return 1.00
 # --- Update in Fantasy_Football_API/main.py ---
 
 @app.get("/api/draft/recommendations")
 async def get_live_recommendations(draft_id: str, user_id: str, format: str = "snake"):
-    """
-    Live Sync Recommendation Endpoint with VORP (Value Over Replacement) sorting.
-    """
     draft_state = await get_draft_state(draft_id, user_id)
     drafted_set = set(str(pid) for pid in draft_state["drafted_player_ids"])
     my_roster_pids = [str(pid) for pid in draft_state["my_roster"]["ALL"]]
@@ -762,14 +778,19 @@ async def get_live_recommendations(draft_id: str, user_id: str, format: str = "s
         
         # 1. Fetch user roster's bye weeks
         my_roster_byes = {"QB": [], "RB": [], "WR": [], "TE": [], "DEF": [], "K": []}
+        my_roster_counts = {"QB": 0, "RB": 0, "WR": 0, "TE": 0, "DEF": 0, "K": 0}
+
         if my_roster_pids:
             placeholders = ",".join(f"'{pid}'" for pid in my_roster_pids)
-            roster_query = f"SELECT position, bye_week FROM player_ti WHERE sleeper_id::text IN ({placeholders}) AND bye_week IS NOT NULL"
+            roster_query = f"SELECT position, bye_week FROM player_ti WHERE sleeper_id::text IN ({placeholders})"
             my_roster_data = await conn.fetch(roster_query)
+            
             for r in my_roster_data:
-                pos = r["position"].upper() if r["position"] else "ALL"
-                if pos in my_roster_byes:
-                    my_roster_byes[pos].append(r["bye_week"])
+                pos_str = r["position"].upper() if r["position"] else "WR"
+                if pos_str in my_roster_byes and r["bye_week"]:
+                    my_roster_byes[pos_str].append(r["bye_week"])
+                if pos_str in my_roster_counts:
+                    my_roster_counts[pos_str] += 1
                     
         # 2. Fetch active available players
         query = """
@@ -783,6 +804,8 @@ async def get_live_recommendations(draft_id: str, user_id: str, format: str = "s
         available_players = []
         positional_scores = {"QB": [], "RB": [], "WR": [], "TE": []}
         
+        # First Pass: Compute raw TI scores and build baselines
+        raw_player_data = []
         for p in all_players:
             s_id = str(p.get("sleeper_id") or "")
             if s_id in drafted_set:
@@ -794,19 +817,58 @@ async def get_live_recommendations(draft_id: str, user_id: str, format: str = "s
                 coefficient_of_variation=p.get("consistency_score"),
                 team_ranks=unit_ranks,
                 position=p.get("position") or "WR",
+                years_exp=p.get("years_exp"),
                 age=p.get("age"),
                 depth_chart_order=p.get("depth_chart_order")
             )
             
+            bye_check = check_bye_constraint(p.get("position", "WR"), p.get("bye_week"), my_roster_byes)
+            pos = p.get("position", "WR").upper()
+            
+            raw_player_data.append({
+                "db_record": p,
+                "sleeper_id": s_id,
+                "score_data": score_data,
+                "bye_check": bye_check,
+                "pos": pos
+            })
+            
+            if pos in positional_scores and not bye_check["blocked"]:
+                positional_scores[pos].append(score_data["ti_score"])
+
+        # 3. Positional Replacement Baselines (VORP)
+        replacement_cutoffs = {"QB": 12, "RB": 24, "WR": 30, "TE": 12}
+        baselines = {}
+        for pos, scores in positional_scores.items():
+            scores.sort(reverse=True)
+            cutoff_idx = replacement_cutoffs.get(pos, 12) - 1
+            baselines[pos] = scores[cutoff_idx] if len(scores) > cutoff_idx else (scores[-1] if scores else 10.0)
+
+        # Second Pass: Apply Roster Need Multiplier to TI Score & VORP
+        for item in raw_player_data:
+            p = item["db_record"]
+            pos = item["pos"]
+            score_data = item["score_data"]
+            bye_check = item["bye_check"]
+            
+            # --- APPLY ROSTER NEED MULTIPLIER HERE ---
+            roster_count = my_roster_counts.get(pos, 0)
+            need_mult = calculate_roster_need_multiplier(pos, roster_count)
+            
+            raw_ti = score_data["ti_score"]
+            base = baselines.get(pos, 10.0)
+            raw_vorp = raw_ti - base
+
+            # Apply need penalty
+            final_ti = round(raw_ti * need_mult, 2)
+            final_vorp = round(raw_vorp * need_mult, 2)
+
             c_score = p.get("consistency_score")
             consistency_val = round(c_score, 3) if c_score is not None else 0.400
-            
-            bye_check = check_bye_constraint(p.get("position", "WR"), p.get("bye_week"), my_roster_byes)
-            
-            pos = p.get("position", "WR").upper()
-            p_dict = {
+
+            available_players.append({
                 "player_id": p["player_id"],
-                "sleeper_id": s_id,
+                "sleeper_id": item["sleeper_id"],
                 "player_name": p["player_name"],
                 "position": pos,
                 "team": p["team_abbr"],
@@ -814,42 +876,18 @@ async def get_live_recommendations(draft_id: str, user_id: str, format: str = "s
                 "bye_week": p.get("bye_week"),
                 "depth_chart_position": p.get("depth_chart_position"),
                 "depth_chart_order": p.get("depth_chart_order"),
-                "ti_score": score_data["ti_score"],
+                "ti_score": final_ti,
                 "ti_score_dynasty": score_data["ti_score_dynasty"],
                 "consistency_score": consistency_val,
                 "projected_points": p.get("projected_points") or 0.0,
                 "is_starter": score_data["is_starter"],
                 "bye_status": bye_check["status"],
                 "bye_message": bye_check["message"],
-                "vorp_score": 0.0,
-                "auction_max_bid": 0 
-            }
-            available_players.append(p_dict)
-            
-            if pos in positional_scores and not bye_check["blocked"]:
-                positional_scores[pos].append(score_data["ti_score"])
-
-        # 3. Positional Replacement Baselines (VORP Math)
-        # Ranks: QB12, RB24, WR30, TE12
-        replacement_cutoffs = {"QB": 12, "RB": 24, "WR": 30, "TE": 12}
-        baselines = {}
-        
-        for pos, scores in positional_scores.items():
-            scores.sort(reverse=True)
-            cutoff_idx = replacement_cutoffs.get(pos, 12) - 1
-            if len(scores) > cutoff_idx:
-                baselines[pos] = scores[cutoff_idx]
-            elif len(scores) > 0:
-                baselines[pos] = scores[-1]
-            else:
-                baselines[pos] = 10.0
-
-        for player in available_players:
-            pos = player["position"]
-            base = baselines.get(pos, 10.0)
-            player["vorp_score"] = round(player["ti_score"] - base, 2)
-
-        # 4. Auction "Don't Go Over" Calculation
+                "vorp_score": final_vorp,
+                "roster_need_mult": need_mult,
+                "auction_max_bid": 0
+            })
+		# 4. Auction "Don't Go Over" Calculation
         if format.lower() == "auction":
             rem_budget = draft_state["remaining_budget"]
             open_spots = max(1, draft_state["total_roster_spots"] - len(my_roster_pids))
@@ -868,8 +906,8 @@ async def get_live_recommendations(draft_id: str, user_id: str, format: str = "s
                 bid_calc = (player["ti_score"] / baseline) * allocation * rem_budget
                 recommended_bid = round(bid_calc)
                 player["auction_max_bid"] = min(recommended_bid, absolute_max_bid) if recommended_bid > 0 else 1
-
-        # 5. Sort Recommendations by VORP (Positional Scarcity)
+				
+        # 5. Sort Recommendations by Adjusted VORP
         def sort_key(x):
             status_weight = 2
             if x["bye_status"] == "BLOCKED": status_weight = 0
@@ -881,8 +919,37 @@ async def get_live_recommendations(draft_id: str, user_id: str, format: str = "s
         return {
             "draft_state": draft_state,
             "my_roster_byes": my_roster_byes,
+            "my_roster_counts": my_roster_counts,
             "baselines": baselines,
             "board": available_players
         }
+    finally:
+        await conn.close()
+
+@app.post("/api/handcuffs/upload")
+async def upload_handcuffs_csv(file: UploadFile = File(...)):
+    """Ingests FantasyPros Handcuff rankings CSV to update depth chart orders."""
+    content = await file.read()
+    df = pd.read_csv(io.StringIO(content.decode('utf-8')))
+    df.columns = [str(c).upper().strip() for c in df.columns]
+
+    conn = await get_db_connection()
+    updated = 0
+    try:
+        for _, row in df.iterrows():
+            starter_col = next((c for c in df.columns if 'STARTER' in c or 'PLAYER' in c), None)
+            handcuff_col = next((c for c in df.columns if 'HANDCUFF' in c), None)
+
+            if starter_col and pd.notna(row[starter_col]):
+                s_name = str(row[starter_col]).split('(')[0].strip()
+                await conn.execute("UPDATE player_ti SET depth_chart_order = 1 WHERE LOWER(player_name) LIKE LOWER($1) AND position = 'RB'", f"%{s_name}%")
+                updated += 1
+
+            if handcuff_col and pd.notna(row[handcuff_col]):
+                h_name = str(row[handcuff_col]).split('(')[0].strip()
+                await conn.execute("UPDATE player_ti SET depth_chart_order = 2 WHERE LOWER(player_name) LIKE LOWER($1) AND position = 'RB'", f"%{h_name}%")
+                updated += 1
+
+        return {"status": "success", "updated": updated}
     finally:
         await conn.close()

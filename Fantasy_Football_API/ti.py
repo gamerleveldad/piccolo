@@ -36,30 +36,22 @@ POSITIONAL_SYNERGY_MATRIX = {
 }
 
 def calculate_team_synergy_multiplier(position: str, team_ranks: dict) -> float:
-    """
-    Calculates the team synergy multiplier using unit rank distance from average (16.5).
-    
-    Args:
-        position (str): Player position (QB, RB, WR, TE, DEF).
-        team_ranks (dict): Dictionary of unit ranks (e.g., {'oline_rank': 5, 'def_rank': 20}).
-        
-    Returns:
-        float: Team synergy multiplier centered around 1.0.
-    """
-    pos_rules = POSITIONAL_SYNERGY_MATRIX.get(position.upper(), {})
-    if not pos_rules or not team_ranks:
+    if not team_ranks or not position:
         return 1.0
-
-    multiplier_offset = 0.0
+    pos = position.upper()
     
-    for rank_key, weight in pos_rules.items():
-        if rank_key in team_ranks and team_ranks[rank_key] is not None:
-            # 16.5 is neutral rank. Rank 1 gives +15.5, Rank 32 gives -15.5.
-            rank_distance = 16.5 - team_ranks[rank_key]
-            multiplier_offset += rank_distance * weight / 100.0
-
-    return 1.0 + multiplier_offset
-
+    # Map position to unit key
+    unit_map = {
+        "QB": "oline_rank",
+        "RB": "oline_rank",
+        "WR": "qb_rank",
+        "TE": "qb_rank"
+    }
+    key = unit_map.get(pos, "off_rank")
+    rank = team_ranks.get(key, 16)
+    
+    # Unit Rank 1 = +15% boost, Unit Rank 32 = -15% penalty
+    return 1.0 + ((16.5 - rank) * 0.01)
 
 def calculate_ti_score(
     projected_pts: float,
@@ -67,71 +59,90 @@ def calculate_ti_score(
     coefficient_of_variation: float,
     team_ranks: dict,
     position: str,
+    years_exp: int = None,
     age: int = None,
     depth_chart_order: int = None,
+    role_discounts: dict = None,
     weights: dict = None,
     dynasty_weights: dict = None
 ) -> dict:
     
-    projected_pts = projected_pts if projected_pts is not None else 0.0
-    historical_pts = historical_pts if historical_pts is not None else 0.0
+    projected_pts = float(projected_pts) if projected_pts is not None else 0.0
+    historical_pts = float(historical_pts) if historical_pts is not None else 0.0
 
-    if weights is None:
-        weights = {"proj": 0.50, "hist": 0.25, "cons": 0.15, "team": 0.10}
-    if dynasty_weights is None:
-        dynasty_weights = {"proj": 0.50, "hist": 0.15, "cons": 0.15, "age": 0.10, "team": 0.10}
+    if role_discounts is None:
+        role_discounts = {"RB2": 0.85, "WR2": 0.90, "WR3": 0.80}
 
-    base_pts = projected_pts if projected_pts > 0 else historical_pts
-    hist_value = historical_pts if historical_pts > 0 else base_pts
-    hist_ratio = hist_value / base_pts if base_pts > 0 else 1.0
-
-    baseline_cv = 0.40
-    cv_score = coefficient_of_variation if coefficient_of_variation is not None else baseline_cv
-    consistency_multiplier = 1.0 + (baseline_cv - cv_score)
-    team_synergy_mult = calculate_team_synergy_multiplier(position, team_ranks)
-
-    # 1. Standard TI
-    std_multiplier = (
-        (weights["proj"] * 1.0) +
-        (weights["hist"] * hist_ratio) +
-        (weights["cons"] * consistency_multiplier) +
-        (weights["team"] * team_synergy_mult)
-    )
-    ti_final = base_pts * std_multiplier
-
-    # 2. Dynasty TI
-    player_age = age if age is not None else 26
+    pos_upper = (position or "WR").upper()
+    team_synergy_mult = calculate_team_synergy_multiplier(pos_upper, team_ranks)
+    player_age = age if age is not None else 25
     age_multiplier = 1.0 + ((26 - player_age) * 0.05)
 
-    dyn_multiplier = (
-        (dynasty_weights["proj"] * 1.0) +
-        (dynasty_weights["hist"] * hist_ratio) +
-        (dynasty_weights["cons"] * consistency_multiplier) +
-        (dynasty_weights["age"] * age_multiplier) +
-        (dynasty_weights["team"] * team_synergy_mult)
-    )
-    ti_dynasty_final = base_pts * dyn_multiplier
+    is_rookie = (years_exp == 0) or (historical_pts == 0.0 and projected_pts > 0)
 
-    # --- Depth Chart Backup Penalty ---
-    # Divide score by 10 if player is not in a starting role
+    # --- ROOKIE FORMULA OVERRIDE ---
+    if is_rookie:
+        ti_final = (0.60 * projected_pts) + (0.40 * projected_pts * team_synergy_mult)
+        ti_dynasty_final = (0.50 * projected_pts) + (0.30 * projected_pts * team_synergy_mult) + (0.20 * projected_pts * age_multiplier)
+    else:
+        if weights is None:
+            weights = {"proj": 0.50, "hist": 0.25, "cons": 0.15, "team": 0.10}
+        if dynasty_weights is None:
+            dynasty_weights = {"proj": 0.50, "hist": 0.15, "cons": 0.15, "age": 0.10, "team": 0.10}
+
+        base_pts = projected_pts if projected_pts > 0 else historical_pts
+        hist_value = historical_pts if historical_pts > 0 else base_pts
+        hist_ratio = hist_value / base_pts if base_pts > 0 else 1.0
+
+        baseline_cv = 0.40
+        cv_score = coefficient_of_variation if coefficient_of_variation is not None else baseline_cv
+        consistency_multiplier = 1.0 + (baseline_cv - cv_score)
+
+        std_mult = (
+            (weights["proj"] * 1.0) +
+            (weights["hist"] * hist_ratio) +
+            (weights["cons"] * consistency_multiplier) +
+            (weights["team"] * team_synergy_mult)
+        )
+        ti_final = base_pts * std_mult
+
+        dyn_mult = (
+            (dynasty_weights["proj"] * 1.0) +
+            (dynasty_weights["hist"] * hist_ratio) +
+            (dynasty_weights["cons"] * consistency_multiplier) +
+            (dynasty_weights["age"] * age_multiplier) +
+            (dynasty_weights["team"] * team_synergy_mult)
+        )
+        ti_dynasty_final = base_pts * dyn_mult
+
+    # --- RB2 / WR2 / WR3 ROLE & TARGET SHARE DISCOUNTS ---
+    depth_order = depth_chart_order or 1
+    if pos_upper == "RB" and depth_order == 2:
+        ti_final *= role_discounts.get("RB2", 0.85)
+        ti_dynasty_final *= role_discounts.get("RB2", 0.85)
+    elif pos_upper == "WR" and depth_order == 2:
+        ti_final *= role_discounts.get("WR2", 0.90)
+        ti_dynasty_final *= role_discounts.get("WR2", 0.90)
+    elif pos_upper == "WR" and depth_order == 3:
+        ti_final *= role_discounts.get("WR3", 0.80)
+        ti_dynasty_final *= role_discounts.get("WR3", 0.80)
+
+    # Backup Starter Threshold Penalty (/10 for depth_order >= starter limit + 1)
     is_starter = True
-    if depth_chart_order is not None and depth_chart_order > 0:
-        pos_upper = (position or "").upper()
-        if pos_upper == "QB" and depth_chart_order >= 2:
-            is_starter = False
-        elif pos_upper == "RB" and depth_chart_order >= 3:
-            is_starter = False
-        elif pos_upper == "WR" and depth_chart_order >= 4:
-            is_starter = False
-        elif pos_upper == "TE" and depth_chart_order >= 2:
-            is_starter = False
+    if depth_order >= 2 and pos_upper in ["QB", "TE"]:
+        is_starter = False
+    elif depth_order >= 3 and pos_upper == "RB":
+        is_starter = False
+    elif depth_order >= 4 and pos_upper == "WR":
+        is_starter = False
 
     if not is_starter:
-        ti_final = ti_final / 10.0
-        ti_dynasty_final = ti_dynasty_final / 10.0
+        ti_final /= 10.0
+        ti_dynasty_final /= 10.0
 
     return {
         "ti_score": round(ti_final, 2),
         "ti_score_dynasty": round(ti_dynasty_final, 2),
-        "is_starter": is_starter
+        "is_starter": is_starter,
+        "is_rookie": is_rookie
     }

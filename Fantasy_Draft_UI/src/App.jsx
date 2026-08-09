@@ -4,6 +4,7 @@ import { BrowserRouter as Router, Routes, Route, NavLink, Navigate } from 'react
 import BoardView from './BoardView';
 import TeamRankingsView from './TeamRankingsView';
 import LiveDraftView from './LiveDraftView';
+import ModelSettingsView from './ModelSettingsView';
 import './App.css';
 
 function App() {
@@ -18,6 +19,7 @@ function App() {
             <NavLink to="/board/chopped" className={({isActive}) => isActive ? "tab active" : "tab"}>Chopped Board</NavLink>
             <NavLink to="/rankings" className={({isActive}) => isActive ? "tab active" : "tab"}>Team Unit Ranks</NavLink>
             <NavLink to="/live-draft" className={({isActive}) => isActive ? "tab active" : "tab"}>Live Assistant</NavLink>
+            <NavLink to="/settings" className={({isActive}) => isActive ? "tab active" : "tab"}>Model Settings</NavLink>
           </nav>
         </header>
 
@@ -27,6 +29,7 @@ function App() {
             <Route path="/board/:boardType" element={<BoardView />} />
             <Route path="/rankings" element={<TeamRankingsView />} />
             <Route path="/live-draft" element={<LiveDraftView />} />
+            <Route path="/settings" element={<ModelSettingsView />} />
           </Routes>
         </main>
       </div>
