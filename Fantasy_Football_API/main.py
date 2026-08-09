@@ -394,6 +394,9 @@ async def get_draft_board(board_type: str = "standard"):
             # Select target score based on requested board type
             target_score = score_data["ti_score_dynasty"] if board_type == "dynasty" else score_data["ti_score"]
 
+            c_score = p.get("consistency_score")
+            cons_data = format_consistency_score(c_score)
+
             draft_board.append({
                 "player_id": p_id,
                 "player_name": p["player_name"],
@@ -407,6 +410,8 @@ async def get_draft_board(board_type: str = "standard"):
                 "manual_rank": pinned_dict.get(p_id),
                 "ti_score": score_data["ti_score"],
                 "ti_score_dynasty": score_data["ti_score_dynasty"],
+                "consistency_score": cons_data["rating"],
+                "consistency_label": cons_data["label"],
                 "target_score": target_score,
                 "projected_points": p.get("projected_points") or 0.0,
                 "projected_next_game": p.get("projected_next_game") or 0.0,
@@ -651,14 +656,14 @@ async def get_sleeper_drafts(league_id: str):
 @app.get("/api/sleeper/draft/{draft_id}/state")
 async def get_draft_state(draft_id: str, user_id: str = None):
     """
-    Fetches the live picks for a draft and returns the active state,
-    including all drafted player IDs, and the specific roster/budget for the requested user.
+    Fetches live picks for a draft, tracking drafted player IDs,
+    user roster positions, and auction budget remaining.
     """
     draft_url = f"https://api.sleeper.app/v1/draft/{draft_id}"
     picks_url = f"https://api.sleeper.app/v1/draft/{draft_id}/picks"
     
     async with aiohttp.ClientSession() as session:
-        # --- NEW: Resolve the numeric user_id if a username is passed ---
+        # Resolve numeric user_id if text username was provided
         if user_id and not user_id.isdigit():
             user_url = f"https://api.sleeper.app/v1/user/{user_id}"
             async with session.get(user_url) as user_resp:
@@ -666,52 +671,54 @@ async def get_draft_state(draft_id: str, user_id: str = None):
                     user_data = await user_resp.json()
                     user_id = user_data.get("user_id", user_id)
                     
-        # 1. Fetch draft metadata
         async with session.get(draft_url) as draft_resp:
             draft_meta = await draft_resp.json() if draft_resp.status == 200 else {}
             
-        # 2. Fetch live picks
         async with session.get(picks_url) as picks_resp:
             picks = await picks_resp.json() if picks_resp.status == 200 else []
 
-    # Map user_id to their specific team slot in this draft
     user_draft_slot = None
     if user_id and draft_meta.get("draft_order"):
         user_draft_slot = draft_meta["draft_order"].get(user_id)
 
+    user_id_str = str(user_id) if user_id is not None else None
+    user_slot_str = str(user_draft_slot) if user_draft_slot is not None else None
+
     drafted_player_ids = []
-    my_roster = {
-        "QB": [], "RB": [], "WR": [], "TE": [], "DEF": [], "K": [], "ALL": []
-    }
+    my_roster = {"QB": [], "RB": [], "WR": [], "TE": [], "DEF": [], "K": [], "ALL": []}
     amount_spent = 0
     
     for pick in picks:
-        pid = pick.get("player_id")
+        pid = str(pick.get("player_id") or "")
         if not pid:
             continue
             
         drafted_player_ids.append(pid)
         
+        picked_by = str(pick.get("picked_by") or "")
+        roster_id = str(pick.get("roster_id") or "")
+        
+        # Robust string matching for auction pick ownership
         is_my_pick = False
-        if pick.get("picked_by") == user_id:
-            is_my_pick = True
-        elif user_draft_slot and pick.get("roster_id") == user_draft_slot:
+        if user_id_str and (picked_by == user_id_str or (user_slot_str and roster_id == user_slot_str)):
             is_my_pick = True
             
         if is_my_pick:
             metadata = pick.get("metadata", {})
             pos = metadata.get("position", "ALL")
-            amount = metadata.get("amount", 0)
+            
+            # Extract auction cost from pick or metadata payload
+            amount_val = metadata.get("amount") or pick.get("amount") or 0
             
             my_roster["ALL"].append(pid)
             if pos in my_roster:
                 my_roster[pos].append(pid)
             try:
-                amount_spent += int(amount)
-            except ValueError:
+                amount_spent += int(amount_val)
+            except (ValueError, TypeError):
                 pass
 
-    total_budget = draft_meta.get("settings", {}).get("budget", 200)
+    total_budget = draft_meta.get("settings", {}).get("budget", 200) or 200
 
     return {
         "draft_id": draft_id,
@@ -722,7 +729,7 @@ async def get_draft_state(draft_id: str, user_id: str = None):
         "drafted_player_ids": drafted_player_ids,
         "my_roster": my_roster,
         "amount_spent": amount_spent,
-        "remaining_budget": total_budget - amount_spent
+        "remaining_budget": max(0, total_budget - amount_spent)
     }
 
 def check_bye_constraint(pos: str, player_bye: int, my_roster_byes: dict) -> dict:
@@ -744,6 +751,24 @@ def check_bye_constraint(pos: str, player_bye: int, my_roster_byes: dict) -> dic
             return {"blocked": False, "status": "WARNING", "message": f"Warning: 1 {pos} shares Wk {player_bye} bye"}
             
     return {"blocked": False, "status": "CLEAR", "message": None}
+def format_consistency_score(cv: float) -> dict:
+    """Converts raw CV into a 0-100 rating with a readable tier label."""
+    if cv is None:
+        cv = 0.40
+    
+    # Normalize CV: 0.20 or lower = 100 (Rock Solid), 0.65 or higher = 0 (Boom/Bust)
+    rating = int(max(0.0, min(100.0, ((0.65 - cv) / 0.45) * 100.0)))
+    
+    if rating >= 80:
+        label = f"{rating} (Rock Solid)"
+    elif rating >= 60:
+        label = f"{rating} (Dependable)"
+    elif rating >= 40:
+        label = f"{rating} (Moderate)"
+    else:
+        label = f"{rating} (Boom / Bust)"
+        
+    return {"rating": rating, "label": label}
 def calculate_roster_need_multiplier(pos: str, drafted_count: int) -> float:
     """
     Calculates diminishing marginal utility as roster slots fill up for a given position.
@@ -864,7 +889,7 @@ async def get_live_recommendations(draft_id: str, user_id: str, format: str = "s
             final_vorp = round(raw_vorp * need_mult, 2)
 
             c_score = p.get("consistency_score")
-            consistency_val = round(c_score, 3) if c_score is not None else 0.400
+            cons_data = format_consistency_score(c_score)
 
             available_players.append({
                 "player_id": p["player_id"],
@@ -878,7 +903,8 @@ async def get_live_recommendations(draft_id: str, user_id: str, format: str = "s
                 "depth_chart_order": p.get("depth_chart_order"),
                 "ti_score": final_ti,
                 "ti_score_dynasty": score_data["ti_score_dynasty"],
-                "consistency_score": consistency_val,
+                "consistency_score": cons_data["rating"],
+                "consistency_label": cons_data["label"],
                 "projected_points": p.get("projected_points") or 0.0,
                 "is_starter": score_data["is_starter"],
                 "bye_status": bye_check["status"],
@@ -888,23 +914,51 @@ async def get_live_recommendations(draft_id: str, user_id: str, format: str = "s
                 "auction_max_bid": 0
             })
 		# 4. Auction "Don't Go Over" Calculation
+        # Realistic Auction "Don't Go Over" Max Bid Calculation
         if format.lower() == "auction":
+            total_budget = draft_state.get("budget", 200) or 200
             rem_budget = draft_state["remaining_budget"]
             open_spots = max(1, draft_state["total_roster_spots"] - len(my_roster_pids))
-            absolute_max_bid = rem_budget - (open_spots - 1)
+            absolute_max_bid = max(1, rem_budget - (open_spots - 1))
             
-            target_allocation = {"QB": 0.15, "RB": 0.35, "WR": 0.35, "TE": 0.10}
+            # Position target allocation % and starter count in standard lineup
+            pos_config = {
+                "QB": {"alloc": 0.15, "starters": 1},
+                "RB": {"alloc": 0.35, "starters": 2},
+                "WR": {"alloc": 0.35, "starters": 3},
+                "TE": {"alloc": 0.10, "starters": 1}
+            }
+
+            # Calculate average starter TI score for each position
+            starter_ti_avg = {}
+            for pos, cfg in pos_config.items():
+                scores = sorted(positional_scores.get(pos, []), reverse=True)
+                top_n = max(1, cfg["starters"] * 10)
+                top_scores = scores[:top_n]
+                starter_ti_avg[pos] = (sum(top_scores) / len(top_scores)) if top_scores else 12.0
 
             for player in available_players:
                 pos = player["position"]
-                if pos not in baselines or player["bye_status"] == "BLOCKED":
+                if pos not in pos_config or player["bye_status"] == "BLOCKED":
+                    player["auction_max_bid"] = 1
                     continue
                     
-                baseline = baselines[pos]
-                allocation = target_allocation.get(pos, 0.05)
+                cfg = pos_config[pos]
+                avg_starter_ti = starter_ti_avg.get(pos, 12.0)
                 
-                bid_calc = (player["ti_score"] / baseline) * allocation * rem_budget
+                # Average dollars allocated per starter slot
+                avg_slot_cost = (cfg["alloc"] * total_budget) / cfg["starters"]
+                
+                # Ratio of player's TI relative to an average starter
+                ti_ratio = player["ti_score"] / avg_starter_ti if avg_starter_ti > 0 else 1.0
+                
+                # Budget decay factor (scales bids as remaining budget diminishes)
+                budget_scale = rem_budget / total_budget if total_budget > 0 else 1.0
+                
+                bid_calc = ti_ratio * avg_slot_cost * budget_scale
                 recommended_bid = round(bid_calc)
+                
+                # Cap at absolute max capacity to ensure $1 is reserved for all open spots
                 player["auction_max_bid"] = min(recommended_bid, absolute_max_bid) if recommended_bid > 0 else 1
 				
         # 5. Sort Recommendations by Adjusted VORP

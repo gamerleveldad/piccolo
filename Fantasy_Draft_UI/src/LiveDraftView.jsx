@@ -272,7 +272,7 @@ const LiveDraftView = () => {
 
               <div className="stat-box">
                 <label>Consistency</label>
-                <div>{player.consistency_score}</div>
+                <div>{player.consistency_label || '-'}</div>
               </div>
 
               {draftFormat === 'auction' && (
