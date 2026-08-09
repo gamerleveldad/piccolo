@@ -184,3 +184,231 @@ button:hover {
 .auction-stat div, .highlight-stat div, .summary-stat.highlight span {
   color: var(--dolphins-orange) !important; 
 }
+
+/* --- Live Draft Assistant Styles --- */
+
+.live-draft-container {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.draft-control-panel {
+  background: #ffffff;
+  padding: 15px;
+  border-radius: 6px;
+  border: 1px solid #e0e0e0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.control-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  align-items: flex-end;
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.control-group label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #555;
+}
+
+.control-group input, .control-group select {
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.input-with-btn {
+  display: flex;
+  gap: 4px;
+}
+
+.override-group {
+  flex-grow: 1;
+}
+
+.sync-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.sync-on {
+  background-color: #28a745;
+  color: white;
+}
+
+.sync-off {
+  background-color: #6c757d;
+  color: white;
+}
+
+.manual-fetch-btn {
+  padding: 6px 12px;
+  background-color: #0056b3;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.draft-error-text {
+  color: #dc3545;
+  font-weight: 600;
+  font-size: 0.85rem;
+  margin-left: 10px;
+}
+
+.draft-summary-banner {
+  display: flex;
+  gap: 15px;
+  background: #f8f9fa;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid #dcdcdc;
+}
+
+.summary-stat {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.85rem;
+}
+
+.summary-stat label {
+  color: #666;
+}
+
+.summary-stat span {
+  font-weight: bold;
+  font-size: 1.1rem;
+}
+
+.summary-stat.highlight span {
+  color: #28a745;
+  font-size: 1.3rem;
+}
+
+.position-filter-bar {
+  display: flex;
+  gap: 8px;
+}
+
+.pos-tab {
+  padding: 6px 14px;
+  border: 1px solid #ccc;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.pos-tab.active {
+  background: #0056b3;
+  color: white;
+  border-color: #0056b3;
+}
+
+.live-board-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.live-player-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.card-blocked {
+  opacity: 0.6;
+  background-color: #fff8f8;
+}
+
+.auction-stat div {
+  color: #28a745;
+  font-weight: bold;
+  font-size: 1.2rem;
+}
+
+.bye-alert-banner {
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.alert-blocked {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.alert-warning {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
+/* --- Settings & File Upload Styles --- */
+
+.settings-description {
+  font-size: 0.85rem;
+  color: #666;
+  margin-bottom: 10px;
+}
+
+.upload-row {
+  align-items: flex-end;
+}
+
+.file-group {
+  flex-grow: 1;
+}
+
+.upload-btn {
+  height: 36px;
+  padding: 0 20px;
+  background-color: #28a745;
+  font-weight: bold;
+}
+
+.upload-btn:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
+}
+
+.upload-status-text {
+  margin-top: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: 4px;
+}
+
+.status-success {
+  background-color: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.status-error {
+  background-color: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
