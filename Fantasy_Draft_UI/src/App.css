@@ -1,436 +1,186 @@
+/* --- Dolphins "Dark Waters" Rivalries Theme --- */
+:root {
+  /* Miami Dolphins Authentic Colors */
+  --pitch-blue: #0A1526; 
+  --pitch-blue-light: #12223D;
+  --dolphins-orange: #FC4C02;
+  --dolphins-aqua: #00B5C1;
+  --aqua-muted: #008E97;
+  
+  /* Text Colors */
+  --text-main: #00B5C1; /* Aqua words */
+  --text-light: #a3d8db; /* Softer aqua for subtext to prevent eye strain */
+  
+  /* Base structural colors */
+  --bg-main: var(--pitch-blue);
+  --bg-card: var(--pitch-blue-light);
+  --border-color: var(--dolphins-orange);
+}
+
+/* Base Body and Backgrounds */
 body {
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  background-color: #f4f7f6;
-  color: #333;
+  padding: 0;
 }
 
 .app-container {
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 20px;
+  background-color: var(--bg-main);
+  min-height: 100vh;
 }
 
-.app-header h1 { margin-top: 0; }
+/* Headers and Titles */
+h1, h2, h3, h4, h5, label {
+  color: var(--text-main);
+}
 
+.app-header {
+  background-color: var(--pitch-blue-light);
+  border-bottom: 2px solid var(--dolphins-orange);
+  padding: 15px 20px;
+}
+
+/* Navigation Tabs */
 .tabs {
   display: flex;
   gap: 10px;
-  border-bottom: 2px solid #ddd;
-  margin-bottom: 20px;
+  margin-top: 10px;
 }
 
 .tab {
-  padding: 10px 20px;
+  padding: 8px 16px;
+  background-color: transparent;
+  color: var(--text-main);
+  border: 1px solid var(--dolphins-orange);
+  border-radius: 4px;
   text-decoration: none;
-  color: #666;
-  font-weight: 500;
-  border-radius: 4px 4px 0 0;
-}
-
-.tab.active {
-  color: #0056b3;
-  border-bottom: 3px solid #0056b3;
-  background: #eef2f5;
-}
-
-.board-controls {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 15px;
-}
-
-.view-toggles button {
-  padding: 6px 12px;
-  margin-left: 8px;
-  border: 1px solid #ccc;
-  background: #fff;
-  cursor: pointer;
-  border-radius: 4px;
-}
-
-.view-toggles button.active {
-  background: #0056b3;
-  color: white;
-  border-color: #0056b3;
-}
-
-.player-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.player-row {
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
-  cursor: grab;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-}
-
-.player-row:active { cursor: grabbing; }
-
-/* Compact View Styles */
-.compact {
-  display: flex;
-  align-items: center;
-  padding: 10px 15px;
-  gap: 15px;
-}
-
-.team-logo-small { width: 24px; height: 24px; object-fit: contain; }
-.rank-col { font-weight: bold; width: 30px; }
-.name-col { flex-grow: 1; }
-.stat-col { width: 80px; text-align: right; color: #555; }
-
-/* Grid View Styles */
-.grid-card {
-  padding: 15px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-bottom: 1px solid #eee;
-  padding-bottom: 10px;
-}
-
-.header-left { display: flex; align-items: center; gap: 15px; }
-.grid-rank { font-size: 1.2rem; font-weight: bold; color: #888; }
-.team-logo-large { width: 40px; height: 40px; object-fit: contain; }
-.header-names h3 { margin: 0 0 4px 0; font-size: 1.1rem; }
-.header-names span { color: #666; font-size: 0.9rem; }
-
-.header-right { display: flex; gap: 10px; }
-.badge { background: #eef2f5; padding: 4px 8px; border-radius: 12px; font-size: 0.85rem; font-weight: 500; }
-
-.card-body {
-  display: flex;
-  justify-content: space-between;
-}
-
-.stat-box { text-align: center; }
-.stat-box label { display: block; font-size: 0.75rem; color: #888; text-transform: uppercase; margin-bottom: 4px; }
-.stat-box div { font-weight: bold; font-size: 1.1rem; }
-.main-stat div { color: #0056b3; font-size: 1.3rem; }
-
-.team-rankings-container {
-  display: flex;
-  flex-direction: column;
-  gap: 15px;
-}
-
-.rankings-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.save-btn {
-  background-color: #28a745;
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 4px;
   font-weight: bold;
-  cursor: pointer;
+  transition: all 0.2s ease;
 }
 
-.save-btn:hover {
-  background-color: #218838;
+.tab:hover, .tab.active {
+  background-color: var(--dolphins-orange);
+  color: var(--pitch-blue); /* Dark text on orange background for contrast */
 }
 
-.save-status-msg {
-  padding: 8px 12px;
-  background-color: #e2e3e5;
-  border-radius: 4px;
-  font-size: 0.9rem;
-}
-
-.unit-category-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.unit-tab {
-  padding: 8px 14px;
-  background: #fff;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-
-.unit-tab.active {
-  background: #0056b3;
-  color: white;
-  border-color: #0056b3;
-}
-
-.team-rankings-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.team-rank-row {
-  display: flex;
-  align-items: center;
-  padding: 10px 16px;
-  background: #ffffff;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
-  cursor: grab;
-  gap: 15px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-}
-
-.team-rank-row:active {
-  cursor: grabbing;
-}
-
-.team-rank-number {
-  font-weight: bold;
-  font-size: 1.1rem;
-  width: 40px;
-  color: #555;
-}
-
-.team-abbr-text {
-  font-weight: 600;
-  font-size: 1rem;
-}
-
-/* --- Live Draft Assistant Styles --- */
-
-.live-draft-container {
-  display: flex;
-  flex-direction: column;
-  gap: 15px;
-}
-
-.draft-control-panel {
-  background: #ffffff;
-  padding: 15px;
-  border-radius: 6px;
-  border: 1px solid #e0e0e0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.control-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 15px;
-  align-items: flex-end;
-}
-
-.control-group {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.control-group label {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #555;
+/* Draft Control Panels and Settings Cards */
+.draft-control-panel, .draft-summary-banner, .team-rankings-container {
+  background-color: var(--bg-card);
+  border: 1px solid var(--dolphins-orange);
+  color: var(--text-main);
 }
 
 .control-group input, .control-group select {
-  padding: 8px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  font-size: 0.9rem;
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  border: 1px solid var(--dolphins-aqua);
 }
 
-.input-with-btn {
-  display: flex;
-  gap: 4px;
-}
-
-.override-group {
-  flex-grow: 1;
-}
-
-.sync-btn {
-  padding: 8px 16px;
-  border: none;
-  border-radius: 4px;
-  font-weight: bold;
-  cursor: pointer;
-}
-
-.sync-on {
-  background-color: #28a745;
-  color: white;
-}
-
-.sync-off {
-  background-color: #6c757d;
-  color: white;
-}
-
-.manual-fetch-btn {
-  padding: 6px 12px;
-  background-color: #0056b3;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-
-.draft-error-text {
-  color: #dc3545;
-  font-weight: 600;
-  font-size: 0.85rem;
-  margin-left: 10px;
-}
-
-.draft-summary-banner {
-  display: flex;
-  gap: 15px;
-  background: #f8f9fa;
-  padding: 12px;
-  border-radius: 6px;
-  border: 1px solid #dcdcdc;
-}
-
-.summary-stat {
-  display: flex;
-  flex-direction: column;
-  font-size: 0.85rem;
+.control-group input:focus, .control-group select:focus {
+  outline: none;
+  border-color: var(--dolphins-orange);
 }
 
 .summary-stat label {
-  color: #666;
+  color: var(--text-light);
 }
 
-.summary-stat span {
+/* Player Cards */
+.live-player-card, .player-row {
+  background-color: var(--bg-card);
+  border: 1px solid var(--dolphins-orange);
+  color: var(--text-main);
+}
+
+.card-header {
+  border-bottom: 1px solid var(--aqua-muted);
+}
+
+.header-names span {
+  color: var(--text-light);
+}
+
+.badge {
+  background-color: var(--bg-main);
+  color: var(--dolphins-orange);
+  border: 1px solid var(--dolphins-orange);
+}
+
+.depth-badge {
+  background-color: var(--dolphins-orange);
+  color: var(--pitch-blue);
   font-weight: bold;
-  font-size: 1.1rem;
+  border: none;
 }
 
-.summary-stat.highlight span {
-  color: #28a745;
-  font-size: 1.3rem;
+.stat-box label {
+  color: var(--text-light);
 }
 
-.position-filter-bar {
-  display: flex;
-  gap: 8px;
+/* Buttons */
+button {
+  background-color: var(--dolphins-orange);
+  color: var(--pitch-blue);
+  border: none;
+  font-weight: bold;
 }
 
+button:hover {
+  background-color: #ff6a2b;
+}
+
+.manual-fetch-btn {
+  background-color: var(--dolphins-aqua);
+  color: var(--pitch-blue);
+}
+
+.sync-on {
+  background-color: var(--dolphins-orange);
+  color: var(--pitch-blue);
+  box-shadow: 0 0 8px var(--dolphins-orange);
+}
+
+.sync-off {
+  background-color: var(--bg-main);
+  color: var(--dolphins-aqua);
+  border: 1px solid var(--dolphins-aqua);
+}
+
+/* Position Filter Tabs */
 .pos-tab {
-  padding: 6px 14px;
-  border: 1px solid #ccc;
-  background: white;
-  border-radius: 4px;
-  cursor: pointer;
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  border: 1px solid var(--dolphins-aqua);
 }
 
 .pos-tab.active {
-  background: #0056b3;
-  color: white;
-  border-color: #0056b3;
+  background-color: var(--dolphins-orange);
+  color: var(--pitch-blue);
+  border-color: var(--dolphins-orange);
 }
 
-.live-board-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.live-player-card {
-  background: white;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.card-blocked {
-  opacity: 0.6;
-  background-color: #fff8f8;
-}
-
-.auction-stat div {
-  color: #28a745;
-  font-weight: bold;
-  font-size: 1.2rem;
-}
-
-.bye-alert-banner {
-  padding: 6px 10px;
-  border-radius: 4px;
-  font-size: 0.85rem;
-  font-weight: 600;
-}
-
+/* Badges / Warnings */
 .alert-blocked {
-  background-color: #f8d7da;
-  color: #721c24;
+  background-color: #4a0000; /* Darker red for pitch blue background */
+  color: #ff6b6b;
+  border: 1px solid #ff6b6b;
 }
 
 .alert-warning {
-  background-color: #fff3cd;
-  color: #856404;
+  background-color: #4d3800; /* Darker yellow/brown */
+  color: #ffc107;
+  border: 1px solid #ffc107;
 }
 
-/* --- Settings & File Upload Styles --- */
-
-.settings-description {
-  font-size: 0.85rem;
-  color: #666;
-  margin-bottom: 10px;
+.card-blocked {
+  opacity: 0.5;
+  background-color: var(--bg-main);
+  border-color: #ff6b6b;
 }
 
-.upload-row {
-  align-items: flex-end;
-}
-
-.file-group {
-  flex-grow: 1;
-}
-
-.upload-btn {
-  height: 36px;
-  padding: 0 20px;
-  background-color: #28a745;
-  font-weight: bold;
-}
-
-.upload-btn:disabled {
-  background-color: #6c757d;
-  cursor: not-allowed;
-}
-
-.upload-status-text {
-  margin-top: 10px;
-  font-size: 0.9rem;
-  font-weight: 600;
-  padding: 8px 12px;
-  border-radius: 4px;
-}
-
-.status-success {
-  background-color: #d4edda;
-  color: #155724;
-  border: 1px solid #c3e6cb;
-}
-
-.status-error {
-  background-color: #f8d7da;
-  color: #721c24;
-  border: 1px solid #f5c6cb;
+/* Auction & Highlight Stats */
+.auction-stat div, .highlight-stat div, .summary-stat.highlight span {
+  color: var(--dolphins-orange) !important; 
 }
