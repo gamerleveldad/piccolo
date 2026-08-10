@@ -3,7 +3,9 @@ name: Piccolo Smart Deploy
 on:
   push:
     branches:
-      - main # Change this if your default branch is 'master'
+      - main
+      - master
+  workflow_dispatch: # Enables the manual "Run workflow" button in GitHub Actions UI
 
 jobs:
   deploy:
@@ -18,11 +20,11 @@ jobs:
       - name: Get Changed Directories
         id: changed-dirs
         run: |
-          if [ "${{ github.event.before }}" == "0000000000000000000000000000000000000000" ]; then
-            echo "First push detected, marking all as changed"
+          if [ "${{ github.event.before }}" == "0000000000000000000000000000000000000000" ] || [ -z "${{ github.event.before }}" ]; then
+            echo "First push or manual trigger detected, marking all as changed"
             echo "dirs=ALL" >> $GITHUB_OUTPUT
           else
-            # Extracts just the top-level directory names of changed files
+            # Extracts top-level directory names of changed files
             DIRS=$(git diff --name-only ${{ github.event.before }} ${{ github.event.after }} | cut -d/ -f1 | sort -u | xargs)
             echo "dirs=$DIRS" >> $GITHUB_OUTPUT
           fi
@@ -31,9 +33,9 @@ jobs:
         run: |
           # Move to your live production directory
           cd /home/howl/Piccolo
-          
+
           # Pull the latest code to the live environment
-          git pull origin main
+          git pull origin ${{ github.ref_name }}
 
           CHANGED_DIRS="${{ steps.changed-dirs.outputs.dirs }}"
           SERVICES_TO_BUILD=""
@@ -96,9 +98,14 @@ jobs:
               DEPLOYED_PROJECTS="\n- Minor File Updates (No Containers Rebuilt)"
           fi
 
-          # Output for the next Discord step
           echo "projects=$DEPLOYED_PROJECTS" >> $GITHUB_OUTPUT
         id: deploy-step
+
+      - name: Prune Dangling Docker Images
+        if: always()
+        run: |
+          echo "Cleaning up dangling Docker images..."
+          docker image prune -f
 
       - name: Send Discord Alert
         if: always()

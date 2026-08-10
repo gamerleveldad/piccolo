@@ -16,6 +16,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("fantasy_api")
 
+# adding environment variables for Sleeper API and PostgreSQL connection
 SLEEPER_USERNAME = os.getenv("SLEEPER_USERNAME", "your_username")
 SLEEPER_SEASON = os.getenv("SLEEPER_SEASON", "2026")
 SLEEPER_DYNASTY_LEAGUE_ID = os.getenv(
