@@ -1,14 +1,116 @@
-name: Deploy to Piccolo
+name: Piccolo Smart Deploy
 
 on:
   push:
     branches:
-      - main # Or 'master'
+      - main # Change this if your default branch is 'master'
 
 jobs:
   deploy:
-    runs-on: self-hosted # This targets the runner you just built
+    runs-on: [self-hosted, piccolo]
+
     steps:
-      - name: Trigger Deployment Script
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required to accurately compare commits
+
+      - name: Get Changed Directories
+        id: changed-dirs
         run: |
-          /home/howl/Piccolo/deploy.sh ${{ github.event.before }} ${{ github.sha }}
+          if [ "${{ github.event.before }}" == "0000000000000000000000000000000000000000" ]; then
+            echo "First push detected, marking all as changed"
+            echo "dirs=ALL" >> $GITHUB_OUTPUT
+          else
+            # Extracts just the top-level directory names of changed files
+            DIRS=$(git diff --name-only ${{ github.event.before }} ${{ github.event.after }} | cut -d/ -f1 | sort -u | xargs)
+            echo "dirs=$DIRS" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Execute Targeted Deployment
+        run: |
+          # Move to your live production directory
+          cd /home/howl/Piccolo
+          
+          # Pull the latest code to the live environment
+          git pull origin main
+
+          CHANGED_DIRS="${{ steps.changed-dirs.outputs.dirs }}"
+          SERVICES_TO_BUILD=""
+          DEPLOYED_PROJECTS=""
+
+          if [ "$CHANGED_DIRS" == "ALL" ]; then
+              SERVICES_TO_BUILD="ALL"
+          else
+              for DIR in $CHANGED_DIRS; do
+                  case "$DIR" in
+                      "Family_Dashboard_API"|"Family_Dashboard_UI")
+                          SERVICES_TO_BUILD="$SERVICES_TO_BUILD family_dashboard_api family_dashboard_ui"
+                          DEPLOYED_PROJECTS="$DEPLOYED_PROJECTS\n- Family Dashboard"
+                          ;;
+                      "Game_Scanner")
+                          SERVICES_TO_BUILD="$SERVICES_TO_BUILD game_scanner_api game_scanner_daemon game_scanner_ui"
+                          DEPLOYED_PROJECTS="$DEPLOYED_PROJECTS\n- Game Scanner Stack"
+                          ;;
+                      "Crunchyroll_Scanner"|"Crunchyroll_API"|"Crunchyroll_UI")
+                          SERVICES_TO_BUILD="$SERVICES_TO_BUILD crunchyroll_scanner crunchyroll_api crunchyroll_ui"
+                          DEPLOYED_PROJECTS="$DEPLOYED_PROJECTS\n- Crunchyroll Stack"
+                          ;;
+                      "Weather_Daemon"|"Weather_API")
+                          SERVICES_TO_BUILD="$SERVICES_TO_BUILD weather_brief_daemon weather_api"
+                          DEPLOYED_PROJECTS="$DEPLOYED_PROJECTS\n- Weather Stack"
+                          ;;
+                      "Flight_Tracker"|"Flight_API")
+                          SERVICES_TO_BUILD="$SERVICES_TO_BUILD flight_tracker_daemon flight_api"
+                          DEPLOYED_PROJECTS="$DEPLOYED_PROJECTS\n- Flight Tracking Stack"
+                          ;;
+                      "Maverick_FE")
+                          SERVICES_TO_BUILD="$SERVICES_TO_BUILD maverick_front_end"
+                          DEPLOYED_PROJECTS="$DEPLOYED_PROJECTS\n- Maverick Dashboard"
+                          ;;
+                      "Fantasy_Football_API"|"Fantasy_Draft_UI")
+                          SERVICES_TO_BUILD="$SERVICES_TO_BUILD fantasy_football_api fantasy_draft_ui"
+                          DEPLOYED_PROJECTS="$DEPLOYED_PROJECTS\n- Fantasy Football Stack"
+                          ;;
+                      "Tempest_Bridge")
+                          SERVICES_TO_BUILD="$SERVICES_TO_BUILD tempest_bridge"
+                          DEPLOYED_PROJECTS="$DEPLOYED_PROJECTS\n- Tempest Bridge"
+                          ;;
+                      "docker-compose.yml")
+                          SERVICES_TO_BUILD="ALL"
+                          DEPLOYED_PROJECTS="$DEPLOYED_PROJECTS\n- Core Infrastructure"
+                          ;;
+                  esac
+              done
+          fi
+
+          if [ "$SERVICES_TO_BUILD" == "ALL" ]; then
+              echo "Core change detected. Building all services..."
+              docker compose up -d --build
+          elif [ -n "$SERVICES_TO_BUILD" ]; then
+              echo "Building targeted services: $SERVICES_TO_BUILD"
+              UNIQUE_SERVICES=$(echo "$SERVICES_TO_BUILD" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+              docker compose up -d --build $UNIQUE_SERVICES
+          else
+              echo "No container rebuilds necessary."
+              DEPLOYED_PROJECTS="\n- Minor File Updates (No Containers Rebuilt)"
+          fi
+
+          # Output for the next Discord step
+          echo "projects=$DEPLOYED_PROJECTS" >> $GITHUB_OUTPUT
+        id: deploy-step
+
+      - name: Send Discord Alert
+        if: always()
+        run: |
+          PAYLOAD=$(cat <<EOF
+          {
+            "embeds": [{
+              "title": "Piccolo Deployment Status: ${{ job.status }}",
+              "color": ${{ job.status == 'success' && 3066993 || 15158332 }},
+              "description": "**Deployed Projects:**${{ steps.deploy-step.outputs.projects }}"
+            }]
+          }
+          EOF
+          )
+          curl -H "Content-Type: application/json" -d "$PAYLOAD" ${{ secrets.DISCORD_DEPLOY_WEBHOOK }}
