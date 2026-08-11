@@ -5,21 +5,21 @@ networks:
 
 services:
   postgres_db:
-      image: postgres:15-alpine
-      container_name: postgres_db
-      restart: unless-stopped
-      environment:
-        POSTGRES_USER: ${POSTGRES_USER}
-        POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-        POSTGRES_DB: ${POSTGRES_DB}
-      volumes:
-        # Maps local directory to persist database data
-        - ./data/postgres:/var/lib/postgresql/data
-        - ./data/postgres-init/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh
-      networks:
-        - piccolo_net
- 
-# --- Fantasy Football API Service Update ---
+    image: postgres:15-alpine
+    container_name: postgres_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      # Maps local directory to persist database data
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./data/postgres-init/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh
+    networks:
+      - piccolo_net
+
+  # --- Fantasy Football API Service Update ---
   fantasy_football_api:
     build:
       context: ./Fantasy_Football_API
@@ -81,7 +81,7 @@ services:
       context: ./Family_Dashboard_UI
       dockerfile: Dockerfile
       args:
-        - VITE_BACKEND_HOST=192.168.4.55  # --- 192.168.4.55
+        - VITE_BACKEND_HOST=192.168.4.55 # --- 192.168.4.55
         - VITE_BACKEND_PORT=8000
         - VITE_FANTASY_API_URL=http://fantasy_football_api:8000
     container_name: howls-dashboard-ui
@@ -143,22 +143,22 @@ services:
       - piccolo_net
 
   game_scanner_ui:
-      build:
-        context: ./Game_Scanner/src/frontend  # Path to your React UI directory
-        dockerfile: Dockerfile
-      container_name: game_scanner_ui
-      restart: unless-stopped
-      ports:
-        - "8082:80"  # Exposes the UI on port 8082 to avoid collisions
-      environment:
-        - POSTGRES_USER=${POSTGRES_USER}
-        - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-        - POSTGRES_DB=game_scanner_db
-        - POSTGRES_HOST=postgres_db
-      depends_on:
-        - postgres_db
-      networks:
-        - piccolo_net
+    build:
+      context: ./Game_Scanner/src/frontend # Path to your React UI directory
+      dockerfile: Dockerfile
+    container_name: game_scanner_ui
+    restart: unless-stopped
+    ports:
+      - "8082:80" # Exposes the UI on port 8082 to avoid collisions
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=game_scanner_db
+      - POSTGRES_HOST=postgres_db
+    depends_on:
+      - postgres_db
+    networks:
+      - piccolo_net
 
   # --- Persistent Crunchyroll Scanner Daemon ---
   crunchyroll_scanner:
@@ -216,7 +216,6 @@ services:
       - /app/node_modules
     networks:
       - piccolo_net
-
 
   # --- Uptime Kuma Monitoring ---
   uptime_kuma:
@@ -451,21 +450,21 @@ services:
       - ./data/dnsmasq.d:/etc/dnsmasq.d
     networks:
       - piccolo_net
-# --- ADS-B / SDR Decoder Hub ---
+  # --- ADS-B / SDR Decoder Hub ---
   ultrafeeder:
     image: ghcr.io/sdr-enthusiasts/docker-adsb-ultrafeeder
     container_name: ultrafeeder
     hostname: ultrafeeder
     restart: unless-stopped
     device_cgroup_rules:
-      - 'c 189:* rwm'
+      - "c 189:* rwm"
     volumes:
       - /dev/bus/usb:/dev/bus/usb
       - ./data/ultrafeeder:/var/globe_history
     ports:
-      - "8085:80"       # Tar1090 web UI & JSON endpoints
-      - "30005:30005"   # Beast format output (optional: for direct TCP streams)
-      - "30003:30003"   # SBS BaseStation format (optional: human-readable ASCII feed)
+      - "8085:80" # Tar1090 web UI & JSON endpoints
+      - "30005:30005" # Beast format output (optional: for direct TCP streams)
+      - "30003:30003" # SBS BaseStation format (optional: human-readable ASCII feed)
     environment:
       - TZ=${TZ:-America/New_York}
       - LAT=${HOME_LATITUDE}
@@ -495,13 +494,27 @@ services:
       - BEASTHOST=ultrafeeder
       - LAT=${HOME_LATITUDE}
       - LONG=${HOME_LONGITUDE}
-      - ALT=85ft                     # Add this line
-      - ALLOW_MLAT=yes               # Explicitly enable MLAT
+      - ALT=85ft # Add this line
+      - ALLOW_MLAT=yes # Explicitly enable MLAT
       - FEEDER_ID=${PIAWARE_FEEDER_ID}
     networks:
       - piccolo_net
 
-# --- Simple Map Preview ---
+  # --- Flightradar24 Feeder ---
+  fr24feed:
+    image: ghcr.io/sdr-enthusiasts/docker-flightradar24:latest
+    container_name: fr24feed
+    restart: unless-stopped
+    depends_on:
+      - ultrafeeder
+    environment:
+      - TZ=${TZ:-America/New_York}
+      - BEASTHOST=ultrafeeder
+      - FR24KEY=${FR24_SHARING_KEY}
+    networks:
+      - piccolo_net
+
+  # --- Simple Map Preview ---
   map_preview:
     image: nginx:alpine
     container_name: map_preview
@@ -512,8 +525,8 @@ services:
       - ./Map_Preview/html:/usr/share/nginx/html:ro
     networks:
       - piccolo_net
-      
-# --- MQTT Message Broker ---
+
+  # --- MQTT Message Broker ---
   mosquitto:
     image: eclipse-mosquitto:latest
     container_name: mosquitto
@@ -525,7 +538,7 @@ services:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
     networks:
       - piccolo_net
-    # Note: We removed the custom `command` and `environment` variables 
+    # Note: We removed the custom `command` and `environment` variables
     # because the container natively looks for the config file at the path we just mounted.
 
   # --- UDP to MQTT Bridge ---
@@ -540,10 +553,10 @@ services:
     depends_on:
       - mosquitto
     ports:
-      - "50222:50222/udp" 
+      - "50222:50222/udp"
     networks:
       - piccolo_net
-# --- New Fantasy Draft UI ---
+  # --- New Fantasy Draft UI ---
   fantasy_draft_ui:
     build:
       context: ./Fantasy_Draft_UI
