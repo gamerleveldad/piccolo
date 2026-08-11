@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Plane, X } from 'lucide-react';
+import { Plane, X } from "lucide-react";
+import { useEffect, useState } from "react";
 
 export default function AircraftTable() {
   const [aircraft, setAircraft] = useState([]);
@@ -8,16 +8,20 @@ export default function AircraftTable() {
   useEffect(() => {
     const fetchTableData = async () => {
       try {
-        const res = await fetch(`http://${window.location.hostname}:8085/data/aircraft.json`);
+        const res = await fetch(
+          `http://${window.location.hostname}:8085/data/aircraft.json`,
+        );
         if (!res.ok) return;
         const data = await res.json();
-        
+
         // Filter out ground stations or invalid hexes
-        const validAircraft = (data.aircraft || []).filter(ac => ac.hex && ac.hex.indexOf('~') === -1);
-        
+        const validAircraft = (data.aircraft || []).filter(
+          (ac) => ac.hex && ac.hex.indexOf("~") === -1,
+        );
+
         // Sort descending by altitude
         validAircraft.sort((a, b) => (b.alt_baro || 0) - (a.alt_baro || 0));
-        
+
         setAircraft(validAircraft);
       } catch (err) {
         console.warn("Aircraft table fetch error:", err);
@@ -41,8 +45,8 @@ export default function AircraftTable() {
 
   // Check for emergency squawks or emergency flags
   const isEmergency = (ac) => {
-    if (ac.emergency && ac.emergency !== 'none') return true;
-    if (['7500', '7600', '7700'].includes(ac.squawk)) return true;
+    if (ac.emergency && ac.emergency !== "none") return true;
+    if (["7500", "7600", "7700"].includes(ac.squawk)) return true;
     return false;
   };
 
@@ -50,7 +54,9 @@ export default function AircraftTable() {
     <div className="bg-[#162032] border border-slate-700/50 rounded-lg p-4 mt-6 shadow-lg flex flex-col h-96">
       <div className="flex items-center gap-2 mb-4 shrink-0">
         <Plane className="text-accentBlue w-5 h-5" />
-        <h2 className="text-lg font-semibold text-textSilver">Local Traffic (Raw Feed)</h2>
+        <h2 className="text-lg font-semibold text-textSilver">
+          Local Traffic (Raw Feed)
+        </h2>
         <span className="ml-auto text-xs font-bold bg-slate-800 text-slate-400 px-2 py-1 rounded">
           {aircraft.length} Aircraft
         </span>
@@ -78,24 +84,24 @@ export default function AircraftTable() {
               const emergencyActive = isEmergency(ac);
 
               // Emergency formatting logic
-              const rowStyle = emergencyActive 
-                ? 'bg-red-900/50 text-red-100 animate-pulse font-semibold border-l-4 border-red-500' 
-                : 'hover:bg-slate-700/30 transition-colors';
+              const rowStyle = emergencyActive
+                ? "bg-red-900/50 text-red-100 animate-pulse font-semibold border-l-4 border-red-500"
+                : "hover:bg-slate-700/30 transition-colors";
 
               return (
-                <tr 
-                  key={ac.hex} 
+                <tr
+                  key={ac.hex}
                   onClick={() => setSelectedRawData(ac)}
                   className={`cursor-pointer ${rowStyle}`}
                 >
                   {/* Airline Logo */}
                   <td className="px-3 py-2 w-16">
                     {airlineCode ? (
-                      <img 
-                        src={`/tails/${airlineCode}.svg`} 
+                      <img
+                        src={`/tails/${airlineCode}.svg`}
                         alt={airlineCode}
                         className="h-6 w-auto object-contain bg-slate-100 rounded px-1"
-                        onError={(e) => e.target.style.display = 'none'}
+                        onError={(e) => (e.target.style.display = "none")}
                       />
                     ) : (
                       <span className="text-slate-600 text-xs">N/A</span>
@@ -103,36 +109,64 @@ export default function AircraftTable() {
                   </td>
 
                   {/* Callsign & Reg */}
-                  <td className="px-3 py-2 font-bold text-slate-200">{ac.flight?.trim() || '---'}</td>
-                  <td className="px-3 py-2">{ac.r || '---'}</td>
+                  <td className="px-3 py-2 font-bold text-slate-200">
+                    {ac.flight?.trim() || "---"}
+                  </td>
+                  <td className="px-3 py-2">{ac.r || "---"}</td>
 
                   {/* Aircraft Specs (Type & Description Next to Each Other) */}
-                  <td className="px-3 py-2 text-amber-400 font-mono text-xs">{ac.t || '---'}</td>
-                  <td className="px-3 py-2 text-xs max-w-[180px] truncate" title={ac.desc}>
-                    {ac.desc || '---'}
+                  <td className="px-3 py-2 text-amber-400 font-mono text-xs">
+                    {ac.t || "---"}
+                  </td>
+                  <td
+                    className="px-3 py-2 text-xs max-w-[180px] truncate"
+                    title={ac.desc}
+                  >
+                    {ac.desc || "---"}
                   </td>
 
                   {/* Flight Dynamics */}
                   <td className="px-3 py-2">
-                    {ac.alt_baro !== undefined ? (ac.alt_baro === 'ground' ? 'GND' : `${ac.alt_baro.toLocaleString()} ft`) : '---'}
+                    {ac.alt_baro !== undefined
+                      ? ac.alt_baro === "ground"
+                        ? "GND"
+                        : `${ac.alt_baro.toLocaleString()} ft`
+                      : "---"}
                   </td>
-                  <td className="px-3 py-2">{ac.track != null ? `${Math.round(ac.track)}°` : '---'}</td>
+                  <td className="px-3 py-2">
+                    {ac.track != null ? `${Math.round(ac.track)}°` : "---"}
+                  </td>
                   <td className="px-3 py-2">
                     {ac.baro_rate != null ? (
-                      <span className={ac.baro_rate > 0 ? 'text-emerald-400' : ac.baro_rate < 0 ? 'text-sky-400' : ''}>
-                        {ac.baro_rate > 0 ? `+${ac.baro_rate}` : ac.baro_rate} fpm
+                      <span
+                        className={
+                          ac.baro_rate > 0
+                            ? "text-emerald-400"
+                            : ac.baro_rate < 0
+                              ? "text-sky-400"
+                              : ""
+                        }
+                      >
+                        {ac.baro_rate > 0 ? `+${ac.baro_rate}` : ac.baro_rate}{" "}
+                        fpm
                       </span>
-                    ) : '---'}
+                    ) : (
+                      "---"
+                    )}
                   </td>
 
                   {/* Distance & Direction */}
                   <td className="px-3 py-2 font-mono text-xs">
-                    {ac.r_dst != null && ac.r_dir != null ? `${ac.r_dst.toFixed(1)} NM @ ${Math.round(ac.r_dir)}°` : '---'}
+                    {ac.r_dst != null && ac.r_dir != null
+                      ? `${ac?.r_dst?.toFixed(1) ?? "---"} NM @ ${Math.round(ac.r_dir)}°`
+                      : "---"}
                   </td>
 
                   {/* Coordinates */}
                   <td className="px-3 py-2 font-mono text-xs text-slate-400">
-                    {ac.lat != null && ac.lon != null ? `${ac.lat.toFixed(4)}, ${ac.lon.toFixed(4)}` : 'Hidden'}
+                    {ac.lat != null && ac.lon != null
+                      ? `${ac?.lat?.toFixed(4) ?? "---"}°, ${ac?.lon?.toFixed(4) ?? "---"}°`
+                      : "Hidden"}
                   </td>
                 </tr>
               );
@@ -147,9 +181,10 @@ export default function AircraftTable() {
           <div className="bg-[#162032] border border-slate-600 rounded-lg shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between p-4 border-b border-slate-700 bg-slate-800/50 rounded-t-lg">
               <h3 className="font-bold text-slate-200">
-                Raw JSON: {selectedRawData.flight?.trim() || selectedRawData.hex}
+                Raw JSON:{" "}
+                {selectedRawData.flight?.trim() || selectedRawData.hex}
               </h3>
-              <button 
+              <button
                 onClick={() => setSelectedRawData(null)}
                 className="p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors"
               >

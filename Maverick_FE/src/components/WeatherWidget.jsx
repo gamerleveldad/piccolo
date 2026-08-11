@@ -266,7 +266,7 @@ export default function WeatherWidget() {
             <div>
               <p className="text-slate-500">Rain (Today / Rate)</p>
               <p className="font-semibold text-slate-200">
-                {current.precip_in != null ? current.precip_in.toFixed(2) : '0.00'} in
+                {current.precip_in != null ? current?.precip_in?.toFixed(2) ?? '0.00'} in
                 <span className="text-slate-400 text-xs font-normal"> / {liveTelemetry.rain_rate_in_hr ?? 0} in/hr</span>
               </p>
             </div>
