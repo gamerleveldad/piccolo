@@ -3,21 +3,21 @@
 """
 WeatherFlow Collector Data Handlers
 
-This module forms a part of the WeatherFlow Collector system, a robust application designed to 
-gather, process, and store weather data from various sources. It caters to diverse data types 
+This module forms a part of the WeatherFlow Collector system, a robust application designed to
+gather, process, and store weather data from various sources. It caters to diverse data types
 and formats, making it an integral component of the WeatherFlow ecosystem.
 
 Key Features:
-- Multi-source data handling: Capable of processing data from UDP broadcasts, WebSocket 
+- Multi-source data handling: Capable of processing data from UDP broadcasts, WebSocket
   streams, and REST API responses.
-- Data normalization: Transforms disparate data formats into a unified structure suitable for 
+- Data normalization: Transforms disparate data formats into a unified structure suitable for
   storage and analysis.
-- InfluxDB integration: Seamlessly stores processed data in InfluxDB, ensuring efficient 
+- InfluxDB integration: Seamlessly stores processed data in InfluxDB, ensuring efficient
   data management and retrieval.
 
 Usage:
-This module is used within the WeatherFlow Collector system and requires data inputs from 
-UDP broadcasts, WebSocket connections, or RESTful APIs. It should be initialized with 
+This module is used within the WeatherFlow Collector system and requires data inputs from
+UDP broadcasts, WebSocket connections, or RESTful APIs. It should be initialized with
 appropriate configurations for each data source and the InfluxDB instance.
 
 Dependencies:
@@ -34,42 +34,38 @@ Classes:
 - InfluxDBStorage: Interfaces with InfluxDB for data storage.
 
 Methods:
-Each class contains specific methods for processing its designated data type and communicating 
-with the InfluxDB. Key methods include process_data(), handle_evt_strike(), handle_obs_st(), 
+Each class contains specific methods for processing its designated data type and communicating
+with the InfluxDB. Key methods include process_data(), handle_evt_strike(), handle_obs_st(),
 and save_data().
 
 Author: [Your Name or Team's Name]
 Last Update: [Last Update Date]
 
 Note:
-This module is part of the WeatherFlow Collector system and is not intended to be used as a 
-standalone script. It requires a running instance of InfluxDB and access to WeatherFlow data 
+This module is part of the WeatherFlow Collector system and is not intended to be used as a
+standalone script. It requires a running instance of InfluxDB and access to WeatherFlow data
 streams.
 """
 
+import asyncio
+import inspect
+import json
+import os
+import time
+import traceback
+from datetime import datetime, timedelta
+
 import config
-
-from influxdb_client import InfluxDBClient, Point, WriteOptions, DeleteService
+import logger
+import pytz
+import utils.utils as utils
+from influxdb_client import DeleteService, InfluxDBClient, Point, WriteOptions
 from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync
-
 
 # from influxdb_client.client.write_api import ASYNCHRONOUS
 
 
 # Import necessary libraries for InfluxDB communication and others
-
-import time
-import pytz
-from datetime import datetime, timedelta
-import json
-import inspect
-import os
-import asyncio
-import traceback
-
-
-import logger
-import utils.utils as utils
 
 
 logger_InfluxDBStorage = logger.get_module_logger(__name__ + ".InfluxDBStorage")
@@ -161,7 +157,7 @@ class InfluxDBStorage:
 
                 # Normalize fields before writing to the database
                 fields = utils.normalize_fields(fields)
-                fields.pop("time",None)
+                fields.pop("time", None)
                 # If timestamp is not provided, use current time
                 if timestamp is None:
                     timestamp = int(time.time())
@@ -175,7 +171,7 @@ class InfluxDBStorage:
                     point.tag(tag, value)
                 for field, value in fields.items():
                     point.field(field, value)
-                point.time(timestamp, write_precision="s")
+                point.time(int(timestamp), write_precision="s")
 
                 # Add the primary data point to the points list
                 points.append(point)
@@ -195,7 +191,7 @@ class InfluxDBStorage:
                         secondary_point.tag(tag, value)
                     for field, value in fields.items():
                         secondary_point.field(field, value)
-                    secondary_point.time(timestamp, write_precision="s")
+                    secondary_point.time(int(timestamp), write_precision="s")
 
                     # Add the secondary data point to the points list
                     points.append(secondary_point)
@@ -273,7 +269,7 @@ class InfluxDBStorage:
             # Normalize fields before writing to the database
             fields = utils.normalize_fields(fields)
             # logger_InfluxDBStorage.debug(f"Normalized Fields: {fields}")
-            fields.pop("time",None)
+            fields.pop("time", None)
             if timestamp is None:
                 timestamp = int(time.time())  # Current time in epoch seconds
                 logger_InfluxDBStorage.debug(
@@ -289,7 +285,7 @@ class InfluxDBStorage:
                 point.tag(tag, value)
             for field, value in fields.items():
                 point.field(field, value)
-            point.time(timestamp, write_precision="s")
+            point.time(int(timestamp), write_precision="s")
 
             await self.write_api.write(
                 bucket=self.bucket, record=point, write_precision="s"
@@ -313,7 +309,7 @@ class InfluxDBStorage:
                     secondary_point.tag(tag, value)
                 for field, value in fields.items():
                     secondary_point.field(field, value)
-                secondary_point.time(timestamp, write_precision="s")
+                secondary_point.time(int(timestamp), write_precision="s")
 
                 await self.write_api.write(
                     bucket=self.bucket, record=secondary_point, write_precision="s"
@@ -453,9 +449,7 @@ class InfluxDBStorage:
         # Only perform dumping if data structure tracking is enabled
         if config.WEATHERFLOW_COLLECTOR_ENABLE_INFLUXDB_DATA_STRUCTURE_TRACKING:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            directory = (
-                config.WEATHERFLOW_COLLECTOR_ENABLE_INFLUXDB_DATA_STRUCTURE_TRACKING_SAVE_DIR
-            )
+            directory = config.WEATHERFLOW_COLLECTOR_ENABLE_INFLUXDB_DATA_STRUCTURE_TRACKING_SAVE_DIR
             filename = f"{directory}/influxdb_relationships_{timestamp}.json"
 
             # Check if directory exists, if not, create it
