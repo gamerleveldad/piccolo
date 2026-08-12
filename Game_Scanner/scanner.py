@@ -41,29 +41,42 @@ def call_gemini_with_retry(contents, model='gemini-3.5-flash', max_retries=6, in
                 print(f"FATAL: Gemini API failed after {max_retries} attempts.")
                 raise e
 
-def get_rawg_data(rawg_id):
+def get_rawg_data(rawg_id, max_retries=3):
     if not rawg_id or rawg_id == "custom_search":
         return None
     api_key = os.getenv("RAWG_API_KEY")
     url = "https://api.rawg.io/api/games"
-    response = requests.get(f"{url}/{rawg_id}", params={"key": api_key})
-    if response.status_code == 200:
-        data = response.json()
-        return {
-            "name": data.get("name"),
-            "released": data.get("released"),
-            "metacritic": data.get("metacritic"),
-            "updated": data.get("updated"),
-            "description": data.get("description_raw", "")[:800]
-        }
-    return None
+    
+    for attempt in range(max_retries):
+        try:
+            # Added a timeout so it doesn't hang indefinitely 
+            response = requests.get(f"{url}/{rawg_id}", params={"key": api_key}, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    "name": data.get("name"),
+                    "released": data.get("released"),
+                    "metacritic": data.get("metacritic"),
+                    "updated": data.get("updated"),
+                    "description": data.get("description_raw", "")[:800]
+                }
+            return None
+            
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries - 1:
+                print(f"Network blip reaching RAWG (Attempt {attempt + 1}/{max_retries}). Retrying in 5s...")
+                time.sleep(5)
+            else:
+                print(f"FATAL: Could not resolve RAWG API for ID {rawg_id} after {max_retries} attempts.")
+                return None
 
-def get_youtube_data(channel_id):
+def get_youtube_data(channel_id, max_retries=3):
     if not channel_id:
         return None
     api_key = os.getenv("YOUTUBE_API_KEY")
     url = "https://www.googleapis.com/youtube/v3/search"
-    # Query for the two most recently uploaded videos on the official channel
+    
     params = {
         "part": "snippet",
         "channelId": channel_id,
@@ -72,18 +85,29 @@ def get_youtube_data(channel_id):
         "type": "video",
         "key": api_key
     }
-    response = requests.get(url, params=params)
-    if response.status_code == 200:
-        videos = []
-        for item in response.json().get("items", []):
-            snippet = item.get("snippet", {})
-            videos.append({
-                "video_title": snippet.get("title"),
-                "published_at": snippet.get("publishedAt"),
-                "video_url": f"https://www.youtube.com/watch?v={item['id']['videoId']}"
-            })
-        return videos
-    return None
+
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, params=params, timeout=10)
+            if response.status_code == 200:
+                videos = []
+                for item in response.json().get("items", []):
+                    snippet = item.get("snippet", {})
+                    videos.append({
+                        "video_title": snippet.get("title"),
+                        "published_at": snippet.get("publishedAt"),
+                        "video_url": f"https://www.youtube.com/watch?v={item['id']['videoId']}"
+                    })
+                return videos
+            return None
+
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries - 1:
+                print(f"Network blip reaching YouTube API (Attempt {attempt + 1}/{max_retries}). Retrying in 5s...")
+                time.sleep(5)
+            else:
+                print(f"FATAL: Could not resolve YouTube API for Channel ID {channel_id} after {max_retries} attempts.")
+                return None
 
 def evaluate_game_batch(batch_data, scan_type):
     from datetime import datetime
