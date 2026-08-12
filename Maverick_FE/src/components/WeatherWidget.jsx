@@ -1,4 +1,4 @@
-import { CloudRain, Droplets, Wind, Zap } from "lucide-react";
+import { CloudRain, Droplets, Wind, X, Zap } from "lucide-react";
 import mqtt from "mqtt";
 import { useEffect, useState } from "react";
 
@@ -336,9 +336,6 @@ export default function WeatherWidget() {
                   ))}
                 </div>
               )}
-              <h2 className="text-sm font-medium text-slate-400">
-                Local Telemetry
-              </h2>
             </div>
 
             <div className="flex items-center gap-3 mt-1">
