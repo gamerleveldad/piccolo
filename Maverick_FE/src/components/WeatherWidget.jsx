@@ -25,11 +25,102 @@ const getMiseryDotColor = (val) => {
   return "bg-red-500 shadow-[0_0_6px_#ef4444] animate-pulse";
 };
 
+const getAlertStyling = (eventStr) => {
+  const lowerEvent = eventStr.toLowerCase();
+  let icon = "wi wi-info-circle"; // Fallback icon
+  let color = "text-slate-300";
+  let animation = "";
+
+  if (lowerEvent.includes("special weather statement")) {
+    icon = "wi wi-thunderstorm";
+    color = "text-yellow-400";
+  } else if (lowerEvent.includes("severe thunderstorm warning")) {
+    icon = "wi wi-thunderstorm";
+    color = "text-red-500";
+    animation = "animate-pulse";
+  } else if (lowerEvent.includes("tornado watch")) {
+    icon = "wi wi-tornado";
+    color = "text-yellow-400";
+  } else if (lowerEvent.includes("tornado warning")) {
+    icon = "wi wi-tornado";
+    color = "text-red-500";
+    animation = "animate-pulse";
+  } else if (lowerEvent.includes("tropical storm watch")) {
+    icon = "wi wi-storm-warning";
+    color = "text-yellow-400";
+  } else if (lowerEvent.includes("tropical storm warning")) {
+    icon = "wi wi-storm-warning";
+    color = "text-red-500";
+  } else if (lowerEvent.includes("hurricane watch")) {
+    icon = "wi wi-hurricane-warning";
+    color = "text-yellow-400";
+  } else if (lowerEvent.includes("hurricane warning")) {
+    icon = "wi wi-hurricane-warning";
+    color = "text-red-500";
+    animation = "animate-pulse";
+  } else if (lowerEvent.includes("extreme heat watch")) {
+    icon = "wi wi-hot";
+    color = "text-yellow-400";
+  } else if (lowerEvent.includes("extreme heat warning")) {
+    icon = "wi wi-hot";
+    color = "text-red-500";
+    animation = "animate-pulse";
+  } else if (lowerEvent.includes("heat advisory")) {
+    icon = "wi wi-hot";
+    color = "text-yellow-400";
+  } else if (lowerEvent.includes("dense fog")) {
+    icon = "wi wi-fog";
+    color = "text-slate-400";
+  } else if (lowerEvent.includes("freeze watch")) {
+    icon = "wi wi-snowflake-cold";
+    color = "text-blue-400";
+  } else if (lowerEvent.includes("freeze warning")) {
+    icon = "wi wi-snowflake-cold";
+    color = "text-cyan-300";
+  } else if (lowerEvent.includes("cold weather advisory")) {
+    icon = "wi wi-thermometer-exterior";
+    color = "text-blue-400";
+  } else if (lowerEvent.includes("extreme cold warning")) {
+    icon = "wi wi-thermometer-exterior";
+    color = "text-cyan-300";
+  } else if (lowerEvent.includes("high wind watch")) {
+    icon = "wi wi-strong-wind";
+    color = "text-yellow-400";
+  } else if (lowerEvent.includes("high wind warning")) {
+    icon = "wi wi-strong-wind";
+    color = "text-red-500";
+  } else if (lowerEvent.includes("red flag")) {
+    icon = "wi wi-fire";
+    color = "text-red-500";
+  } else if (lowerEvent.includes("flash flood warning")) {
+    icon = "wi wi-flood";
+    color = "text-red-500";
+    animation = "animate-pulse";
+  } else if (lowerEvent.includes("flood warning")) {
+    icon = "wi wi-flood";
+    color = "text-red-500";
+  } else if (lowerEvent.includes("flood watch")) {
+    icon = "wi wi-flood";
+    color = "text-yellow-400";
+  }
+  // Generic fallbacks just in case NWS throws a curveball
+  else if (lowerEvent.includes("warning")) {
+    color = "text-red-500";
+    animation = "animate-pulse";
+  } else if (lowerEvent.includes("watch") || lowerEvent.includes("advisory")) {
+    color = "text-yellow-400";
+  }
+
+  return { icon, color, animation };
+};
+
 export default function WeatherWidget() {
   const [current, setCurrent] = useState(null);
   const [hourlyForecast, setHourlyForecast] = useState([]);
   const [dailyForecast, setDailyForecast] = useState([]);
-  const [localAlert, setLocalAlert] = useState(null);
+  const [activeAlerts, setActiveAlerts] = useState([]);
+  const [selectedAlert, setSelectedAlert] = useState(null);
+  const USE_BUTTON_BORDERS = true; // Set to false to remove the borders around icons
   const [loading, setLoading] = useState(true);
   const [tropicsOutlook, setTropicsOutlook] = useState(null);
   const [activeStorms, setActiveStorms] = useState([]);
@@ -155,24 +246,23 @@ export default function WeatherWidget() {
       const alertsRes = await fetch(NWS_ALERTS_URL);
       if (alertsRes.ok) {
         const alertData = await alertsRes.json();
-        const severeFeatures =
-          alertData.features?.filter((feature) => {
-            const event = feature.properties.event;
-            return (
-              event === "Severe Thunderstorm Warning" ||
-              event === "Tornado Warning" ||
-              event === "Flash Flood Warning" ||
-              event === "Special Weather Statement"
-            );
-          }) || [];
+        const features = alertData.features || [];
 
-        if (severeFeatures.length > 0) {
-          const activeEvent = severeFeatures[0].properties.event;
-          const isWarning = activeEvent.toLowerCase().includes("warning");
-          setLocalAlert({ event: activeEvent, isWarning });
-        } else {
-          setLocalAlert(null);
-        }
+        const parsedAlerts = features.map((feature) => {
+          const event = feature.properties.event;
+          const description = feature.properties.description;
+          const instruction = feature.properties.instruction;
+          const styling = getAlertStyling(event);
+
+          return {
+            id: feature.id || Math.random().toString(36).substring(2, 9),
+            event,
+            description,
+            instruction,
+            ...styling,
+          };
+        });
+        setActiveAlerts(parsedAlerts);
       }
     } catch (err) {
       console.error("Failed to fetch weather telemetry:", err);
@@ -229,15 +319,26 @@ export default function WeatherWidget() {
         <div className="flex justify-between items-center mb-4">
           <div>
             <div className="flex items-center gap-2">
+              {/* ALERTS ICON BAR */}
+              {activeAlerts.length > 0 && (
+                <div className="bg-[#1e293b] border border-slate-700/50 rounded-lg p-2 flex flex-wrap gap-2 items-center shadow-inner">
+                  {activeAlerts.map((alert) => (
+                    <button
+                      key={alert.id}
+                      onClick={() => setSelectedAlert(alert)}
+                      title={alert.event}
+                      className={`p-1.5 flex items-center justify-center transition-all ${alert.animation}
+                          ${USE_BUTTON_BORDERS ? "border border-slate-600 rounded bg-slate-800 hover:bg-slate-700 shadow-sm" : "hover:scale-110"}
+                        `}
+                    >
+                      <i className={`${alert.icon} text-xl ${alert.color}`} />
+                    </button>
+                  ))}
+                </div>
+              )}
               <h2 className="text-sm font-medium text-slate-400">
                 Local Telemetry
               </h2>
-              {localAlert && (
-                <i
-                  className={`wi wi-thunderstorm text-xl animate-pulse ${localAlert.isWarning ? "text-red-500" : "text-amber-400"}`}
-                  title={localAlert.event}
-                />
-              )}
             </div>
 
             <div className="flex items-center gap-3 mt-1">
@@ -547,6 +648,52 @@ export default function WeatherWidget() {
           </div>
         )}
       </div>
+      {/* ALERT DETAILS MODAL */}
+      {selectedAlert && (
+        <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#162032] border border-slate-600 rounded-lg shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+            <div className="flex items-center gap-3 p-4 border-b border-slate-700 bg-slate-800/50 rounded-t-lg shrink-0">
+              <i
+                className={`${selectedAlert.icon} text-2xl ${selectedAlert.color}`}
+              />
+              <h3
+                className={`font-bold text-lg uppercase tracking-wide ${selectedAlert.color}`}
+              >
+                {selectedAlert.event}
+              </h3>
+              <button
+                onClick={() => setSelectedAlert(null)}
+                className="ml-auto p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 overflow-auto space-y-5 text-sm text-slate-300">
+              {selectedAlert.description && (
+                <div>
+                  <h4 className="font-bold text-slate-400 uppercase text-xs mb-1">
+                    Details
+                  </h4>
+                  <p className="whitespace-pre-wrap leading-relaxed">
+                    {selectedAlert.description}
+                  </p>
+                </div>
+              )}
+              {selectedAlert.instruction && (
+                <div>
+                  <h4 className="font-bold text-slate-400 uppercase text-xs mb-1">
+                    Instructions
+                  </h4>
+                  <p className="whitespace-pre-wrap leading-relaxed border-l-2 border-amber-500 pl-3 italic">
+                    {selectedAlert.instruction}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
