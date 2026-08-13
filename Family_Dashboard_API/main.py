@@ -419,6 +419,76 @@ def get_calendar_credentials():
     return creds
 
 
+YV_BOOK_MAP = {
+    "GEN": "Genesis",
+    "EXO": "Exodus",
+    "LEV": "Leviticus",
+    "NUM": "Numbers",
+    "DEU": "Deuteronomy",
+    "JOS": "Joshua",
+    "JDG": "Judges",
+    "RUT": "Ruth",
+    "1SA": "1 Samuel",
+    "2SA": "2 Samuel",
+    "1KI": "1 Kings",
+    "2KI": "2 Kings",
+    "1CH": "1 Chronicles",
+    "2CH": "2 Chronicles",
+    "EZR": "Ezra",
+    "NEH": "Nehemiah",
+    "EST": "Esther",
+    "JOB": "Job",
+    "PSA": "Psalm",
+    "PRO": "Proverbs",
+    "ECC": "Ecclesiastes",
+    "SNG": "Song of Solomon",
+    "ISA": "Isaiah",
+    "JER": "Jeremiah",
+    "LAM": "Lamentations",
+    "EZK": "Ezekiel",
+    "DAN": "Daniel",
+    "HOS": "Hosea",
+    "JOL": "Joel",
+    "AMO": "Amos",
+    "OBA": "Obadiah",
+    "JON": "Jonah",
+    "MIC": "Micah",
+    "NAM": "Nahum",
+    "HAB": "Habakkuk",
+    "ZEP": "Zephaniah",
+    "HAG": "Haggai",
+    "ZEC": "Zechariah",
+    "MAL": "Malachi",
+    "MAT": "Matthew",
+    "MRK": "Mark",
+    "LUK": "Luke",
+    "JHN": "John",
+    "ACT": "Acts",
+    "ROM": "Romans",
+    "1CO": "1 Corinthians",
+    "2CO": "2 Corinthians",
+    "GAL": "Galatians",
+    "EPH": "Ephesians",
+    "PHP": "Philippians",
+    "COL": "Colossians",
+    "1TH": "1 Thessalonians",
+    "2TH": "2 Thessalonians",
+    "1TI": "1 Timothy",
+    "2TI": "2 Timothy",
+    "TIT": "Titus",
+    "PHM": "Philemon",
+    "HEB": "Hebrews",
+    "JAS": "James",
+    "1PE": "1 Peter",
+    "2PE": "2 Peter",
+    "1JN": "1 John",
+    "2JN": "2 John",
+    "3JN": "3 John",
+    "JUD": "Jude",
+    "REV": "Revelation",
+}
+
+
 async def poll_daily_verse():
     logger.info("YouVersion + NLT Daily Verse sync worker online.")
     while True:
@@ -439,7 +509,6 @@ async def poll_daily_verse():
                 async with session.get(yv_url, headers=headers, timeout=5) as resp:
                     if resp.status == 200:
                         yv_data = await resp.json()
-                        # Extract the passage ID (e.g., "1CH.16.11")
                         passage_id = yv_data.get("passage_id")
                         logger.info(f"YouVersion API success. Passage ID: {passage_id}")
                     else:
@@ -449,15 +518,16 @@ async def poll_daily_verse():
                         )
 
                 if passage_id:
-                    # 2. Convert YouVersion format (1CH.16.11) to NLT format (1CH.16:11)
+                    # 2. Translate YouVersion format (1CH.16.11) to plain English (1 Chronicles 16:11)
                     parts = passage_id.split(".")
                     if len(parts) >= 3:
-                        # Join all parts except the last with a dot, then append the verse with a colon
-                        nlt_ref = f"{'.'.join(parts[:-1])}:{parts[-1]}"
+                        book_code = parts[0].upper()
+                        book_name = YV_BOOK_MAP.get(book_code, book_code)
+                        nlt_ref = f"{book_name} {parts[1]}:{parts[2]}"
                     else:
-                        nlt_ref = passage_id.replace(" ", ".")
+                        nlt_ref = passage_id.replace(".", " ")
 
-                    # 3. Query NLT API using the corrected reference
+                    # 3. Query NLT API using the translated English reference
                     nlt_url = f"https://api.nlt.to/api/passages?ref={nlt_ref}"
                     async with session.get(nlt_url, timeout=5) as nlt_resp:
                         if nlt_resp.status == 200:
@@ -465,7 +535,7 @@ async def poll_daily_verse():
 
                             # Extract inner HTML block from NLT response
                             match = re.search(
-                                r'<div id="bibletext".*?>(.*?)</div></body>',
+                                r'<div id="bibletext"[^>]*>(.*)</div>',
                                 nlt_html,
                                 re.IGNORECASE | re.DOTALL,
                             )
@@ -479,15 +549,14 @@ async def poll_daily_verse():
                             clean_text = re.sub(r"<[^>]+>", " ", clean_text)
                             clean_text = re.sub(r"\s+", " ", clean_text).strip()
 
-                            # Format the reference for the UI (e.g., "1CH 16:11")
-                            ui_reference = nlt_ref.replace(".", " ")
-
                             rest_cache["daily_verse"] = {
-                                "reference": ui_reference,
+                                "reference": nlt_ref,
                                 "text": clean_text,
                                 "html": inner_html,
                             }
-                            logger.info("Daily verse successfully updated in cache.")
+                            logger.info(
+                                f"Daily verse successfully updated for: {nlt_ref}"
+                            )
                         else:
                             logger.error(
                                 f"NLT API Error {nlt_resp.status} for URL: {nlt_url}"
