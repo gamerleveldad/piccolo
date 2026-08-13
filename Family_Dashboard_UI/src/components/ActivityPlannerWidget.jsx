@@ -51,11 +51,11 @@ function DialActivity({ act, weather, dailyForecast }) {
   const fileName = iconMapping[act.name] || "default.svg";
   const iconPath = `/assets/activities/${fileName}`;
 
-  // Explicit styling overrides for specific icons
+  // Explicit styling overrides: Silver for Walking/Airbrush, Original for the rest
   const isSilver = act.name === "Walking" || act.name === "Airbrushing";
   const iconFilter = isSilver
     ? "brightness(0) invert(0.8) drop-shadow(0 0 4px rgba(203,213,225,0.6))"
-    : "brightness(0) invert(0.5)";
+    : "drop-shadow(0 2px 4px rgba(0,0,0,0.3))";
 
   const generateDiagnostics = () => {
     const isFc = mode === "forecast";
@@ -226,9 +226,9 @@ function DialActivity({ act, weather, dailyForecast }) {
     <>
       <div
         onClick={() => setIsOpen(true)}
-        className="bg-slate-900/40 border border-slate-800 rounded-xl p-2 flex items-center justify-between cursor-pointer hover:bg-slate-800/50 transition-colors"
+        className="flex items-center justify-center cursor-pointer hover:scale-105 transition-transform"
       >
-        <div className="relative w-12 h-12 flex items-center justify-center">
+        <div className="relative w-16 h-16 flex items-center justify-center">
           <svg
             className="absolute w-full h-full transform -rotate-90"
             viewBox="0 0 48 48"
@@ -238,7 +238,7 @@ function DialActivity({ act, weather, dailyForecast }) {
               cy={center}
               r={radiusOuter}
               fill="none"
-              className="stroke-slate-800"
+              className="stroke-slate-800/50"
               strokeWidth="2"
             />
             <circle
@@ -246,7 +246,7 @@ function DialActivity({ act, weather, dailyForecast }) {
               cy={center}
               r={radiusInner}
               fill="none"
-              className="stroke-slate-800"
+              className="stroke-slate-800/50"
               strokeWidth="4"
             />
 
@@ -278,23 +278,9 @@ function DialActivity({ act, weather, dailyForecast }) {
             <img
               src={iconPath}
               alt={act.name}
-              className="w-5 h-5"
+              className="w-6 h-6"
               style={{ filter: iconFilter }}
             />
-          </div>
-        </div>
-
-        <div className="flex flex-col items-end justify-center h-full gap-1">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[8px] text-slate-500 font-bold uppercase">
-              N
-            </span>
-          </div>
-          <div className="w-full border-t border-slate-800/80"></div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-[8px] text-slate-500 font-bold uppercase">
-              F
-            </span>
           </div>
         </div>
       </div>
@@ -383,7 +369,7 @@ export default function ActivityPlannerWidget({
 
   return (
     <div className="col-span-2 bg-slate-950 border border-slate-900/60 p-4 rounded-3xl shadow-xl flex flex-col w-full h-full">
-      <div className="w-full flex justify-between items-end border-b border-slate-900 pb-2 mb-3">
+      <div className="w-full flex justify-between items-end border-b border-slate-900 pb-2 mb-4">
         <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">
           Activity Matrix
         </span>
@@ -392,7 +378,7 @@ export default function ActivityPlannerWidget({
         </span>
       </div>
 
-      <div className="grid grid-cols-4 gap-2 h-full">
+      <div className="grid grid-cols-4 gap-y-6 gap-x-2 h-full items-center">
         {activities.map((act, idx) => (
           <DialActivity
             key={idx}

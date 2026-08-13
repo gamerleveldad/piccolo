@@ -76,6 +76,25 @@ rest_cache = {
 # --- BUSINESS LOGIC & CALCULATION ENGINE ---
 
 
+def safe_float(value, default=0.0):
+    """Convert value to float safely, returning default on failure.
+    Handles None, placeholder strings like "--.-", percent values and commas.
+    """
+    try:
+        if value is None:
+            return float(default)
+        if isinstance(value, str):
+            v = value.strip()
+            if v in ("", "--.-", "--", "N/A"):
+                return float(default)
+            # strip percent or commas
+            v = v.replace("%", "").replace(",", "")
+            return float(v)
+        return float(value)
+    except Exception:
+        return float(default)
+
+
 def calculate_comfort_level(dew_point_f: float) -> dict:
     if dew_point_f is None or dew_point_f == "--.-":
         return {"text": "Analyzing Air...", "color": "text-slate-500"}
@@ -141,29 +160,34 @@ def calculate_rain_status(rain_rate_in_hr: float) -> dict:
 
 
 def calculate_activity_ratings(weather_data: dict, daily_forecast: list) -> list:
-    temp = float(weather_data.get("temperature_f", 72.0))
-    feels = float(weather_data.get("feels_like_f", temp))
-    humidity = float(weather_data.get("humidity_pct", 50.0))
-    wind = float(weather_data.get("wind_speed_mph", 0.0))
-    gust = float(weather_data.get("wind_gust_mph", 0.0))
-    rain_accum = float(weather_data.get("rain_accumulation_day_in", 0.0))
-    rain_rate = float(weather_data.get("rain_rate_in_hr", 0.0))
-    lightning_dist = float(weather_data.get("last_strike_distance") or 999.0)
+    temp = safe_float(weather_data.get("temperature_f"), 72.0)
+    feels = safe_float(weather_data.get("feels_like_f"), temp)
+    humidity = safe_float(weather_data.get("humidity_pct"), 50.0)
+    wind = safe_float(weather_data.get("wind_speed_mph"), 0.0)
+    gust = safe_float(weather_data.get("wind_gust_mph"), 0.0)
+    rain_accum = safe_float(weather_data.get("rain_accumulation_day_in"), 0.0)
+    rain_rate = safe_float(weather_data.get("rain_rate_in_hr"), 0.0)
+    lightning_dist = safe_float(weather_data.get("last_strike_distance"), 999.0)
 
     fc_day = daily_forecast[0] if daily_forecast else {}
-    fc_temp = (float(fc_day.get("high", temp)) + float(fc_day.get("low", temp))) / 2.0
-    fc_rain_chance = int(fc_day.get("rain_pct", 0))
+    # Check both 'temp_max_f' (weather_api key) and 'high' (mapped key)
+    fc_high = safe_float(fc_day.get("temp_max_f", fc_day.get("high")), temp)
+    fc_low = safe_float(fc_day.get("temp_min_f", fc_day.get("low")), temp)
+    fc_temp = (fc_high + fc_low) / 2.0
+    fc_rain_chance = int(
+        safe_float(fc_day.get("precip_probability", fc_day.get("rain_pct")), 0)
+    )
 
     def evaluate(t, f, h, w, g, r_accum, r_rate, l_dist, is_forecast=False):
         scores = {
-            "Walking": 10,
-            "Airbrushing": 10,
-            "Yard Work": 10,
-            "Video Games": 5,
-            "Basketball": 10,
-            "Football": 10,
-            "Swimming": 10,
-            "Driving": 10,
+            "Walking": 10.0,
+            "Airbrushing": 10.0,
+            "Yard Work": 10.0,
+            "Video Games": 5.0,
+            "Basketball": 10.0,
+            "Football": 10.0,
+            "Swimming": 10.0,
+            "Driving": 10.0,
         }
 
         if t < 65:
@@ -171,7 +195,7 @@ def calculate_activity_ratings(weather_data: dict, daily_forecast: list) -> list
         if t > 75:
             scores["Football"] -= min((t - 75) / 3, 4)
         if f > 100:
-            scores["Football"] = 0
+            scores["Football"] = 0.0
         if w > 15 or g > 22:
             scores["Football"] -= 3
         if r_accum > 0.15:
@@ -184,16 +208,16 @@ def calculate_activity_ratings(weather_data: dict, daily_forecast: list) -> list
         if t > 75:
             scores["Basketball"] -= min((t - 75) / 3, 4)
         if f > 98:
-            scores["Basketball"] = 0
+            scores["Basketball"] = 0.0
         if w > 8:
             scores["Basketball"] -= 2
         if r_accum > 0.30:
-            scores["Basketball"] = 0
+            scores["Basketball"] = 0.0
 
         if t > 90:
             scores["Yard Work"] -= 4
         if f > 102:
-            scores["Yard Work"] = 0
+            scores["Yard Work"] = 0.0
         if w > 25:
             scores["Yard Work"] -= 3
         if r_accum > 0.15:
@@ -248,16 +272,9 @@ def calculate_activity_ratings(weather_data: dict, daily_forecast: list) -> list
     current_scores = evaluate(
         temp, feels, humidity, wind, gust, rain_accum, rain_rate, lightning_dist, False
     )
+    # Forecast ignores current temporary rain/lightning strikes
     forecast_scores = evaluate(
-        fc_temp,
-        fc_temp,
-        humidity,
-        wind,
-        gust,
-        rain_accum,
-        rain_rate,
-        lightning_dist,
-        True,
+        fc_temp, fc_temp, humidity, wind, gust, 0.0, 0.0, 999.0, True
     )
 
     return [
@@ -406,34 +423,35 @@ async def poll_daily_verse():
     logger.info("YouVersion + NLT Daily Verse sync worker online.")
     while True:
         try:
-            # use timezone-aware datetime to avoid naive datetime usage
-            day_of_year = (
-                datetime.datetime.now(tz=datetime.timezone.utc).timetuple().tm_yday
-            )
+            day_of_year = datetime.datetime.now().timetuple().tm_yday
 
             async with aiohttp.ClientSession() as session:
-                # 1. Fetch the Human Reference from YouVersion
-                yv_url = f"https://developers.youversionapi.com/1.0/verse_of_the_day/{day_of_year}?version_id=1"
+                # 1. Query YouVersion API using Day of the Year
+                yv_url = (
+                    f"https://api.youversion.com/v1/verse_of_the_days/{day_of_year}"
+                )
                 headers = {
                     "X-YouVersion-Developer-Token": API_TOKEN_BIBLE,
                     "Accept": "application/json",
                 }
 
-                ref_string = None
+                passage_id = None
                 async with session.get(yv_url, headers=headers, timeout=5) as resp:
                     if resp.status == 200:
                         yv_data = await resp.json()
-                        ref_string = yv_data.get("verse", {}).get("human_reference")
+                        passage_id = yv_data.get("passage_id") or yv_data.get(
+                            "verse", {}
+                        ).get("human_reference")
 
-                if ref_string:
-                    # 2. Fetch the full NLT HTML payload
-                    nlt_ref = ref_string.replace(" ", ".")
+                if passage_id:
+                    # 2. Query NLT API using passage_id
+                    nlt_ref = passage_id.replace(" ", ".")
                     nlt_url = f"https://api.nlt.to/api/passages?ref={nlt_ref}"
                     async with session.get(nlt_url, timeout=5) as nlt_resp:
                         if nlt_resp.status == 200:
                             nlt_html = await nlt_resp.text()
 
-                            # Isolate the core verse HTML for the frontend modal
+                            # Extract inner HTML block from NLT response
                             match = re.search(
                                 r'<div id="bibletext".*?>(.*?)</div></body>',
                                 nlt_html,
@@ -441,7 +459,7 @@ async def poll_daily_verse():
                             )
                             inner_html = match.group(1) if match else nlt_html
 
-                            # Strip tags to create clean text for the truncated top bar
+                            # Clean tags for top bar plain text reference
                             clean_text = re.sub(
                                 r'<span class="vn">.*?</span>', "", inner_html
                             )
@@ -450,14 +468,14 @@ async def poll_daily_verse():
                             clean_text = re.sub(r"\s+", " ", clean_text).strip()
 
                             rest_cache["daily_verse"] = {
-                                "reference": ref_string,
+                                "reference": passage_id,
                                 "text": clean_text,
                                 "html": inner_html,
                             }
         except Exception as e:
-            logger.error(f"Failed to fetch 2-API daily verse: {e}")
+            logger.error(f"Failed to fetch YouVersion/NLT daily verse: {e}")
 
-        await asyncio.sleep(43200)  # Refresh every 12 hours
+        await asyncio.sleep(43200)  # Refresh twice daily
 
 
 async def poll_calendar_events():

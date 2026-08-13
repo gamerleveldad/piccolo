@@ -47,14 +47,14 @@ export default function HeaderBar({ connected, dailyVerse }) {
         {/* Right Side: Clock & Status Pill */}
         <div className="flex items-center gap-4 shrink-0">
           <div className="text-right font-mono uppercase tracking-widest hidden sm:block">
-            <div className="text-[10px] text-slate-400 font-bold">
+            <div className="text-[8px] text-slate-400 font-bold">
               {currentTime.toLocaleDateString("en-US", {
                 weekday: "short",
                 month: "short",
                 day: "numeric",
               })}
             </div>
-            <div className="text-[11px] text-slate-200 font-black">
+            <div className="text-[14px] text-violet-700 font-black">
               {currentTime.toLocaleTimeString("en-US", {
                 hour12: true,
                 hour: "2-digit",
