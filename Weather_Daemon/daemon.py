@@ -403,7 +403,7 @@ def fetch_and_store_tropics():
         nhc_entries = get_nhc_data()
         regional_outlook = parse_nhc_outlook_with_gemini("\n".join(nhc_entries))
 
-        # Sanitize percentage inputs to guarantee strict integers for Postgres
+        # Sanitize percentage inputs for Postgres integer columns
         try:
             p_2day = int(
                 str(regional_outlook.get("outlook_2day_pct", 0))
@@ -422,7 +422,7 @@ def fetch_and_store_tropics():
         except Exception:
             p_7day = 0
 
-        # 2. ALWAYS insert/update the system outlook record first (guarantees data exists even with 0 active storms)
+        # 2. ALWAYS insert/update the system outlook record first
         cursor.execute(
             """
             INSERT INTO tropical_storms (
@@ -456,35 +456,67 @@ def fetch_and_store_tropics():
 
         if trop_resp.get("success") and trop_resp.get("response"):
             for storm in trop_resp["response"]:
+                # FIX: Extract 'id' from top-level storm object, not 'profile'
+                storm_id = storm.get("id", "")
                 profile = storm.get("profile", {})
-                storm_id = profile.get("id", "")
+                basin = profile.get("basinCurrent") or profile.get("basinOrigin") or ""
 
                 # Filter specifically for Atlantic basin storms
-                if not storm_id.startswith("AL"):
+                if not (storm_id.startswith("AL") or basin == "AL"):
                     continue
 
-                has_atlantic_storm = True
+                if profile.get("isActive", True):
+                    has_atlantic_storm = True
+
                 position = storm.get("position", {})
                 details = position.get("details", {})
                 movement = details.get("movement", {})
+                pos_ts = position.get("timestamp", 0)
 
-                # Format future track array
+                # Format future track array & calculate lead hours from timestamps
                 track_points = []
                 for point in storm.get("forecast", []):
                     point_details = point.get("details", {})
+                    point_ts = point.get("timestamp", 0)
+                    lead_hours = (
+                        int((point_ts - pos_ts) / 3600) if pos_ts and point_ts else 0
+                    )
+
+                    pt_loc = point.get("loc", {})
+                    pt_coords = point.get("location", {}).get("coordinates", [0, 0])
+                    pt_lat = (
+                        pt_loc.get("lat")
+                        if "lat" in pt_loc
+                        else (pt_coords[1] if len(pt_coords) > 1 else 0)
+                    )
+                    pt_lon = (
+                        pt_loc.get("long")
+                        if "long" in pt_loc
+                        else (pt_coords[0] if len(pt_coords) > 0 else 0)
+                    )
+
                     track_points.append(
                         {
-                            "lead_hours": point.get("profile", {}).get("forecastHour"),
-                            "lat": point.get("location", {}).get("coordinates", [0, 0])[
-                                1
-                            ],
-                            "lon": point.get("location", {}).get("coordinates", [0, 0])[
-                                0
-                            ],
+                            "lead_hours": lead_hours,
+                            "lat": pt_lat,
+                            "lon": pt_lon,
                             "wind_mph": point_details.get("windSpeedMPH"),
                             "category": point_details.get("stormCat"),
                         }
                     )
+
+                pos_loc = position.get("loc", {})
+                pos_coords = position.get("location", {}).get("coordinates", [0, 0])
+                lat = (
+                    pos_loc.get("lat")
+                    if "lat" in pos_loc
+                    else (pos_coords[1] if len(pos_coords) > 1 else 0)
+                )
+                lon = (
+                    pos_loc.get("long")
+                    if "long" in pos_loc
+                    else (pos_coords[0] if len(pos_coords) > 0 else 0)
+                )
 
                 cursor.execute(
                     """
@@ -497,6 +529,7 @@ def fetch_and_store_tropics():
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (id) DO UPDATE SET 
                         timestamp = EXCLUDED.timestamp, 
+                        name = EXCLUDED.name,
                         category = EXCLUDED.category,
                         is_active = EXCLUDED.is_active,
                         lat = EXCLUDED.lat, 
@@ -522,8 +555,8 @@ def fetch_and_store_tropics():
                         profile.get("name"),
                         details.get("stormCat"),
                         profile.get("isActive", True),
-                        position.get("location", {}).get("coordinates", [0, 0])[1],
-                        position.get("location", {}).get("coordinates", [0, 0])[0],
+                        lat,
+                        lon,
                         details.get("windSpeedMPH"),
                         details.get("gustSpeedMPH"),
                         details.get("pressureMB"),
@@ -547,7 +580,7 @@ def fetch_and_store_tropics():
 
         ACTIVE_HURRICANE = has_atlantic_storm
         status_str = (
-            "Active Atlantic storm. Polling set to 3 hours."
+            "Active Atlantic storm detected. Polling set to 3 hours."
             if ACTIVE_HURRICANE
             else "No active Atlantic storms. Polling set to 6 hours."
         )
