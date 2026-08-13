@@ -431,7 +431,7 @@ async def poll_daily_verse():
                     f"https://api.youversion.com/v1/verse_of_the_days/{day_of_year}"
                 )
                 headers = {
-                    "X-YouVersion-Developer-Token": API_TOKEN_BIBLE,
+                    "x-yvp-app-key": API_TOKEN_BIBLE,
                     "Accept": "application/json",
                 }
 
