@@ -102,6 +102,21 @@ const getAlertStyling = (eventStr) => {
   } else if (lowerEvent.includes("flood watch")) {
     icon = "wi wi-flood";
     color = "text-yellow-400";
+  } else if (lowerEvent.includes("flood advisory")) {
+    icon = "wi wi-raindrops";
+    color = "text-cyan-400";
+  } else if (lowerEvent.includes("frost advisory")) {
+    icon = "wi wi-snowflake-cold";
+    color = "text-blue-300";
+  } else if (lowerEvent.includes("wind advisory")) {
+    icon = "wi wi-windy";
+    color = "text-slate-400";
+  } else if (lowerEvent.includes("fire weather watch")) {
+    icon = "wi wi-fire";
+    color = "text-amber-500";
+  } else if (lowerEvent.includes("air quality")) {
+    icon = "wi wi-smog";
+    color = "text-slate-400";
   }
   // Generic fallbacks just in case NWS throws a curveball
   else if (lowerEvent.includes("warning")) {
