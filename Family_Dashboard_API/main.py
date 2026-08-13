@@ -439,13 +439,25 @@ async def poll_daily_verse():
                 async with session.get(yv_url, headers=headers, timeout=5) as resp:
                     if resp.status == 200:
                         yv_data = await resp.json()
-                        passage_id = yv_data.get("passage_id") or yv_data.get(
-                            "verse", {}
-                        ).get("human_reference")
+                        # Extract the passage ID (e.g., "1CH.16.11")
+                        passage_id = yv_data.get("passage_id")
+                        logger.info(f"YouVersion API success. Passage ID: {passage_id}")
+                    else:
+                        error_text = await resp.text()
+                        logger.error(
+                            f"YouVersion API Error {resp.status}: {error_text}"
+                        )
 
                 if passage_id:
-                    # 2. Query NLT API using passage_id
-                    nlt_ref = passage_id.replace(" ", ".")
+                    # 2. Convert YouVersion format (1CH.16.11) to NLT format (1CH.16:11)
+                    parts = passage_id.split(".")
+                    if len(parts) >= 3:
+                        # Join all parts except the last with a dot, then append the verse with a colon
+                        nlt_ref = f"{'.'.join(parts[:-1])}:{parts[-1]}"
+                    else:
+                        nlt_ref = passage_id.replace(" ", ".")
+
+                    # 3. Query NLT API using the corrected reference
                     nlt_url = f"https://api.nlt.to/api/passages?ref={nlt_ref}"
                     async with session.get(nlt_url, timeout=5) as nlt_resp:
                         if nlt_resp.status == 200:
@@ -467,13 +479,24 @@ async def poll_daily_verse():
                             clean_text = re.sub(r"<[^>]+>", " ", clean_text)
                             clean_text = re.sub(r"\s+", " ", clean_text).strip()
 
+                            # Format the reference for the UI (e.g., "1CH 16:11")
+                            ui_reference = nlt_ref.replace(".", " ")
+
                             rest_cache["daily_verse"] = {
-                                "reference": passage_id,
+                                "reference": ui_reference,
                                 "text": clean_text,
                                 "html": inner_html,
                             }
+                            logger.info("Daily verse successfully updated in cache.")
+                        else:
+                            logger.error(
+                                f"NLT API Error {nlt_resp.status} for URL: {nlt_url}"
+                            )
+
         except Exception as e:
-            logger.error(f"Failed to fetch YouVersion/NLT daily verse: {e}")
+            logger.error(
+                f"Failed to fetch YouVersion/NLT daily verse: {e}", exc_info=True
+            )
 
         await asyncio.sleep(43200)  # Refresh twice daily
 
