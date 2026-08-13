@@ -407,7 +407,9 @@ async def poll_daily_verse():
     while True:
         try:
             # use timezone-aware datetime to avoid naive datetime usage
-            day_of_year = datetime.datetime.now(tz=datetime.timezone.utc).timetuple().tm_yday
+            day_of_year = (
+                datetime.datetime.now(tz=datetime.timezone.utc).timetuple().tm_yday
+            )
 
             async with aiohttp.ClientSession() as session:
                 # 1. Fetch the Human Reference from YouVersion
@@ -755,6 +757,7 @@ async def lifespan(app: FastAPI):
     microservice_task = None
     photo_task = None
     mqtt_task = None  # Replaced udp_task
+    verse_task = None
 
     if SIMULATION_MODE:
         sim_task = asyncio.create_task(simulate_weather_stream())
@@ -764,6 +767,7 @@ async def lifespan(app: FastAPI):
         microservice_task = asyncio.create_task(poll_local_microservices())
         photo_task = asyncio.create_task(poll_google_drive_photos())
         mqtt_task = asyncio.create_task(listen_to_mqtt())  # New MQTT listener
+        verse_task = asyncio.create_task(poll_daily_verse())
 
     yield
 
@@ -777,6 +781,8 @@ async def lifespan(app: FastAPI):
         photo_task.cancel()
     if mqtt_task:
         mqtt_task.cancel()  # Cancel MQTT on shutdown
+    if verse_task:
+        verse_task.cancel()
 
 
 app = FastAPI(title="Family Tactical Dashboard API", lifespan=lifespan)
