@@ -1,11 +1,12 @@
+import json
 import os
 import time
-import json
-import requests
-import feedparser
-import schedule
-import psycopg2
 from datetime import datetime, timedelta, timezone
+
+import feedparser
+import psycopg2
+import requests
+import schedule
 from google import genai
 from influxdb_client import InfluxDBClient
 
@@ -171,7 +172,13 @@ def get_open_meteo_data(model_type):
 
 def get_nhc_data():
     try:
-        feed = feedparser.parse("https://www.nhc.noaa.gov/index-at.xml")
+        # Fetch the feed using requests to enforce a strict 10-second timeout
+        resp = requests.get("https://www.nhc.noaa.gov/index-at.xml", timeout=10)
+        resp.raise_for_status()
+        
+        # Parse the raw content locally so feedparser doesn't touch the network
+        feed = feedparser.parse(resp.content)
+        
         entries = []
         for entry in feed.entries[:5]:
             entries.append(entry.title + ": " + entry.summary)
@@ -607,4 +614,4 @@ if __name__ == "__main__":
             fetch_and_store_tropics()
             LAST_TROPICS_CHECK = now
 
-        time.sleep(10)
+        time.sleep(10)        time.sleep(10)
