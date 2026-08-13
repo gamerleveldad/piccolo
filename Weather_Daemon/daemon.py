@@ -41,7 +41,9 @@ LAST_TROPICS_CHECK = datetime.min.replace(tzinfo=timezone.utc)
 
 
 def get_db_connection():
-    return psycopg2.connect(host=PG_HOST, database=PG_DB, user=PG_USER, password=PG_PASS)
+    return psycopg2.connect(
+        host=PG_HOST, database=PG_DB, user=PG_USER, password=PG_PASS
+    )
 
 
 def setup_database():
@@ -122,7 +124,9 @@ def setup_database():
 # --- Data Collection Functions for Discord Brief ---
 def get_influx_data():
     try:
-        client_influx = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+        client_influx = InfluxDBClient(
+            url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG
+        )
         query_api = client_influx.query_api()
         query = f'''
             from(bucket: "{INFLUX_BUCKET}")
@@ -155,7 +159,7 @@ def get_nws_data():
         headers = {"User-Agent": "PersonalWeatherDaemon/1.0"}
         points_url = f"https://api.weather.gov/points/{LAT},{LON}"
         points_resp = requests.get(points_url, headers=headers, timeout=10).json()
-        forecast_url = points_resp['properties']['forecast']
+        forecast_url = points_resp["properties"]["forecast"]
         return requests.get(forecast_url, headers=headers, timeout=10).json()
     except Exception as e:
         return f"NWS Error: {e}"
@@ -175,10 +179,10 @@ def get_nhc_data():
         # Fetch the feed using requests to enforce a strict 10-second timeout
         resp = requests.get("https://www.nhc.noaa.gov/index-at.xml", timeout=10)
         resp.raise_for_status()
-        
+
         # Parse the raw content locally so feedparser doesn't touch the network
         feed = feedparser.parse(resp.content)
-        
+
         entries = []
         for entry in feed.entries[:5]:
             entries.append(entry.title + ": " + entry.summary)
@@ -223,22 +227,35 @@ def fetch_and_store_storm_data():
                 hail = ob.get("hail", {})
                 forecast = cell.get("forecast", {})
 
-                cursor.execute("""
+                cursor.execute(
+                    """
                     INSERT INTO storm_cells (
                         timestamp, cell_id, lat, lon, heading_deg, speed_kts, 
                         tvs, mda, vil, height_ft, top_ft, hail_prob, 
                         hail_prob_severe, hail_max_size_in, forecast_cone_narrow, 
                         forecast_cone_wide, traits
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, (
-                    now, cell.get("id"), ob.get("cpos", {}).get("lat"), ob.get("cpos", {}).get("long"),
-                    movement.get("dirDEG"), movement.get("speedKTS"),
-                    bool(ob.get("tvs", 0)), ob.get("mda"), ob.get("vil"), ob.get("htFT"), ob.get("topFT"), # <--- Updated this line
-                    hail.get("prob"), hail.get("probSevere"), hail.get("maxSizeIN"),
-                    json.dumps(forecast.get("cone", {}).get("narrow")),
-                    json.dumps(forecast.get("cone", {}).get("wide")),
-                    json.dumps(cell.get("traits", {}))
-                ))
+                """,
+                    (
+                        now,
+                        cell.get("id"),
+                        ob.get("cpos", {}).get("lat"),
+                        ob.get("cpos", {}).get("long"),
+                        movement.get("dirDEG"),
+                        movement.get("speedKTS"),
+                        bool(ob.get("tvs", 0)),
+                        ob.get("mda"),
+                        ob.get("vil"),
+                        ob.get("htFT"),
+                        ob.get("topFT"),  # <--- Updated this line
+                        hail.get("prob"),
+                        hail.get("probSevere"),
+                        hail.get("maxSizeIN"),
+                        json.dumps(forecast.get("cone", {}).get("narrow")),
+                        json.dumps(forecast.get("cone", {}).get("wide")),
+                        json.dumps(cell.get("traits", {})),
+                    ),
+                )
 
         # 2. Fetch Lightning Flashes within 20 nautical miles
         lightning_url = f"https://api.aerisapi.com/lightning/flash/closest?p={LAT},{LON}&radius=20nm&limit=50&client_id={XWEATHER_ID}&client_secret={XWEATHER_SECRET}"
@@ -248,11 +265,22 @@ def fetch_and_store_storm_data():
             cells_found = True
             for strike in light_resp["response"]:
                 strike_ts = strike.get("ob", {}).get("timestamp")
-                strike_time = datetime.fromtimestamp(strike_ts, tz=timezone.utc) if strike_ts else now
-                cursor.execute("""
+                strike_time = (
+                    datetime.fromtimestamp(strike_ts, tz=timezone.utc)
+                    if strike_ts
+                    else now
+                )
+                cursor.execute(
+                    """
                     INSERT INTO lightning_strikes (timestamp, lat, lon)
                     VALUES (%s, %s, %s)
-                """, (strike_time, strike.get("loc", {}).get("lat"), strike.get("loc", {}).get("long")))
+                """,
+                    (
+                        strike_time,
+                        strike.get("loc", {}).get("lat"),
+                        strike.get("loc", {}).get("long"),
+                    ),
+                )
 
         conn.commit()
         cursor.close()
@@ -260,36 +288,50 @@ def fetch_and_store_storm_data():
         # Transition state: We went from clear skies to storms nearby
         if cells_found and not STORM_NEARBY:
             alert_msg = "⚠️ **Storm Alert: Convective Activity Within 20 Miles**\n"
-            
+
             # If the trigger was a cell, grab the closest one for details
             if cells_resp.get("success") and cells_resp.get("response"):
                 cell = cells_resp["response"][0]
                 dist = cell.get("relativeTo", {}).get("distanceMI", "Unknown")
                 bearing = cell.get("relativeTo", {}).get("bearing", "Unknown")
-                
+
                 # Fix: Target the correct stormcell movement keys and convert KTS to MPH
                 movement = cell.get("ob", {}).get("movement", {})
                 speed_kts = movement.get("speedKTS")
-                speed_mph = round(speed_kts * 1.15078, 1) if speed_kts is not None else "Unknown"
+                speed_mph = (
+                    round(speed_kts * 1.15078, 1)
+                    if speed_kts is not None
+                    else "Unknown"
+                )
                 dir_deg = movement.get("dirDEG", "Unknown")
-                
+
                 # Clarify the severity definitions
                 is_severe = cell.get("traits", {}).get("isSevere", False)
-                severity_text = "🔴 **SEVERE Thunderstorm/Cell**" if is_severe else "🟡 General Thunderstorm"
-                
+                severity_text = (
+                    "🔴 **SEVERE Thunderstorm/Cell**"
+                    if is_severe
+                    else "🟡 General Thunderstorm"
+                )
+
                 alert_msg += f"- **Type:** {severity_text}\n"
                 alert_msg += f"- **Location:** {dist} miles away at direction of {bearing} degrees.\n"
-                alert_msg += f"- **Movement:** Moving {dir_deg} degrees at {speed_mph} mph.\n"
+                alert_msg += (
+                    f"- **Movement:** Moving {dir_deg} degrees at {speed_mph} mph.\n"
+                )
             else:
                 alert_msg += "- **Type:** Lightning strikes detected in the immediate vicinity.\n"
-            
+
             try:
                 requests.post(WEBHOOK_URL, json={"content": alert_msg}, timeout=10)
             except Exception as e:
                 print(f"Discord webhook failed: {e}")
 
         STORM_NEARBY = cells_found
-        status_str = "Active storm/lightning nearby. Polling set to 3 min." if STORM_NEARBY else "No local storms. Polling set to 15 min."
+        status_str = (
+            "Active storm/lightning nearby. Polling set to 3 min."
+            if STORM_NEARBY
+            else "No local storms. Polling set to 15 min."
+        )
         print(f"[{datetime.now(timezone.utc)}] Storm check complete. {status_str}")
 
     except Exception as e:
@@ -321,8 +363,7 @@ def parse_nhc_outlook_with_gemini(raw_nhc_text):
     """
     try:
         response = client.models.generate_content(
-            model='gemini-3.6-flash',
-            contents=prompt
+            model="gemini-3.6-flash", contents=prompt
         )
         text_resp = response.text.strip()
         # Clean JSON if backticks were returned
@@ -340,7 +381,7 @@ def parse_nhc_outlook_with_gemini(raw_nhc_text):
             "carrib_favor": "Low",
             "gulf_favor": "Low",
             "outlook_2day_pct": 0,
-            "outlook_7day_pct": 0
+            "outlook_7day_pct": 0,
         }
 
 
@@ -364,17 +405,26 @@ def fetch_and_store_tropics():
 
         # Sanitize percentage inputs to guarantee strict integers for Postgres
         try:
-            p_2day = int(str(regional_outlook.get("outlook_2day_pct", 0)).replace("%", "").strip())
+            p_2day = int(
+                str(regional_outlook.get("outlook_2day_pct", 0))
+                .replace("%", "")
+                .strip()
+            )
         except Exception:
             p_2day = 0
 
         try:
-            p_7day = int(str(regional_outlook.get("outlook_7day_pct", 0)).replace("%", "").strip())
+            p_7day = int(
+                str(regional_outlook.get("outlook_7day_pct", 0))
+                .replace("%", "")
+                .strip()
+            )
         except Exception:
             p_7day = 0
 
         # 2. ALWAYS insert/update the system outlook record first (guarantees data exists even with 0 active storms)
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO tropical_storms (
                 id, timestamp, is_active, 
                 atlantic_favor, carrib_favor, gulf_favor, 
@@ -387,14 +437,18 @@ def fetch_and_store_tropics():
                 gulf_favor = EXCLUDED.gulf_favor,
                 outlook_2day_pct = EXCLUDED.outlook_2day_pct,
                 outlook_7day_pct = EXCLUDED.outlook_7day_pct
-        """, (
-            "SYSTEM_OUTLOOK", now, False,
-            regional_outlook.get("atlantic_favor", "Low"),
-            regional_outlook.get("carrib_favor", "Low"),
-            regional_outlook.get("gulf_favor", "Low"),
-            p_2day,
-            p_7day
-        ))
+        """,
+            (
+                "SYSTEM_OUTLOOK",
+                now,
+                False,
+                regional_outlook.get("atlantic_favor", "Low"),
+                regional_outlook.get("carrib_favor", "Low"),
+                regional_outlook.get("gulf_favor", "Low"),
+                p_2day,
+                p_7day,
+            ),
+        )
 
         # 3. Fetch Active Cyclones from Xweather
         trop_url = f"https://api.aerisapi.com/tropicalcyclones?client_id={XWEATHER_ID}&client_secret={XWEATHER_SECRET}"
@@ -418,15 +472,22 @@ def fetch_and_store_tropics():
                 track_points = []
                 for point in storm.get("forecast", []):
                     point_details = point.get("details", {})
-                    track_points.append({
-                        "lead_hours": point.get("profile", {}).get("forecastHour"),
-                        "lat": point.get("location", {}).get("coordinates", [0, 0])[1],
-                        "lon": point.get("location", {}).get("coordinates", [0, 0])[0],
-                        "wind_mph": point_details.get("windSpeedMPH"),
-                        "category": point_details.get("stormCat")
-                    })
+                    track_points.append(
+                        {
+                            "lead_hours": point.get("profile", {}).get("forecastHour"),
+                            "lat": point.get("location", {}).get("coordinates", [0, 0])[
+                                1
+                            ],
+                            "lon": point.get("location", {}).get("coordinates", [0, 0])[
+                                0
+                            ],
+                            "wind_mph": point_details.get("windSpeedMPH"),
+                            "category": point_details.get("stormCat"),
+                        }
+                    )
 
-                cursor.execute("""
+                cursor.execute(
+                    """
                     INSERT INTO tropical_storms (
                         id, timestamp, name, category, is_active, lat, lon, 
                         wind_speed_mph, gust_speed_mph, pressure_mb, advisory_number, 
@@ -454,36 +515,42 @@ def fetch_and_store_tropics():
                         gulf_favor = EXCLUDED.gulf_favor,
                         outlook_2day_pct = EXCLUDED.outlook_2day_pct,
                         outlook_7day_pct = EXCLUDED.outlook_7day_pct
-                """, (
-                    storm_id,
-                    now,
-                    profile.get("name"),
-                    details.get("stormCat"),
-                    profile.get("isActive", True),
-                    position.get("location", {}).get("coordinates", [0, 0])[1],
-                    position.get("location", {}).get("coordinates", [0, 0])[0],
-                    details.get("windSpeedMPH"),
-                    details.get("gustSpeedMPH"),
-                    details.get("pressureMB"),
-                    details.get("advisoryNumber"),
-                    movement.get("directionDEG"),
-                    movement.get("speedMPH"),
-                    json.dumps(details.get("windRadii")),
-                    json.dumps(track_points),
-                    json.dumps(storm.get("breakPointAlerts")),
-                    regional_outlook.get("atlantic_favor"),
-                    regional_outlook.get("carrib_favor"),
-                    regional_outlook.get("gulf_favor"),
-                    p_2day,
-                    p_7day
-                ))
+                """,
+                    (
+                        storm_id,
+                        now,
+                        profile.get("name"),
+                        details.get("stormCat"),
+                        profile.get("isActive", True),
+                        position.get("location", {}).get("coordinates", [0, 0])[1],
+                        position.get("location", {}).get("coordinates", [0, 0])[0],
+                        details.get("windSpeedMPH"),
+                        details.get("gustSpeedMPH"),
+                        details.get("pressureMB"),
+                        details.get("advisoryNumber"),
+                        movement.get("directionDEG"),
+                        movement.get("speedMPH"),
+                        json.dumps(details.get("windRadii")),
+                        json.dumps(track_points),
+                        json.dumps(storm.get("breakPointAlerts")),
+                        regional_outlook.get("atlantic_favor"),
+                        regional_outlook.get("carrib_favor"),
+                        regional_outlook.get("gulf_favor"),
+                        p_2day,
+                        p_7day,
+                    ),
+                )
 
         conn.commit()
         cursor.close()
         conn.close()
 
         ACTIVE_HURRICANE = has_atlantic_storm
-        status_str = "Active Atlantic storm. Polling set to 3 hours." if ACTIVE_HURRICANE else "No active Atlantic storms. Polling set to 6 hours."
+        status_str = (
+            "Active Atlantic storm. Polling set to 3 hours."
+            if ACTIVE_HURRICANE
+            else "No active Atlantic storms. Polling set to 6 hours."
+        )
         print(f"[{datetime.now(timezone.utc)}] Tropics check complete. {status_str}")
 
     except Exception as e:
@@ -497,8 +564,8 @@ def build_discord_message():
     influx_data = get_influx_data()
     wu_data = get_wu_data()
     nws_data = get_nws_data()
-    gfs_data = get_open_meteo_data('gfs')
-    euro_data = get_open_meteo_data('ecmwf')
+    gfs_data = get_open_meteo_data("gfs")
+    euro_data = get_open_meteo_data("ecmwf")
     nhc_data = get_nhc_data()
     metar_data = get_metar_data()
 
@@ -571,8 +638,7 @@ def build_discord_message():
     print(f"[{datetime.now()}] Sending payload to Gemini...")
     try:
         response = client.models.generate_content(
-            model='gemini-3.6-flash',
-            contents=prompt
+            model="gemini-3.6-flash", contents=prompt
         )
         final_message = response.text.strip()
     except Exception as e:
@@ -609,9 +675,11 @@ if __name__ == "__main__":
             LAST_STORM_CHECK = now
 
         # Dynamic Polling: Tropics (3 hours if active hurricane, else 6 hours)
-        tropics_interval = timedelta(hours=3) if ACTIVE_HURRICANE else timedelta(hours=6)
+        tropics_interval = (
+            timedelta(hours=3) if ACTIVE_HURRICANE else timedelta(hours=6)
+        )
         if now - LAST_TROPICS_CHECK >= tropics_interval:
             fetch_and_store_tropics()
             LAST_TROPICS_CHECK = now
 
-        time.sleep(10)        time.sleep(10)
+        time.sleep(10)
