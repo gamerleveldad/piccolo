@@ -212,11 +212,21 @@ img, svg {
 }
 
 .stat-col {
-  min-width: 90px;
+  min-width: 80px;
   text-align: right;
   font-size: 0.92rem;
   color: var(--dolphins-aqua);
   font-weight: 700;
+  white-space: nowrap;
+}
+
+.stat-col.bye-col {
+  min-width: 65px;
+}
+
+.stat-col.cons-col {
+  min-width: 140px;
+  color: var(--text-light);
 }
 
 /* ==========================================================================

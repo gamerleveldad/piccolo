@@ -1,6 +1,7 @@
 import logging
 import os
 from contextlib import asynccontextmanager
+from typing import Optional
 
 import aiohttp
 import asyncpg  # type: ignore[import]
@@ -370,6 +371,12 @@ class ReorderRequest(BaseModel):
     target_below_player_id: str | None = None
 
 
+class ReorderPayload(BaseModel):
+    player_id: str
+    target_above_player_id: Optional[str] = None
+    target_below_player_id: Optional[str] = None
+
+
 async def fetch_team_unit_ranks(conn) -> dict:
     """
     Fetches all 1-32 team unit rankings from PostgreSQL.
@@ -408,10 +415,17 @@ async def get_draft_board(board_type: str = "standard"):
 
         # 2. Query active players (excluding Free Agents, UNK, and Inactive/Retired players)
         query = """
-            SELECT * FROM player_ti
-            WHERE team_abbr IS NOT NULL 
-              AND team_abbr NOT IN ('FA', 'UNK', 'None', '')
-              AND (status IS NULL OR LOWER(status) NOT IN ('inactive', 'retired', 'cut'))
+            SELECT 
+                p.*,
+                b.manual_rank,
+                COALESCE(b.is_pinned, FALSE) as is_pinned
+            FROM player_ti p
+            LEFT JOIN board_player_order b 
+                ON p.player_id = b.player_id AND b.board_type = $1
+            WHERE p.team_abbr IS NOT NULL 
+              AND p.team_abbr NOT IN ('FA', 'UNK', 'None', '')
+              AND (p.status IS NULL OR LOWER(p.status) NOT IN ('inactive', 'retired', 'cut'))
+            ORDER BY b.manual_rank ASC NULLS LAST, p.projected_points DESC NULLS LAST
         """
         rows = await conn.fetch(query)
 
@@ -505,61 +519,76 @@ async def get_draft_board(board_type: str = "standard"):
 
 
 @app.post("/api/ti/board/{board_type}/reorder")
-async def reorder_board_player(board_type: str, req: ReorderRequest):
+async def reorder_board_player(board_type: str, payload: ReorderPayload):
     """
-    Updates a player's position relative to their adjacent global board neighbors.
-    Supports filtered position drags by inserting the moved player between
-    the global neighbors specified by the frontend payload.
+    Persists manual drag-and-drop reordering to the `board_player_order` table.
     """
     conn = await get_db_connection()
     try:
-        # Fetch current custom order records for reference
-        order_rows = await conn.fetch(
-            "SELECT player_id, manual_rank FROM board_player_order WHERE board_type = $1",
-            board_type,
-        )
-        rank_map = {r["player_id"]: r["manual_rank"] for r in order_rows}
+        # 1. Fetch current display order of all active players on this board
+        query = """
+            SELECT 
+                p.player_id,
+                b.manual_rank,
+                p.projected_points
+            FROM player_ti p
+            LEFT JOIN board_player_order b 
+                ON p.player_id = b.player_id AND b.board_type = $1
+            WHERE p.team_abbr IS NOT NULL 
+              AND p.team_abbr NOT IN ('FA', 'UNK', 'None', '')
+              AND (p.status IS NULL OR LOWER(p.status) NOT IN ('inactive', 'retired', 'cut'))
+            ORDER BY b.manual_rank ASC NULLS LAST, p.projected_points DESC NULLS LAST
+        """
+        rows = await conn.fetch(query, board_type)
 
-        above_rank = (
-            rank_map.get(req.target_above_player_id)
-            if req.target_above_player_id
-            else None
-        )
-        below_rank = (
-            rank_map.get(req.target_below_player_id)
-            if req.target_below_player_id
-            else None
-        )
+        # Current list of player IDs excluding the player being moved
+        current_pids = [
+            r["player_id"] for r in rows if r["player_id"] != payload.player_id
+        ]
 
-        # Calculate new relative rank float
-        if above_rank is not None and below_rank is not None:
-            new_rank = (above_rank + below_rank) / 2.0
-        elif above_rank is not None:
-            # Moved to the bottom below the last element
-            new_rank = above_rank + 1.0
-        elif below_rank is not None:
-            # Moved to the absolute top above the first element
-            new_rank = below_rank - 1.0
-        else:
-            # Fallback default rank
-            new_rank = 1.0
+        # 2. Determine target insertion index
+        insert_idx = len(current_pids)  # Default fallback: end of list
 
-        # Upsert the new manual rank into PostgreSQL
+        if (
+            payload.target_above_player_id
+            and payload.target_above_player_id in current_pids
+        ):
+            above_idx = current_pids.index(payload.target_above_player_id)
+            insert_idx = above_idx + 1
+        elif (
+            payload.target_below_player_id
+            and payload.target_below_player_id in current_pids
+        ):
+            below_idx = current_pids.index(payload.target_below_player_id)
+            insert_idx = below_idx
+        elif not payload.target_above_player_id:
+            # Moved to the very top (#1)
+            insert_idx = 0
+
+        # Insert moved player at the target index
+        current_pids.insert(insert_idx, payload.player_id)
+
+        # 3. Upsert dense integer ranks (1.0, 2.0, 3.0...) into board_player_order
         upsert_query = """
             INSERT INTO board_player_order (board_type, player_id, manual_rank, is_pinned, updated_at)
             VALUES ($1, $2, $3, TRUE, CURRENT_TIMESTAMP)
-            ON CONFLICT (board_type, player_id) DO UPDATE SET
+            ON CONFLICT (board_type, player_id)
+            DO UPDATE SET 
                 manual_rank = EXCLUDED.manual_rank,
                 is_pinned = TRUE,
                 updated_at = CURRENT_TIMESTAMP;
         """
-        await conn.execute(upsert_query, board_type, req.player_id, new_rank)
+
+        async with conn.transaction():
+            for idx, pid in enumerate(current_pids):
+                assigned_rank = float(idx + 1)
+                await conn.execute(upsert_query, board_type, pid, assigned_rank)
 
         return {
             "status": "success",
             "board_type": board_type,
-            "player_id": req.player_id,
-            "new_manual_rank": new_rank,
+            "player_id": payload.player_id,
+            "new_manual_rank": float(insert_idx + 1),
         }
     finally:
         await conn.close()
