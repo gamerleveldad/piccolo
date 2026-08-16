@@ -753,17 +753,15 @@ async def get_sleeper_drafts(league_id: str):
 
 
 @app.get("/api/sleeper/draft/{draft_id}/state")
-async def get_draft_state(draft_id: str, user_id: str | None = None):
+async def get_draft_state(draft_id: str, user_id: str = None, roster_id: str = None):
     """
-    Fetches live picks for a draft, tracks drafted player IDs,
-    user roster positions, and auction budget remaining.
-    Includes advanced tracing to map User IDs to mock draft Roster IDs.
+    Fetches live picks for a draft. Includes a manual `roster_id` override
+    to handle anonymous or auction mock drafts where Sleeper hides user mappings.
     """
     draft_url = f"https://api.sleeper.app/v1/draft/{draft_id}"
     picks_url = f"https://api.sleeper.app/v1/draft/{draft_id}/picks"
 
     async with aiohttp.ClientSession() as session:
-        # Resolve numeric user_id if text username was provided
         if user_id and not user_id.isdigit():
             user_url = f"https://api.sleeper.app/v1/user/{user_id}"
             async with session.get(user_url) as user_resp:
@@ -778,18 +776,24 @@ async def get_draft_state(draft_id: str, user_id: str | None = None):
             picks = await picks_resp.json() if picks_resp.status == 200 else []
 
     user_id_str = str(user_id) if user_id is not None else None
-    user_roster_id_str = None
 
-    # Step 1: Trace User ID -> Draft Slot -> Roster ID (Crucial for Mock Drafts)
-    if user_id_str and draft_meta:
+    # 1. Use manual override if provided
+    user_roster_id_str = str(roster_id) if roster_id else None
+
+    # 2. If no override, try to auto-resolve from Sleeper metadata
+    if not user_roster_id_str and user_id_str and draft_meta:
         draft_order = draft_meta.get("draft_order") or {}
-        # Find which slot the user is assigned to
         d_slot = draft_order.get(user_id_str)
-
         if d_slot:
-            # Map the slot to the actual roster/team ID
             slot_to_roster = draft_meta.get("slot_to_roster_id") or {}
             user_roster_id_str = str(slot_to_roster.get(str(d_slot), d_slot))
+
+        # 3. Fallback: Scan picks to see if user_id made a pick and snag their roster_id
+        if not user_roster_id_str:
+            for p in picks:
+                if str(p.get("picked_by") or "") == user_id_str:
+                    user_roster_id_str = str(p.get("roster_id") or "")
+                    break
 
     drafted_player_ids = []
     my_roster = {"QB": [], "RB": [], "WR": [], "TE": [], "DEF": [], "K": [], "ALL": []}
@@ -802,21 +806,19 @@ async def get_draft_state(draft_id: str, user_id: str | None = None):
 
         drafted_player_ids.append(pid)
 
-        picked_by = str(pick.get("picked_by") or "")
-        roster_id = str(pick.get("roster_id") or "")
+        pick_owner_user = str(pick.get("picked_by") or "")
+        pick_roster_id = str(pick.get("roster_id") or "")
 
-        # Step 2: Validate ownership against both picked_by and roster_id
+        # Validate ownership
         is_my_pick = False
-        if (user_id_str and picked_by == user_id_str) or (
-            user_roster_id_str and roster_id == user_roster_id_str
-        ):
+        if user_roster_id_str and pick_roster_id == user_roster_id_str:
+            is_my_pick = True
+        elif not user_roster_id_str and user_id_str and pick_owner_user == user_id_str:
             is_my_pick = True
 
         if is_my_pick:
             metadata = pick.get("metadata", {})
             pos = metadata.get("position", "ALL")
-
-            # Step 3: Extract auction amount
             amount_val = metadata.get("amount") or pick.get("amount") or 0
 
             my_roster["ALL"].append(pid)
@@ -927,8 +929,10 @@ def calculate_roster_need_multiplier(pos: str, drafted_count: int) -> float:
 
 
 @app.get("/api/draft/recommendations")
-async def get_live_recommendations(draft_id: str, user_id: str, format: str = "snake"):
-    draft_state = await get_draft_state(draft_id, user_id)
+async def get_live_recommendations(
+    draft_id: str, user_id: str, format: str = "snake", roster_id: str = None
+):
+    draft_state = await get_draft_state(draft_id, user_id, roster_id)
     drafted_set = {str(pid) for pid in draft_state["drafted_player_ids"]}
     my_roster_pids = [str(pid) for pid in draft_state["my_roster"]["ALL"]]
 
