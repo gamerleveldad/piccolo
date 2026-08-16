@@ -487,7 +487,7 @@ async def get_draft_board(board_type: str):
 
         draft_board.sort(key=board_sort_key)
 
-        return {"board_type": board_type, "players": draft_board}
+        return {"board_type": board_type, "draft_board": draft_board}
     finally:
         await conn.close()
 
