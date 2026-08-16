@@ -427,7 +427,7 @@ async def get_draft_board(board_type: str = "standard"):
               AND (p.status IS NULL OR LOWER(p.status) NOT IN ('inactive', 'retired', 'cut'))
             ORDER BY b.manual_rank ASC NULLS LAST, p.projected_points DESC NULLS LAST
         """
-        rows = await conn.fetch(query)
+        rows = await conn.fetch(query, board_type)
 
         # 3. Check for manual board pins/overrides if table exists
         pinned_dict = {}
