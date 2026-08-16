@@ -755,13 +755,14 @@ async def get_sleeper_drafts(league_id: str):
 @app.get("/api/sleeper/draft/{draft_id}/state")
 async def get_draft_state(draft_id: str, user_id: str = None, roster_id: str = None):
     """
-    Fetches live picks for a draft. Includes a manual `roster_id` override
-    to handle anonymous or auction mock drafts where Sleeper hides user mappings.
+    Fetches live picks for a draft. Uses deep metadata extraction to bypass
+    Sleeper's hidden roster_ids in Auction Mock Drafts.
     """
     draft_url = f"https://api.sleeper.app/v1/draft/{draft_id}"
     picks_url = f"https://api.sleeper.app/v1/draft/{draft_id}/picks"
 
     async with aiohttp.ClientSession() as session:
+        # Resolve numeric user_id if text username was provided
         if user_id and not user_id.isdigit():
             user_url = f"https://api.sleeper.app/v1/user/{user_id}"
             async with session.get(user_url) as user_resp:
@@ -777,23 +778,16 @@ async def get_draft_state(draft_id: str, user_id: str = None, roster_id: str = N
 
     user_id_str = str(user_id) if user_id is not None else None
 
-    # 1. Use manual override if provided
-    user_roster_id_str = str(roster_id) if roster_id else None
+    # 1. Clean the manual override
+    user_roster_id_str = str(roster_id).strip() if roster_id else None
 
-    # 2. If no override, try to auto-resolve from Sleeper metadata
+    # 2. Fallback auto-resolution if no override is provided
     if not user_roster_id_str and user_id_str and draft_meta:
         draft_order = draft_meta.get("draft_order") or {}
         d_slot = draft_order.get(user_id_str)
         if d_slot:
             slot_to_roster = draft_meta.get("slot_to_roster_id") or {}
             user_roster_id_str = str(slot_to_roster.get(str(d_slot), d_slot))
-
-        # 3. Fallback: Scan picks to see if user_id made a pick and snag their roster_id
-        if not user_roster_id_str:
-            for p in picks:
-                if str(p.get("picked_by") or "") == user_id_str:
-                    user_roster_id_str = str(p.get("roster_id") or "")
-                    break
 
     drafted_player_ids = []
     my_roster = {"QB": [], "RB": [], "WR": [], "TE": [], "DEF": [], "K": [], "ALL": []}
@@ -806,19 +800,29 @@ async def get_draft_state(draft_id: str, user_id: str = None, roster_id: str = N
 
         drafted_player_ids.append(pid)
 
+        metadata = pick.get("metadata") or {}
         pick_owner_user = str(pick.get("picked_by") or "")
-        pick_roster_id = str(pick.get("roster_id") or "")
 
-        # Validate ownership
+        # Deep extraction for Auction Mocks where roster_id is buried
+        pick_roster_id = str(
+            pick.get("roster_id")
+            or metadata.get("roster_id")
+            or metadata.get("team_id")
+            or ""
+        )
+
         is_my_pick = False
+
+        # Match 1: Manual Override matches the deep-extracted roster ID
         if user_roster_id_str and pick_roster_id == user_roster_id_str:
             is_my_pick = True
-        elif not user_roster_id_str and user_id_str and pick_owner_user == user_id_str:
+        # Match 2: Real user ID matches the pick owner
+        elif user_id_str and user_id_str.isdigit() and pick_owner_user == user_id_str:
             is_my_pick = True
 
         if is_my_pick:
-            metadata = pick.get("metadata", {})
             pos = metadata.get("position", "ALL")
+            # Extract amount from metadata or root
             amount_val = metadata.get("amount") or pick.get("amount") or 0
 
             my_roster["ALL"].append(pid)
@@ -830,7 +834,8 @@ async def get_draft_state(draft_id: str, user_id: str = None, roster_id: str = N
             except (ValueError, TypeError):
                 pass
 
-    total_budget = draft_meta.get("settings", {}).get("budget", 200) or 200
+    # Safety catch for budget setting
+    total_budget = draft_meta.get("settings", {}).get("budget") or 200
 
     return {
         "draft_id": draft_id,
