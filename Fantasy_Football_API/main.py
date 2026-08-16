@@ -402,18 +402,16 @@ async def fetch_team_unit_ranks(conn) -> dict:
 
 
 @app.get("/api/ti/board/{board_type}")
-async def get_draft_board(board_type: str = "standard"):
+async def get_draft_board(board_type: str):
     """
-    Fetches the draft board (standard, dynasty, or chopped),
-    applies TI score calculations, depth chart penalties,
-    filters inactive/teamless players, and sorts by effective rank.
+    Fetches the draft board, reading persisted drag-and-drop ranks
+    from `board_player_order`.
     """
     conn = await get_db_connection()
     try:
-        # 1. Fetch current team unit rankings
         unit_ranks = await fetch_team_unit_ranks(conn)
 
-        # 2. Query active players (excluding Free Agents, UNK, and Inactive/Retired players)
+        # 1. Fetch players joined with board_player_order
         query = """
             SELECT 
                 p.*,
@@ -429,48 +427,30 @@ async def get_draft_board(board_type: str = "standard"):
         """
         rows = await conn.fetch(query, board_type)
 
-        # 3. Check for manual board pins/overrides if table exists
-        pinned_dict = {}
-        try:
-            pins = await conn.fetch(
-                "SELECT player_id, manual_rank FROM board_pins WHERE board_type = $1",
-                board_type,
-            )
-            pinned_dict = {p["player_id"]: p["manual_rank"] for p in pins}
-        except asyncpg.PostgresError as e:
-            # Log and continue if the board_pins table/query is unavailable or fails
-            logger.warning(
-                "Unable to fetch board_pins for board_type=%s; continuing without pins: %s",
-                board_type,
-                e,
-            )
-
         draft_board = []
         for p in rows:
             p_id = p["player_id"]
 
-            # Compute TI Scores
             score_data = calculate_ti_score(
                 projected_pts=p.get("projected_points") or 0.0,
                 historical_pts=p.get("historical_avg_points") or 0.0,
                 coefficient_of_variation=p.get("consistency_score"),
                 team_ranks=unit_ranks,
                 position=p.get("position") or "WR",
+                years_exp=p.get("years_exp"),
                 age=p.get("age"),
                 depth_chart_order=p.get("depth_chart_order"),
             )
 
-            is_pinned = p_id in pinned_dict
+            c_score = p.get("consistency_score")
+            cons_data = format_consistency_score(c_score)
 
-            # Select target score based on requested board type
+            # Select target score based on board mode
             target_score = (
                 score_data["ti_score_dynasty"]
                 if board_type == "dynasty"
                 else score_data["ti_score"]
             )
-
-            c_score = p.get("consistency_score")
-            cons_data = format_consistency_score(c_score)
 
             draft_board.append(
                 {
@@ -482,8 +462,8 @@ async def get_draft_board(board_type: str = "standard"):
                     "bye_week": p.get("bye_week"),
                     "depth_chart_position": p.get("depth_chart_position"),
                     "depth_chart_order": p.get("depth_chart_order"),
-                    "is_pinned": is_pinned,
-                    "manual_rank": pinned_dict.get(p_id),
+                    "is_pinned": p["is_pinned"],
+                    "manual_rank": p["manual_rank"],
                     "ti_score": score_data["ti_score"],
                     "ti_score_dynasty": score_data["ti_score_dynasty"],
                     "consistency_score": cons_data["rating"],
@@ -496,24 +476,18 @@ async def get_draft_board(board_type: str = "standard"):
                 }
             )
 
-        # Sort by mathematical score descending
-        draft_board.sort(key=lambda x: x["target_score"], reverse=True)
+        # 2. Sort: Manual ranks take absolute priority (1.0, 2.0, 3.0...), unranked players fall back to target_score
+        def board_sort_key(x):
+            has_manual = x["manual_rank"] is not None
+            # False (has manual rank) sorts before True (no manual rank)
+            return (
+                not has_manual,
+                x["manual_rank"] if has_manual else -x["target_score"],
+            )
 
-        # Calculate effective_rank for each player (honoring manual pins)
-        for idx, item in enumerate(draft_board):
-            if item["is_pinned"] and item["manual_rank"] is not None:
-                item["effective_rank"] = float(item["manual_rank"])
-            else:
-                item["effective_rank"] = float(idx + 1)
+        draft_board.sort(key=board_sort_key)
 
-        # Final sort by effective rank ascending
-        draft_board.sort(key=lambda x: x["effective_rank"])
-
-        return {
-            "count": len(draft_board),
-            "board_type": board_type,
-            "draft_board": draft_board,
-        }
+        return {"board_type": board_type, "players": draft_board}
     finally:
         await conn.close()
 
@@ -521,11 +495,11 @@ async def get_draft_board(board_type: str = "standard"):
 @app.post("/api/ti/board/{board_type}/reorder")
 async def reorder_board_player(board_type: str, payload: ReorderPayload):
     """
-    Persists manual drag-and-drop reordering to the `board_player_order` table.
+    Saves new manual ranks to `board_player_order` upon drag-and-drop.
     """
     conn = await get_db_connection()
     try:
-        # 1. Fetch current display order of all active players on this board
+        # Fetch current player order for this board
         query = """
             SELECT 
                 p.player_id,
@@ -541,14 +515,13 @@ async def reorder_board_player(board_type: str, payload: ReorderPayload):
         """
         rows = await conn.fetch(query, board_type)
 
-        # Current list of player IDs excluding the player being moved
+        # Exclude the dragged player to compute insertion point
         current_pids = [
             r["player_id"] for r in rows if r["player_id"] != payload.player_id
         ]
 
-        # 2. Determine target insertion index
-        insert_idx = len(current_pids)  # Default fallback: end of list
-
+        # Calculate new insertion index
+        insert_idx = len(current_pids)
         if (
             payload.target_above_player_id
             and payload.target_above_player_id in current_pids
@@ -562,14 +535,13 @@ async def reorder_board_player(board_type: str, payload: ReorderPayload):
             below_idx = current_pids.index(payload.target_below_player_id)
             insert_idx = below_idx
         elif not payload.target_above_player_id:
-            # Moved to the very top (#1)
             insert_idx = 0
 
-        # Insert moved player at the target index
+        # Insert at new position
         current_pids.insert(insert_idx, payload.player_id)
 
-        # 3. Upsert dense integer ranks (1.0, 2.0, 3.0...) into board_player_order
-        upsert_query = """
+        # Upsert sequential ranks (1.0, 2.0, 3.0...) into board_player_order
+        upsert_sql = """
             INSERT INTO board_player_order (board_type, player_id, manual_rank, is_pinned, updated_at)
             VALUES ($1, $2, $3, TRUE, CURRENT_TIMESTAMP)
             ON CONFLICT (board_type, player_id)
@@ -581,8 +553,7 @@ async def reorder_board_player(board_type: str, payload: ReorderPayload):
 
         async with conn.transaction():
             for idx, pid in enumerate(current_pids):
-                assigned_rank = float(idx + 1)
-                await conn.execute(upsert_query, board_type, pid, assigned_rank)
+                await conn.execute(upsert_sql, board_type, pid, float(idx + 1))
 
         return {
             "status": "success",
