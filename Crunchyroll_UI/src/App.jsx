@@ -222,7 +222,51 @@ export default function App() {
         <h1 className="text-3xl lg:text-4xl font-bold tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-crviolet to-crsilver">
           TRACKER WIDGET
         </h1>
+        <p className="text-xs lg:text-sm text-gray-400 uppercase tracking-widest mt-1">
+          Active Season Matrix
+        </p>
       </header>
+
+      {/* --- SCHEDULE CALENDAR --- */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-4 mb-12 lg:mb-16">
+        {daysOfWeek.map((day, index) => {
+          const isToday = index === currentDayIndex;
+          const dayShows = schedule.filter((show) => show.weekday === index);
+
+          return (
+            <div
+              key={day}
+              className={`rounded-lg p-4 border transition-all ${
+                isToday
+                  ? "bg-crpanel border-crviolet shadow-[0_0_15px_rgba(139,92,246,0.2)]"
+                  : "bg-crbase border-gray-800"
+              }`}
+            >
+              <h2
+                className={`text-center font-bold mb-4 uppercase text-sm ${isToday ? "text-crviolet" : "text-crsilver"}`}
+              >
+                {day}
+              </h2>
+              <div className="space-y-3">
+                {dayShows.length > 0 ? (
+                  dayShows.map((show) => (
+                    <div
+                      key={show.name}
+                      className="bg-gray-900/80 p-2 rounded text-xs border border-gray-800 text-center lg:text-left text-gray-300"
+                    >
+                      {show.name}
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-gray-600 text-xs text-center italic">
+                    No drops
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
       {/* --- ACTIVE PROGRESS WIDGET --- */}
       {history.filter((item) => item.status === "Watching").length > 0 && (
