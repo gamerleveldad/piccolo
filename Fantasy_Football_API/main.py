@@ -1057,6 +1057,18 @@ async def get_live_recommendations(
             c_score = p.get("consistency_score")
             cons_data = format_consistency_score(c_score)
 
+            # PARSE TAGS PER-PLAYER HERE:
+            raw_tags = p.get("custom_tags")
+            if isinstance(raw_tags, str):
+                try:
+                    player_tags = json.loads(raw_tags)
+                except Exception:
+                    player_tags = []
+            elif isinstance(raw_tags, list):
+                player_tags = raw_tags
+            else:
+                player_tags = []
+
             available_players.append(
                 {
                     "player_id": p["player_id"],
@@ -1078,7 +1090,7 @@ async def get_live_recommendations(
                     "bye_message": bye_check["message"],
                     "vorp_score": final_vorp,
                     "roster_need_mult": need_mult,
-                    "custom_tags": parsed_tags,
+                    "custom_tags": player_tags,  # <-- Correct per-player tags
                     "auction_max_bid": 0,
                 }
             )
@@ -1206,7 +1218,7 @@ async def update_player_tags(player_id: str, payload: TagPayload):
         await conn.execute(
             """
             UPDATE player_ti
-            SET custom_tags = $1
+            SET custom_tags = $1::jsonb
             WHERE player_id = $2
         """,
             json.dumps(payload.tags),
