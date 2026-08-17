@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -111,6 +112,11 @@ async def lifespan(app: FastAPI):
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (board_type, player_id)
             );
+        """)
+
+        await conn.execute("""
+            ALTER TABLE player_ti 
+            ADD COLUMN IF NOT EXISTS custom_tags JSONB DEFAULT '[]'::jsonb;
         """)
         logger.info("Database schemas verified successfully via lifespan startup.")
     except (asyncpg.PostgresError, OSError) as e:
@@ -444,7 +450,10 @@ async def get_draft_board(board_type: str):
 
             c_score = p.get("consistency_score")
             cons_data = format_consistency_score(c_score)
-
+            raw_tags = p.get("custom_tags")
+            parsed_tags = (
+                json.loads(raw_tags) if isinstance(raw_tags, str) else (raw_tags or [])
+            )
             # Select target score based on board mode
             target_score = (
                 score_data["ti_score_dynasty"]
@@ -472,6 +481,7 @@ async def get_draft_board(board_type: str):
                     "projected_points": p.get("projected_points") or 0.0,
                     "projected_next_game": p.get("projected_next_game") or 0.0,
                     "projected_next_4": p.get("projected_next_4") or 0.0,
+                    "custom_tags": parsed_tags,
                     "details": score_data,
                 }
             )
@@ -995,6 +1005,10 @@ async def get_live_recommendations(
                 p.get("position", "WR"), p.get("bye_week"), my_roster_byes
             )
             pos = p.get("position", "WR").upper()
+            raw_tags = p.get("custom_tags")
+            parsed_tags = (
+                json.loads(raw_tags) if isinstance(raw_tags, str) else (raw_tags or [])
+            )
 
             raw_player_data.append(
                 {
@@ -1064,6 +1078,7 @@ async def get_live_recommendations(
                     "bye_message": bye_check["message"],
                     "vorp_score": final_vorp,
                     "roster_need_mult": need_mult,
+                    "custom_tags": parsed_tags,
                     "auction_max_bid": 0,
                 }
             )
@@ -1176,5 +1191,27 @@ async def upload_handcuffs_csv(file: UploadFile = HANDCUFF_CSV_FILE):
                 updated += 1
 
         return {"status": "success", "updated": updated}
+    finally:
+        await conn.close()
+
+
+class TagPayload(BaseModel):
+    tags: list[str]
+
+
+@app.post("/api/ti/player/{player_id}/tags")
+async def update_player_tags(player_id: str, payload: TagPayload):
+    conn = await get_db_connection()
+    try:
+        await conn.execute(
+            """
+            UPDATE player_ti
+            SET custom_tags = $1
+            WHERE player_id = $2
+        """,
+            json.dumps(payload.tags),
+            player_id,
+        )
+        return {"status": "success", "player_id": player_id, "tags": payload.tags}
     finally:
         await conn.close()
