@@ -26,6 +26,99 @@ const LiveDraftView = () => {
     return parts[parts.length - 1];
   };
 
+  // Add near top of LiveDraftView.jsx
+  const TAG_OPTIONS = [
+    {
+      value: "PPR Monster",
+      label: "PPR Monster",
+      icon: "/icons/ppr.svg",
+      color: "#F1C27D",
+    },
+    {
+      value: "Injury Risk",
+      label: "Injury Risk",
+      icon: "/icons/injury.svg",
+      color: "#E60000",
+      outline: "#FFFFFF",
+    },
+    {
+      value: "Breakout",
+      label: "Breakout Potential",
+      icon: "/icons/breakout.svg",
+      color: "#87CEFA",
+    },
+    {
+      value: "Rookie",
+      label: "Rookie",
+      icon: "/icons/rookie.svg",
+      color: "#32CD32",
+    },
+    {
+      value: "Handcuff",
+      label: "Premium Handcuff",
+      icon: "/icons/handcuff.svg",
+      color: "#C0C0C0",
+    },
+    {
+      value: "DND",
+      label: "Do Not Draft",
+      icon: "/icons/dnd.svg",
+      color: "#FF2400",
+    },
+    { value: "Star", label: "Star", icon: "/icons/star.svg", color: "#FFD700" },
+    {
+      value: "Regression",
+      label: "Regression Candidate",
+      icon: "/icons/regression.svg",
+      color: "#B22222",
+    },
+    {
+      value: "Hidden Gem",
+      label: "Hidden Gem",
+      icon: "/icons/gem.svg",
+      color: "#9966CC",
+    },
+    {
+      value: "Goalline",
+      label: "Goalline Back",
+      icon: "/icons/goalline.svg",
+      color: "#4682B4",
+    },
+  ];
+
+  const SvgIcon = ({ icon, color, outline }) => {
+    const filterStyle = outline
+      ? `drop-shadow(1px 0px 0px ${outline}) drop-shadow(0px 1px 0px ${outline}) drop-shadow(-1px 0px 0px ${outline}) drop-shadow(0px -1px 0px ${outline})`
+      : "none";
+
+    return (
+      <div
+        style={{
+          filter: filterStyle,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <div
+          style={{
+            width: "18px",
+            height: "18px",
+            backgroundColor: color,
+            WebkitMaskImage: `url(${icon})`,
+            WebkitMaskSize: "contain",
+            WebkitMaskRepeat: "no-repeat",
+            WebkitMaskPosition: "center",
+            maskImage: `url(${icon})`,
+            maskSize: "contain",
+            maskRepeat: "no-repeat",
+            maskPosition: "center",
+          }}
+        />
+      </div>
+    );
+  };
+
   // Fetch leagues for entered username
   const handleFetchLeagues = async () => {
     if (!username) return;
@@ -267,6 +360,33 @@ const LiveDraftView = () => {
               </div>
 
               <div className="header-right">
+                <div
+                  className="tag-icon-bar"
+                  style={{
+                    display: "flex",
+                    gap: "5px",
+                    alignItems: "center",
+                    marginRight: "8px",
+                  }}
+                >
+                  {(player.custom_tags || []).map((tagVal) => {
+                    const opt = TAG_OPTIONS.find((o) => o.value === tagVal);
+                    if (!opt) return null;
+                    return (
+                      <div
+                        key={tagVal}
+                        title={opt.label}
+                        style={{ display: "flex", alignItems: "center" }}
+                      >
+                        <SvgIcon
+                          icon={opt.icon}
+                          color={opt.color}
+                          outline={opt.outline}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
                 {player.depth_chart_order && (
                   <span className="badge depth-badge">
                     Depth: {player.position}
