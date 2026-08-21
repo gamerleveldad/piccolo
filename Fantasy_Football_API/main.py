@@ -1,3 +1,4 @@
+import io
 import json
 import logging
 import os
@@ -6,6 +7,7 @@ from typing import Optional
 
 import aiohttp
 import asyncpg  # type: ignore[import]
+import pandas as pd  # type: ignore[import]
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -18,7 +20,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("fantasy_api")
 
-# adding environment variables for Sleeper API and PostgreSQL connection
+# Environment variables for Sleeper API and PostgreSQL connection
 SLEEPER_USERNAME = os.getenv("SLEEPER_USERNAME", "your_username")
 SLEEPER_SEASON = os.getenv("SLEEPER_SEASON", "2026")
 SLEEPER_DYNASTY_LEAGUE_ID = os.getenv(
@@ -30,10 +32,25 @@ POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "password")
 POSTGRES_DB = os.getenv("POSTGRES_DB", "postgres")
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres_db")
 
+# Global Resource Pointers
+db_pool = None
+http_session = None
 
-async def get_db_connection():
-    db_url = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:5432/{POSTGRES_DB}"
-    return await asyncpg.connect(db_url)
+
+# --- LAZY LOADERS: Bulletproof memory management ---
+async def get_db():
+    global db_pool
+    if db_pool is None:
+        db_url = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:5432/{POSTGRES_DB}"
+        db_pool = await asyncpg.create_pool(db_url, min_size=1, max_size=10)
+    return db_pool
+
+
+async def get_session():
+    global http_session
+    if http_session is None:
+        http_session = aiohttp.ClientSession()
+    return http_session
 
 
 @asynccontextmanager
@@ -42,92 +59,94 @@ async def lifespan(app: FastAPI):
     Handles application startup and shutdown events.
     Verifies and creates required PostgreSQL table schemas before accepting requests.
     """
-    # Startup execution
-    conn = await get_db_connection()
     try:
-        # Create team_unit_rankings table
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS team_unit_rankings (
-                team_abbr VARCHAR(5) PRIMARY KEY,
-                oline_rank INT CHECK (oline_rank BETWEEN 1 AND 32),
-                qb_rank INT CHECK (qb_rank BETWEEN 1 AND 32),
-                wr_rank INT CHECK (wr_rank BETWEEN 1 AND 32),
-                te_rank INT CHECK (te_rank BETWEEN 1 AND 32),
-                rb_rank INT CHECK (rb_rank BETWEEN 1 AND 32),
-                def_rank INT CHECK (def_rank BETWEEN 1 AND 32),
-                off_rank INT CHECK (off_rank BETWEEN 1 AND 32),
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
+        pool = await get_db()
+        async with pool.acquire() as conn:
+            # Create team_unit_rankings table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS team_unit_rankings (
+                    team_abbr VARCHAR(5) PRIMARY KEY,
+                    oline_rank INT CHECK (oline_rank BETWEEN 1 AND 32),
+                    qb_rank INT CHECK (qb_rank BETWEEN 1 AND 32),
+                    wr_rank INT CHECK (wr_rank BETWEEN 1 AND 32),
+                    te_rank INT CHECK (te_rank BETWEEN 1 AND 32),
+                    rb_rank INT CHECK (rb_rank BETWEEN 1 AND 32),
+                    def_rank INT CHECK (def_rank BETWEEN 1 AND 32),
+                    off_rank INT CHECK (off_rank BETWEEN 1 AND 32),
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
 
-        # Create player_ti table
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS player_ti (
-                player_id VARCHAR(50) PRIMARY KEY,
-                player_name VARCHAR(100),
-                position VARCHAR(10),
-                team_abbr VARCHAR(5),
-                age INT,
-                bye_week INT,
-                adp FLOAT,
-                consensus_rank INT,
-                projected_points FLOAT,
-                projected_next_game FLOAT,
-                projected_next_4 FLOAT,
-                historical_avg_points FLOAT,
-                consistency_score FLOAT,
-                team_synergy_multiplier FLOAT,
-                ti_score FLOAT,
-                ti_score_dynasty FLOAT,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
+            # Create player_ti table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS player_ti (
+                    player_id VARCHAR(50) PRIMARY KEY,
+                    player_name VARCHAR(100),
+                    position VARCHAR(10),
+                    team_abbr VARCHAR(5),
+                    age INT,
+                    bye_week INT,
+                    adp FLOAT,
+                    consensus_rank INT,
+                    projected_points FLOAT,
+                    projected_next_game FLOAT,
+                    projected_next_4 FLOAT,
+                    historical_avg_points FLOAT,
+                    consistency_score FLOAT,
+                    team_synergy_multiplier FLOAT,
+                    ti_score FLOAT,
+                    ti_score_dynasty FLOAT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
 
-        # Safely append new metadata columns to the existing table
-        await conn.execute("""
-            ALTER TABLE player_ti 
-            ADD COLUMN IF NOT EXISTS practice_participation VARCHAR(50),
-            ADD COLUMN IF NOT EXISTS depth_chart_position VARCHAR(20),
-            ADD COLUMN IF NOT EXISTS status VARCHAR(50),
-            ADD COLUMN IF NOT EXISTS depth_chart_order INT,
-            ADD COLUMN IF NOT EXISTS years_exp INT,
-            ADD COLUMN IF NOT EXISTS fantasy_positions VARCHAR(50),
-            ADD COLUMN IF NOT EXISTS practice_description VARCHAR(255),
-            ADD COLUMN IF NOT EXISTS injury_body_part VARCHAR(50),
-            ADD COLUMN IF NOT EXISTS search_rank INT,
-            ADD COLUMN IF NOT EXISTS sleeper_id VARCHAR(50),
-            ADD COLUMN IF NOT EXISTS espn_id VARCHAR(50),
-            ADD COLUMN IF NOT EXISTS yahoo_id VARCHAR(50),
-            ADD COLUMN IF NOT EXISTS sportradar_id VARCHAR(50),
-            ADD COLUMN IF NOT EXISTS rotowire_id VARCHAR(50);
-        """)
+            # Safely append new metadata columns to the existing table
+            await conn.execute("""
+                ALTER TABLE player_ti 
+                ADD COLUMN IF NOT EXISTS practice_participation VARCHAR(50),
+                ADD COLUMN IF NOT EXISTS depth_chart_position VARCHAR(20),
+                ADD COLUMN IF NOT EXISTS status VARCHAR(50),
+                ADD COLUMN IF NOT EXISTS depth_chart_order INT,
+                ADD COLUMN IF NOT EXISTS years_exp INT,
+                ADD COLUMN IF NOT EXISTS fantasy_positions VARCHAR(50),
+                ADD COLUMN IF NOT EXISTS practice_description VARCHAR(255),
+                ADD COLUMN IF NOT EXISTS injury_body_part VARCHAR(50),
+                ADD COLUMN IF NOT EXISTS search_rank INT,
+                ADD COLUMN IF NOT EXISTS sleeper_id VARCHAR(50),
+                ADD COLUMN IF NOT EXISTS espn_id VARCHAR(50),
+                ADD COLUMN IF NOT EXISTS yahoo_id VARCHAR(50),
+                ADD COLUMN IF NOT EXISTS sportradar_id VARCHAR(50),
+                ADD COLUMN IF NOT EXISTS rotowire_id VARCHAR(50),
+                ADD COLUMN IF NOT EXISTS custom_tags JSONB DEFAULT '[]'::jsonb;
+            """)
 
-        # Create board_player_order table for custom drag-and-drop overrides
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS board_player_order (
-                board_type VARCHAR(50) NOT NULL,
-                player_id VARCHAR(50) NOT NULL,
-                manual_rank FLOAT NOT NULL,
-                is_pinned BOOLEAN DEFAULT TRUE,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (board_type, player_id)
-            );
-        """)
+            # Create board_player_order table for custom drag-and-drop overrides
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS board_player_order (
+                    board_type VARCHAR(50) NOT NULL,
+                    player_id VARCHAR(50) NOT NULL,
+                    manual_rank FLOAT NOT NULL,
+                    is_pinned BOOLEAN DEFAULT TRUE,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (board_type, player_id)
+                );
+            """)
 
-        await conn.execute("""
-            ALTER TABLE player_ti 
-            ADD COLUMN IF NOT EXISTS custom_tags JSONB DEFAULT '[]'::jsonb;
-        """)
         logger.info("Database schemas verified successfully via lifespan startup.")
     except (asyncpg.PostgresError, OSError) as e:
         logger.error(f"Failed to initialize database schemas during startup: {e}")
-    finally:
-        await conn.close()
 
-    # Yield control back to FastAPI to serve requests
+    # Initialize session on startup
+    await get_session()
+
     yield
 
-    # Shutdown logic can be placed here if needed in the future
+    # Shutdown logic
+    global http_session, db_pool
+    if http_session:
+        await http_session.close()
+    if db_pool:
+        await db_pool.close()
 
 
 # Initialize FastAPI app using the lifespan context manager
@@ -150,96 +169,87 @@ async def health_check():
 @app.get("/api/sleeper/familydynasty")
 async def get_sleeper_matchups():
     url_league = f"https://api.sleeper.app/v1/league/{SLEEPER_DYNASTY_LEAGUE_ID}"
+    session = await get_session()
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url_league) as resp:
-                if resp.status != 200:
-                    return {"mode": "disabled"}
-                league_data = await resp.json()
+        async with session.get(url_league) as resp:
+            if resp.status != 200:
+                return {"mode": "disabled"}
+            league_data = await resp.json()
 
-            if league_data.get("status") == "pre_draft":
-                url_drafts = f"https://api.sleeper.app/v1/league/{SLEEPER_DYNASTY_LEAGUE_ID}/drafts"
-                async with session.get(url_drafts) as d_resp:
-                    drafts = await d_resp.json()
-                    if drafts:
-                        return {
-                            "mode": "draft",
-                            "name": league_data.get("name"),
-                            "draft_start": drafts[0].get("start_time"),
-                        }
-
-            current_week = league_data.get("settings", {}).get("leg", 1)
-
-            async with session.get(
-                f"https://api.sleeper.app/v1/league/{SLEEPER_DYNASTY_LEAGUE_ID}/users"
-            ) as u_resp:
-                users = await u_resp.json()
-                user_map = {
-                    u["user_id"]: u.get("metadata", {}).get(
-                        "team_name", u["display_name"]
-                    )
-                    for u in users
-                }
-
-            async with session.get(
-                f"https://api.sleeper.app/v1/league/{SLEEPER_DYNASTY_LEAGUE_ID}/rosters"
-            ) as r_resp:
-                rosters = await r_resp.json()
-                roster_to_owner = {
-                    r["roster_id"]: user_map.get(
-                        r["owner_id"], f"Team {r['roster_id']}"
-                    )
-                    for r in rosters
-                }
-
-            async with session.get(
-                f"https://api.sleeper.app/v1/league/{SLEEPER_DYNASTY_LEAGUE_ID}/matchups/{current_week}"
-            ) as m_resp:
-                matchups_raw = await m_resp.json()
-
-            match_groups = {}
-            for team in matchups_raw:
-                m_id = team.get("matchup_id")
-                if m_id not in match_groups:
-                    match_groups[m_id] = []
-
-                match_groups[m_id].append(
-                    {
-                        "owner_name": roster_to_owner.get(team["roster_id"], "Unknown"),
-                        "points": team.get("points", 0.0),
-                        "projected_points": sum(team.get("starters_points", [0])),
-                        "starters": team.get("starters", []),
-                        "players": team.get("players", []),
-                        "custom_roster_points_map": team.get("players_points", {}),
+        if league_data.get("status") == "pre_draft":
+            url_drafts = (
+                f"https://api.sleeper.app/v1/league/{SLEEPER_DYNASTY_LEAGUE_ID}/drafts"
+            )
+            async with session.get(url_drafts) as d_resp:
+                drafts = await d_resp.json()
+                if drafts:
+                    return {
+                        "mode": "draft",
+                        "name": league_data.get("name"),
+                        "draft_start": drafts[0].get("start_time"),
                     }
-                )
 
-            return {
-                "mode": "matchups",
-                "week": current_week,
-                "matchups": list(match_groups.values()),
+        current_week = league_data.get("settings", {}).get("leg", 1)
+
+        async with session.get(
+            f"https://api.sleeper.app/v1/league/{SLEEPER_DYNASTY_LEAGUE_ID}/users"
+        ) as u_resp:
+            users = await u_resp.json()
+            user_map = {
+                u["user_id"]: u.get("metadata", {}).get("team_name", u["display_name"])
+                for u in users
             }
+
+        async with session.get(
+            f"https://api.sleeper.app/v1/league/{SLEEPER_DYNASTY_LEAGUE_ID}/rosters"
+        ) as r_resp:
+            rosters = await r_resp.json()
+            roster_to_owner = {
+                r["roster_id"]: user_map.get(r["owner_id"], f"Team {r['roster_id']}")
+                for r in rosters
+            }
+
+        async with session.get(
+            f"https://api.sleeper.app/v1/league/{SLEEPER_DYNASTY_LEAGUE_ID}/matchups/{current_week}"
+        ) as m_resp:
+            matchups_raw = await m_resp.json()
+
+        match_groups = {}
+        for team in matchups_raw:
+            m_id = team.get("matchup_id")
+            if m_id not in match_groups:
+                match_groups[m_id] = []
+
+            match_groups[m_id].append(
+                {
+                    "owner_name": roster_to_owner.get(team["roster_id"], "Unknown"),
+                    "points": team.get("points", 0.0),
+                    "projected_points": sum(team.get("starters_points", [0])),
+                    "starters": team.get("starters", []),
+                    "players": team.get("players", []),
+                    "custom_roster_points_map": team.get("players_points", {}),
+                }
+            )
+
+        return {
+            "mode": "matchups",
+            "week": current_week,
+            "matchups": list(match_groups.values()),
+        }
 
     except aiohttp.ClientError as e:
         logger.error(f"Sleeper API fetch failed: {e}")
         raise HTTPException(status_code=500, detail="Upstream Sleeper API error")
 
 
-# --- Append to the end of Fantasy_Football_API/main.py ---
-
-
 @app.post("/api/rankings/team-units")
 async def update_team_unit_rankings(rankings: dict):
     """
     Receives team unit rankings (1-32) from React UI and stores in DB.
-    Expected JSON format:
-    {
-        "MIA": {"oline_rank": 5, "qb_rank": 10, "wr_rank": 1, "te_rank": 20, "rb_rank": 3, "def_rank": 18, "off_rank": 4}
-    }
     """
-    conn = await get_db_connection()
-    try:
+    pool = await get_db()
+    async with pool.acquire() as conn:
         query = """
             INSERT INTO team_unit_rankings 
             (team_abbr, oline_rank, qb_rank, wr_rank, te_rank, rb_rank, def_rank, off_rank)
@@ -267,8 +277,29 @@ async def update_team_unit_rankings(rankings: dict):
                 ranks.get("off_rank"),
             )
         return {"status": "success", "updated_teams": list(rankings.keys())}
-    finally:
-        await conn.close()
+
+
+@app.get("/api/rankings/team-units")
+async def get_team_unit_rankings():
+    """
+    Fetches all stored 1-32 team unit rankings from PostgreSQL.
+    Returns a dictionary keyed by team abbreviation.
+    """
+    pool = await get_db()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM team_unit_rankings")
+        rankings = {}
+        for r in rows:
+            rankings[r["team_abbr"]] = {
+                "oline_rank": r["oline_rank"],
+                "qb_rank": r["qb_rank"],
+                "wr_rank": r["wr_rank"],
+                "te_rank": r["te_rank"],
+                "rb_rank": r["rb_rank"],
+                "def_rank": r["def_rank"],
+                "off_rank": r["off_rank"],
+            }
+        return {"rankings": rankings}
 
 
 @app.get("/api/ti/master-board")
@@ -277,8 +308,8 @@ async def get_master_draft_board():
     Pulls player projections, historical metrics, and team unit ranks,
     calculates live TI scores, and returns sorted master draft board.
     """
-    conn = await get_db_connection()
-    try:
+    pool = await get_db()
+    async with pool.acquire() as conn:
         # Fetch team unit rankings
         team_rows = await conn.fetch("SELECT * FROM team_unit_rankings")
         team_ranks_map = {r["team_abbr"]: dict(r) for r in team_rows}
@@ -315,8 +346,6 @@ async def get_master_draft_board():
         # Sort draft board descending by TI
         draft_board.sort(key=lambda x: x["ti"], reverse=True)
         return {"count": len(draft_board), "draft_board": draft_board}
-    finally:
-        await conn.close()
 
 
 @app.get("/api/sleeper/leagues")
@@ -325,50 +354,89 @@ async def get_user_leagues():
     Fetches the user_id using SLEEPER_USERNAME, then retrieves all active leagues for the season.
     """
     url_user = f"https://api.sleeper.app/v1/user/{SLEEPER_USERNAME}"
+    session = await get_session()
 
     try:
-        async with aiohttp.ClientSession() as session:
-            # 1. Get User ID from Username
-            async with session.get(url_user) as resp_user:
-                if resp_user.status != 200:
-                    raise HTTPException(
-                        status_code=404, detail="Sleeper user not found"
-                    )
-                user_data = await resp_user.json()
-                user_id = user_data.get("user_id")
+        # 1. Get User ID from Username
+        async with session.get(url_user) as resp_user:
+            if resp_user.status != 200:
+                raise HTTPException(status_code=404, detail="Sleeper user not found")
+            user_data = await resp_user.json()
+            user_id = user_data.get("user_id")
 
-            # 2. Get all leagues for that user ID and season
-            url_leagues = f"https://api.sleeper.app/v1/user/{user_id}/leagues/nfl/{SLEEPER_SEASON}"
-            async with session.get(url_leagues) as resp_leagues:
-                if resp_leagues.status != 200:
-                    raise HTTPException(
-                        status_code=500, detail="Failed to fetch leagues"
-                    )
-                leagues_data = await resp_leagues.json()
+        # 2. Get all leagues for that user ID and season
+        url_leagues = (
+            f"https://api.sleeper.app/v1/user/{user_id}/leagues/nfl/{SLEEPER_SEASON}"
+        )
+        async with session.get(url_leagues) as resp_leagues:
+            if resp_leagues.status != 200:
+                raise HTTPException(status_code=500, detail="Failed to fetch leagues")
+            leagues_data = await resp_leagues.json()
 
-            # 3. Format the response for your React frontend dropdown
-            active_leagues = []
-            for league in leagues_data:
-                active_leagues.append(
-                    {
-                        "league_id": league.get("league_id"),
-                        "name": league.get("name"),
-                        "status": league.get("status"),
-                        "total_rosters": league.get("total_rosters"),
-                    }
-                )
+        # 3. Format the response for your React frontend dropdown
+        active_leagues = []
+        for league in leagues_data:
+            active_leagues.append(
+                {
+                    "league_id": league.get("league_id"),
+                    "name": league.get("name"),
+                    "status": league.get("status"),
+                    "total_rosters": league.get("total_rosters"),
+                }
+            )
 
-            return {
-                "username": SLEEPER_USERNAME,
-                "season": SLEEPER_SEASON,
-                "leagues": active_leagues,
-            }
+        return {
+            "username": SLEEPER_USERNAME,
+            "season": SLEEPER_SEASON,
+            "leagues": active_leagues,
+        }
 
     except HTTPException:
         raise
     except aiohttp.ClientError as e:
         logger.error(f"Failed to fetch user leagues: {e}")
         raise HTTPException(status_code=500, detail="Internal API error")
+
+
+@app.get("/api/sleeper/leagues/{user_identifier}")
+async def get_sleeper_leagues(user_identifier: str, year: str = "2026"):
+    """
+    Fetches all NFL leagues for a Sleeper user.
+    Automatically resolves text usernames to numeric user_ids.
+    """
+    session = await get_session()
+
+    # Step 1: Resolve the numeric user_id if a username is passed
+    if not user_identifier.isdigit():
+        user_url = f"https://api.sleeper.app/v1/user/{user_identifier}"
+        async with session.get(user_url) as user_resp:
+            if user_resp.status == 200:
+                user_data = await user_resp.json()
+                user_identifier = user_data.get("user_id", user_identifier)
+            else:
+                return []  # Username not found
+
+    # Step 2: Fetch the leagues using the numeric user_id
+    leagues_url = (
+        f"https://api.sleeper.app/v1/user/{user_identifier}/leagues/nfl/{year}"
+    )
+    async with session.get(leagues_url) as leagues_resp:
+        if leagues_resp.status == 200:
+            return await leagues_resp.json()
+        return []
+
+
+@app.get("/api/sleeper/league/{league_id}/drafts")
+async def get_sleeper_drafts(league_id: str):
+    """
+    Fetches all drafts associated with a specific Sleeper league.
+    """
+    url = f"https://api.sleeper.app/v1/league/{league_id}/drafts"
+    session = await get_session()
+    async with session.get(url) as resp:
+        if resp.status == 200:
+            return await resp.json()
+        return []
 
 
 class ReorderRequest(BaseModel):
@@ -413,8 +481,8 @@ async def get_draft_board(board_type: str):
     Fetches the draft board, reading persisted drag-and-drop ranks
     from `board_player_order`.
     """
-    conn = await get_db_connection()
-    try:
+    pool = await get_db()
+    async with pool.acquire() as conn:
         unit_ranks = await fetch_team_unit_ranks(conn)
 
         # 1. Fetch players joined with board_player_order
@@ -498,8 +566,6 @@ async def get_draft_board(board_type: str):
         draft_board.sort(key=board_sort_key)
 
         return {"board_type": board_type, "draft_board": draft_board}
-    finally:
-        await conn.close()
 
 
 @app.post("/api/ti/board/{board_type}/reorder")
@@ -507,8 +573,8 @@ async def reorder_board_player(board_type: str, payload: ReorderPayload):
     """
     Saves new manual ranks to `board_player_order` upon drag-and-drop.
     """
-    conn = await get_db_connection()
-    try:
+    pool = await get_db()
+    async with pool.acquire() as conn:
         # Fetch current player order for this board
         query = """
             SELECT 
@@ -571,8 +637,6 @@ async def reorder_board_player(board_type: str, payload: ReorderPayload):
             "player_id": payload.player_id,
             "new_manual_rank": float(insert_idx + 1),
         }
-    finally:
-        await conn.close()
 
 
 @app.post("/api/ti/board/{board_type}/reset")
@@ -580,8 +644,8 @@ async def reset_board_order(board_type: str):
     """
     Clears all manual overrides for a specific board type, reverting back to pure TI calculations.
     """
-    conn = await get_db_connection()
-    try:
+    pool = await get_db()
+    async with pool.acquire() as conn:
         await conn.execute(
             "DELETE FROM board_player_order WHERE board_type = $1", board_type
         )
@@ -589,47 +653,10 @@ async def reset_board_order(board_type: str):
             "status": "success",
             "message": f"Board {board_type} reset to default TI order.",
         }
-    finally:
-        await conn.close()
-
-
-# --- Insert in Fantasy_Football_API/main.py near existing team-units endpoint ---
-
-
-@app.get("/api/rankings/team-units")
-async def get_team_unit_rankings():
-    """
-    Fetches all stored 1-32 team unit rankings from PostgreSQL.
-    Returns a dictionary keyed by team abbreviation.
-    """
-    conn = await get_db_connection()
-    try:
-        rows = await conn.fetch("SELECT * FROM team_unit_rankings")
-        rankings = {}
-        for r in rows:
-            rankings[r["team_abbr"]] = {
-                "oline_rank": r["oline_rank"],
-                "qb_rank": r["qb_rank"],
-                "wr_rank": r["wr_rank"],
-                "te_rank": r["te_rank"],
-                "rb_rank": r["rb_rank"],
-                "def_rank": r["def_rank"],
-                "off_rank": r["off_rank"],
-            }
-        return {"rankings": rankings}
-    finally:
-        await conn.close()
-
-
-import io
-
-import pandas as pd  # type: ignore[import]
-
-upload_file = File(...)
 
 
 @app.post("/api/projections/upload")
-async def upload_projections_csv(file: UploadFile = upload_file):
+async def upload_projections_csv(file: UploadFile = File(...)):
     """
     Accepts a CSV file downloaded from a projections site,
     parses the Player and FPTS columns, and updates the database.
@@ -643,10 +670,10 @@ async def upload_projections_csv(file: UploadFile = upload_file):
         # Standardize column names to uppercase for easy matching
         df.columns = [str(c).upper().strip() for c in df.columns]
 
-        conn = await get_db_connection()
-        updated_count = 0
+        pool = await get_db()
+        async with pool.acquire() as conn:
+            updated_count = 0
 
-        try:
             update_query = """
                 UPDATE player_ti 
                 SET projected_points = $1,
@@ -665,7 +692,7 @@ async def upload_projections_csv(file: UploadFile = upload_file):
                 if not player_col or not fpts_col:
                     continue
 
-                # --- NEW: Skip completely empty rows or NaN values ---
+                # --- Skip completely empty rows or NaN values ---
                 if pd.isna(row[player_col]) or pd.isna(row[fpts_col]):
                     continue
 
@@ -705,9 +732,6 @@ async def upload_projections_csv(file: UploadFile = upload_file):
 
             return {"status": "success", "updated": updated_count}
 
-        finally:
-            await conn.close()
-
     except (
         asyncpg.PostgresError,
         pd.errors.ParserError,
@@ -720,48 +744,6 @@ async def upload_projections_csv(file: UploadFile = upload_file):
         return {"status": "error", "message": str(e)}
 
 
-# --- Append to Fantasy_Football_API/main.py ---
-
-
-@app.get("/api/sleeper/leagues/{user_identifier}")
-async def get_sleeper_leagues(user_identifier: str, year: str = "2026"):
-    """
-    Fetches all NFL leagues for a Sleeper user.
-    Automatically resolves text usernames to numeric user_ids.
-    """
-    async with aiohttp.ClientSession() as session:
-        # Step 1: Resolve the numeric user_id if a username is passed
-        if not user_identifier.isdigit():
-            user_url = f"https://api.sleeper.app/v1/user/{user_identifier}"
-            async with session.get(user_url) as user_resp:
-                if user_resp.status == 200:
-                    user_data = await user_resp.json()
-                    user_identifier = user_data.get("user_id", user_identifier)
-                else:
-                    return []  # Username not found
-
-        # Step 2: Fetch the leagues using the numeric user_id
-        leagues_url = (
-            f"https://api.sleeper.app/v1/user/{user_identifier}/leagues/nfl/{year}"
-        )
-        async with session.get(leagues_url) as leagues_resp:
-            if leagues_resp.status == 200:
-                return await leagues_resp.json()
-            return []
-
-
-@app.get("/api/sleeper/league/{league_id}/drafts")
-async def get_sleeper_drafts(league_id: str):
-    """
-    Fetches all drafts associated with a specific Sleeper league.
-    """
-    url = f"https://api.sleeper.app/v1/league/{league_id}/drafts"
-    async with aiohttp.ClientSession() as session, session.get(url) as resp:
-        if resp.status == 200:
-            return await resp.json()
-        return []
-
-
 @app.get("/api/sleeper/draft/{draft_id}/state")
 async def get_draft_state(draft_id: str, user_id: str = None, roster_id: str = None):
     """
@@ -770,21 +752,21 @@ async def get_draft_state(draft_id: str, user_id: str = None, roster_id: str = N
     """
     draft_url = f"https://api.sleeper.app/v1/draft/{draft_id}"
     picks_url = f"https://api.sleeper.app/v1/draft/{draft_id}/picks"
+    session = await get_session()
 
-    async with aiohttp.ClientSession() as session:
-        # Resolve numeric user_id if text username was provided
-        if user_id and not user_id.isdigit():
-            user_url = f"https://api.sleeper.app/v1/user/{user_id}"
-            async with session.get(user_url) as user_resp:
-                if user_resp.status == 200:
-                    user_data = await user_resp.json()
-                    user_id = user_data.get("user_id", user_id)
+    # Resolve numeric user_id if text username was provided
+    if user_id and not user_id.isdigit():
+        user_url = f"https://api.sleeper.app/v1/user/{user_id}"
+        async with session.get(user_url) as user_resp:
+            if user_resp.status == 200:
+                user_data = await user_resp.json()
+                user_id = user_data.get("user_id", user_id)
 
-        async with session.get(draft_url) as draft_resp:
-            draft_meta = await draft_resp.json() if draft_resp.status == 200 else {}
+    async with session.get(draft_url) as draft_resp:
+        draft_meta = await draft_resp.json() if draft_resp.status == 200 else {}
 
-        async with session.get(picks_url) as picks_resp:
-            picks = await picks_resp.json() if picks_resp.status == 200 else []
+    async with session.get(picks_url) as picks_resp:
+        picks = await picks_resp.json() if picks_resp.status == 200 else []
 
     user_id_str = str(user_id) if user_id is not None else None
 
@@ -940,9 +922,6 @@ def calculate_roster_need_multiplier(pos: str, drafted_count: int) -> float:
     return 1.00
 
 
-# --- Update in Fantasy_Football_API/main.py ---
-
-
 @app.get("/api/draft/recommendations")
 async def get_live_recommendations(
     draft_id: str, user_id: str, format: str = "snake", roster_id: str = None
@@ -951,8 +930,8 @@ async def get_live_recommendations(
     drafted_set = {str(pid) for pid in draft_state["drafted_player_ids"]}
     my_roster_pids = [str(pid) for pid in draft_state["my_roster"]["ALL"]]
 
-    conn = await get_db_connection()
-    try:
+    pool = await get_db()
+    async with pool.acquire() as conn:
         unit_ranks = await fetch_team_unit_ranks(conn)
 
         # 1. Fetch user roster's bye weeks
@@ -1005,10 +984,6 @@ async def get_live_recommendations(
                 p.get("position", "WR"), p.get("bye_week"), my_roster_byes
             )
             pos = p.get("position", "WR").upper()
-            raw_tags = p.get("custom_tags")
-            parsed_tags = (
-                json.loads(raw_tags) if isinstance(raw_tags, str) else (raw_tags or [])
-            )
 
             raw_player_data.append(
                 {
@@ -1090,12 +1065,11 @@ async def get_live_recommendations(
                     "bye_message": bye_check["message"],
                     "vorp_score": final_vorp,
                     "roster_need_mult": need_mult,
-                    "custom_tags": player_tags,  # <-- Correct per-player tags
+                    "custom_tags": player_tags,
                     "auction_max_bid": 0,
                 }
             )
         # 4. Auction "Don't Go Over" Calculation
-        # Realistic Auction "Don't Go Over" Max Bid Calculation
         if format.lower() == "auction":
             total_budget = draft_state.get("budget", 200) or 200
             rem_budget = draft_state["remaining_budget"]
@@ -1166,8 +1140,6 @@ async def get_live_recommendations(
             "baselines": baselines,
             "board": available_players,
         }
-    finally:
-        await conn.close()
 
 
 @app.post("/api/handcuffs/upload")
@@ -1177,9 +1149,9 @@ async def upload_handcuffs_csv(file: UploadFile = HANDCUFF_CSV_FILE):
     df = pd.read_csv(io.StringIO(content.decode("utf-8")))
     df.columns = [str(c).upper().strip() for c in df.columns]
 
-    conn = await get_db_connection()
-    updated = 0
-    try:
+    pool = await get_db()
+    async with pool.acquire() as conn:
+        updated = 0
         for _, row in df.iterrows():
             starter_col = next(
                 (c for c in df.columns if "STARTER" in c or "PLAYER" in c), None
@@ -1203,8 +1175,6 @@ async def upload_handcuffs_csv(file: UploadFile = HANDCUFF_CSV_FILE):
                 updated += 1
 
         return {"status": "success", "updated": updated}
-    finally:
-        await conn.close()
 
 
 class TagPayload(BaseModel):
@@ -1213,8 +1183,8 @@ class TagPayload(BaseModel):
 
 @app.post("/api/ti/player/{player_id}/tags")
 async def update_player_tags(player_id: str, payload: TagPayload):
-    conn = await get_db_connection()
-    try:
+    pool = await get_db()
+    async with pool.acquire() as conn:
         await conn.execute(
             """
             UPDATE player_ti
@@ -1225,5 +1195,64 @@ async def update_player_tags(player_id: str, payload: TagPayload):
             player_id,
         )
         return {"status": "success", "player_id": player_id, "tags": payload.tags}
-    finally:
-        await conn.close()
+
+
+@app.post("/api/admin/sync-sleeper")
+async def sync_sleeper_master_data():
+    """
+    Seeds/Updates the database with Sleeper's master NFL player list.
+    Solves missing rookies and team changes prior to projection uploads.
+    """
+    session = await get_session()
+    async with session.get("https://api.sleeper.app/v1/players/nfl") as resp:
+        players_data = await resp.json()
+
+    records = []
+    for sleeper_id, p in players_data.items():
+        if not p.get("active"):
+            continue
+
+        pos = p.get("position")
+        if pos not in ["QB", "RB", "WR", "TE", "K", "DEF"]:
+            continue
+
+        # Extract the GSIS ID (00-00xxxx) to match your existing DB schema, fallback to sleeper_id
+        player_id = (
+            p.get("gsis_id") or p.get("sportradar_id") or f"sleeper_{sleeper_id}"
+        )
+        full_name = p.get("full_name") or f"{p.get('first_name')} {p.get('last_name')}"
+
+        records.append(
+            (
+                player_id,
+                sleeper_id,
+                full_name,
+                pos,
+                p.get("team"),
+                p.get("age"),
+                p.get("years_exp"),
+                p.get("depth_chart_order"),
+            )
+        )
+
+    pool = await get_db()
+    async with pool.acquire() as conn:
+        upsert_query = """
+            INSERT INTO player_ti (
+                player_id, sleeper_id, player_name, position, team_abbr, age, years_exp, depth_chart_order
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (player_id) DO UPDATE SET
+                sleeper_id = EXCLUDED.sleeper_id,
+                player_name = EXCLUDED.player_name,
+                position = EXCLUDED.position,
+                team_abbr = EXCLUDED.team_abbr,
+                age = EXCLUDED.age,
+                years_exp = EXCLUDED.years_exp,
+                depth_chart_order = EXCLUDED.depth_chart_order,
+                updated_at = CURRENT_TIMESTAMP;
+        """
+        async with conn.transaction():
+            # executemany handles massive arrays efficiently in asyncpg
+            await conn.executemany(upsert_query, records)
+
+        return {"status": "success", "synced_players": len(records)}
