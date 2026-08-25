@@ -1290,19 +1290,19 @@ async def sync_sleeper_master_data():
 @app.post("/api/fantasypros/upload")
 async def upload_fantasypros_csv(file: UploadFile = File(...)):
     """
-    Ingests FantasyPros cheatsheet CSV.
-    Parses RK, TIERS, UPSIDE, BUST, SOS, and ECR VS ADP.
+    Ingests FantasyPros cheatsheet CSV/TSV.
+    Parses RK, TIERS, PLAYER NAME, UPSIDE, BUST, SOS, and ECR VS ADP.
     """
     content = await file.read()
-    decoded = content.decode("utf-8-sig")  # Handles potential Excel BOM
+    decoded = content.decode("utf-8-sig")  # Strips Excel BOM if present
 
-    reader = csv.DictReader(
-        io.StringIO(decoded), delimiter="\t" if "\t" in decoded[:200] else ","
-    )
+    # Auto-detect tab vs comma delimiter
+    delimiter = "\t" if "\t" in decoded[:300] else ","
+    reader = csv.DictReader(io.StringIO(decoded), delimiter=delimiter)
 
-    # Normalize headers to uppercase
     records = []
     for row in reader:
+        # Standardize header keys safely
         clean_row = {}
         for k, v in row.items():
             if k is not None:
@@ -1310,46 +1310,74 @@ async def upload_fantasypros_csv(file: UploadFile = File(...)):
                 clean_value = str(v).strip() if v is not None else ""
                 clean_row[clean_key] = clean_value
 
-        raw_name = clean_row.get("PLAYER NAME") or clean_row.get("PLAYER") or ""
+        # Substring search for Player Name in case of header variations like "PLAYER NAME (?)"
+        raw_name = ""
+        for k, v in clean_row.items():
+            if "PLAYER" in k:
+                raw_name = v
+                break
+
         if not raw_name:
             continue
 
-        # Strip team abbreviations if in player name (e.g., "J. Chase CIN" -> "J. Chase")
+        # Strip team abbreviations if concatenated (e.g., "J. Chase CIN" -> "J. Chase")
         clean_name = raw_name.split("(")[0].strip()
+        parts = clean_name.split()
+        if (
+            len(parts) > 1
+            and len(parts[-1]) in (2, 3)
+            and parts[-1].isupper()
+            and parts[-1] not in ("II", "III", "IV", "JR", "SR")
+        ):
+            clean_name = " ".join(parts[:-1])
 
-        # Parse numeric ratings (e.g. "5 out of 5" -> 5)
-        def parse_score(val_str):
+        def parse_num(val_str):
             if not val_str:
                 return None
-            match = re.search(r"(\d+)", val_str)
-            return int(match.group(1)) if match else None
+            m = re.search(r"(\d+)", str(val_str))
+            return int(m.group(1)) if m else None
 
-        # Parse ECR vs ADP (e.g. "+2" -> 2, "-4" -> -4)
         def parse_diff(diff_str):
-            if not diff_str or diff_str in ("-", "N/A", "0"):
+            if not diff_str or diff_str in ("-", "N/A", "0", ""):
                 return 0
             try:
-                return int(diff_str.replace("+", ""))
+                # Keep '-' but remove '+' and spaces safely
+                cleaned = str(diff_str).replace("+", "").strip()
+                return int(float(cleaned))
             except ValueError:
                 return 0
 
-        fp_rk = parse_score(clean_row.get("RK"))
-        fp_tier = parse_score(clean_row.get("TIERS"))
-        fp_upside = parse_score(clean_row.get("UPSIDE"))
-        fp_bust = parse_score(clean_row.get("BUST"))
-        fp_sos = parse_score(clean_row.get("SOS"))
-        fp_ecr_vs_adp = parse_diff(clean_row.get("ECR VS ADP"))
+        fp_rk = None
+        fp_tier = None
+        fp_upside = None
+        fp_bust = None
+        fp_sos = None
+        fp_ecr_vs_adp = 0
+
+        # Substring matching for metrics to bypass invisible characters or spacing changes
+        for k, v in clean_row.items():
+            if k in ("RK", "RANK"):
+                fp_rk = parse_num(v)
+            elif "TIER" in k:
+                fp_tier = parse_num(v)
+            elif "UPSIDE" in k:
+                fp_upside = parse_num(v)
+            elif "BUST" in k:
+                fp_bust = parse_num(v)
+            elif "SOS" in k:
+                fp_sos = parse_num(v)
+            elif "ECR" in k and "ADP" in k:
+                fp_ecr_vs_adp = parse_diff(v)
+
+        # Support matching abbreviated first names ("J. Chase" -> "%Chase%") as well as full names
+        if "." in clean_name and len(clean_name.split(".")[0].strip()) <= 2:
+            last_name = clean_name.split(".")[-1].strip()
+            search_pattern = f"%{last_name}%"
+        else:
+            search_pattern = f"%{clean_name}%"
 
         records.append(
-            (
-                fp_rk,
-                fp_tier,
-                fp_upside,
-                fp_bust,
-                fp_sos,
-                fp_ecr_vs_adp,
-                f"%{clean_name}%",
-            )
+            (fp_rk, fp_tier, fp_upside, fp_bust, fp_sos, fp_ecr_vs_adp, search_pattern)
         )
 
     pool = await get_db()
