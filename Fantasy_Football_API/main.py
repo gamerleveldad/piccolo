@@ -1303,7 +1303,12 @@ async def upload_fantasypros_csv(file: UploadFile = File(...)):
     # Normalize headers to uppercase
     records = []
     for row in reader:
-        clean_row = {k.strip().upper(): v.strip() for k, v in row.items() if k}
+        clean_row = {}
+        for k, v in row.items():
+            if k is not None:
+                clean_key = str(k).strip().upper()
+                clean_value = str(v).strip() if v is not None else ""
+                clean_row[clean_key] = clean_value
 
         raw_name = clean_row.get("PLAYER NAME") or clean_row.get("PLAYER") or ""
         if not raw_name:
