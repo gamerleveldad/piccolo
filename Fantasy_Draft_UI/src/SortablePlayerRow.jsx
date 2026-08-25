@@ -373,6 +373,42 @@ const SortablePlayerRow = ({ player, displayRank, viewMode }) => {
           <label>Consistency</label>
           <div>{player.consistency_label || "-"}</div>
         </div>
+        {player.fp_rank && (
+          <>
+            <div className="stat-box">
+              <label>FP Rank / Tier</label>
+              <div>
+                #{player.fp_rank} (T{player.fp_tier || "?"})
+              </div>
+            </div>
+            <div className="stat-box">
+              <label>Upside / Bust</label>
+              <div>
+                {player.fp_upside || 0}/5 · {player.fp_bust || 0}/5
+              </div>
+            </div>
+            <div className="stat-box">
+              <label>SoS</label>
+              <div>
+                {"★".repeat(player.fp_sos || 0)}
+                {"☆".repeat(5 - (player.fp_sos || 0))}
+              </div>
+            </div>
+            <div className="stat-box">
+              <label>ECR vs ADP</label>
+              <div
+                style={{
+                  color:
+                    (player.fp_ecr_vs_adp || 0) > 0 ? "#00B5C1" : "#FC4C02",
+                }}
+              >
+                {(player.fp_ecr_vs_adp || 0) > 0
+                  ? `+${player.fp_ecr_vs_adp}`
+                  : player.fp_ecr_vs_adp}
+              </div>
+            </div>
+          </>
+        )}
         <div className="stat-box">
           <label>2026 Proj</label>
           <div>{player.projected_points || "0.0"}</div>

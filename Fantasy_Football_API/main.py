@@ -1,7 +1,9 @@
+import csv
 import io
 import json
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -130,6 +132,15 @@ async def lifespan(app: FastAPI):
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (board_type, player_id)
                 );
+            """)
+            await conn.execute("""
+                ALTER TABLE player_ti 
+                ADD COLUMN IF NOT EXISTS fp_rank INT,
+                ADD COLUMN IF NOT EXISTS fp_tier INT,
+                ADD COLUMN IF NOT EXISTS fp_upside INT,
+                ADD COLUMN IF NOT EXISTS fp_bust INT,
+                ADD COLUMN IF NOT EXISTS fp_sos INT,
+                ADD COLUMN IF NOT EXISTS fp_ecr_vs_adp INT;
             """)
 
         logger.info("Database schemas verified successfully via lifespan startup.")
@@ -549,6 +560,12 @@ async def get_draft_board(board_type: str):
                     "projected_points": p.get("projected_points") or 0.0,
                     "projected_next_game": p.get("projected_next_game") or 0.0,
                     "projected_next_4": p.get("projected_next_4") or 0.0,
+                    "fp_rank": p.get("fp_rank"),
+                    "fp_tier": p.get("fp_tier"),
+                    "fp_upside": p.get("fp_upside"),
+                    "fp_bust": p.get("fp_bust"),
+                    "fp_sos": p.get("fp_sos"),
+                    "fp_ecr_vs_adp": p.get("fp_ecr_vs_adp"),
                     "custom_tags": parsed_tags,
                     "details": score_data,
                 }
@@ -1063,6 +1080,12 @@ async def get_live_recommendations(
                     "is_starter": score_data["is_starter"],
                     "bye_status": bye_check["status"],
                     "bye_message": bye_check["message"],
+                    "fp_rank": p.get("fp_rank"),
+                    "fp_tier": p.get("fp_tier"),
+                    "fp_upside": p.get("fp_upside"),
+                    "fp_bust": p.get("fp_bust"),
+                    "fp_sos": p.get("fp_sos"),
+                    "fp_ecr_vs_adp": p.get("fp_ecr_vs_adp"),
                     "vorp_score": final_vorp,
                     "roster_need_mult": need_mult,
                     "custom_tags": player_tags,
@@ -1256,3 +1279,83 @@ async def sync_sleeper_master_data():
             await conn.executemany(upsert_query, records)
 
         return {"status": "success", "synced_players": len(records)}
+
+
+@app.post("/api/fantasypros/upload")
+async def upload_fantasypros_csv(file: UploadFile = File(...)):
+    """
+    Ingests FantasyPros cheatsheet CSV.
+    Parses RK, TIERS, UPSIDE, BUST, SOS, and ECR VS ADP.
+    """
+    content = await file.read()
+    decoded = content.decode("utf-8-sig")  # Handles potential Excel BOM
+
+    reader = csv.DictReader(
+        io.StringIO(decoded), delimiter="\t" if "\t" in decoded[:200] else ","
+    )
+
+    # Normalize headers to uppercase
+    records = []
+    for row in reader:
+        clean_row = {k.strip().upper(): v.strip() for k, v in row.items() if k}
+
+        raw_name = clean_row.get("PLAYER NAME") or clean_row.get("PLAYER") or ""
+        if not raw_name:
+            continue
+
+        # Strip team abbreviations if in player name (e.g., "J. Chase CIN" -> "J. Chase")
+        clean_name = raw_name.split("(")[0].strip()
+
+        # Parse numeric ratings (e.g. "5 out of 5" -> 5)
+        def parse_score(val_str):
+            if not val_str:
+                return None
+            match = re.search(r"(\d+)", val_str)
+            return int(match.group(1)) if match else None
+
+        # Parse ECR vs ADP (e.g. "+2" -> 2, "-4" -> -4)
+        def parse_diff(diff_str):
+            if not diff_str or diff_str in ("-", "N/A", "0"):
+                return 0
+            try:
+                return int(diff_str.replace("+", ""))
+            except ValueError:
+                return 0
+
+        fp_rk = parse_score(clean_row.get("RK"))
+        fp_tier = parse_score(clean_row.get("TIERS"))
+        fp_upside = parse_score(clean_row.get("UPSIDE"))
+        fp_bust = parse_score(clean_row.get("BUST"))
+        fp_sos = parse_score(clean_row.get("SOS"))
+        fp_ecr_vs_adp = parse_diff(clean_row.get("ECR VS ADP"))
+
+        records.append(
+            (
+                fp_rk,
+                fp_tier,
+                fp_upside,
+                fp_bust,
+                fp_sos,
+                fp_ecr_vs_adp,
+                f"%{clean_name}%",
+            )
+        )
+
+    pool = await get_db()
+    async with pool.acquire() as conn:
+        update_sql = """
+            UPDATE player_ti
+            SET 
+                fp_rank = $1,
+                fp_tier = $2,
+                fp_upside = $3,
+                fp_bust = $4,
+                fp_sos = $5,
+                fp_ecr_vs_adp = $6,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE LOWER(player_name) LIKE LOWER($7);
+        """
+        async with conn.transaction():
+            await conn.executemany(update_sql, records)
+
+    return {"status": "success", "processed_records": len(records)}
