@@ -351,6 +351,13 @@ services:
       - DAC_READ_SEARCH
     security_opt:
       - apparmor:unconfined
+    environment:
+      # Caps the in-memory metric cache to 64MB (Default can grow to gigabytes)
+      - NETDATA_PAGE_CACHE_SIZE=64
+      # Caps disk storage to 256MB for history
+      - NETDATA_DBENGINE_DISK_SPACE=256
+      # Tells Netdata to only update metrics every 2 seconds instead of every 1 second (Cuts CPU usage in half)
+      - NETDATA_UPDATE_EVERY=2
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
