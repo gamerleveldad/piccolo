@@ -210,7 +210,23 @@ img, svg {
   color: #FFFFFF;
   font-weight: 800;
 }
+/* Positional Tier Badges */
+.badge.tier-badge {
+  background-color: #0A1526;
+  border: 1px solid #00B5C1;
+  color: #00B5C1;
+  font-weight: 800;
+  font-size: 0.78rem;
+  letter-spacing: 0.5px;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
 
+.compact-tier {
+  margin-left: 8px;
+  font-size: 0.72rem;
+  padding: 1px 5px;
+}
 .stat-col {
   min-width: 80px;
   text-align: right;

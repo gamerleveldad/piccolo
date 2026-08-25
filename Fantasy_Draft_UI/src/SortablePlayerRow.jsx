@@ -4,69 +4,66 @@ import { CSS } from "@dnd-kit/utilities";
 import { useEffect, useState } from "react";
 import Select, { components } from "react-select";
 
-// 1. Tag Definitions & Icon Color Mapping
 const TAG_OPTIONS = [
   {
     value: "PPR Monster",
     label: "PPR Monster",
     icon: "/icons/ppr.svg",
     color: "#F1C27D",
-  }, // Caucasian Skin Tone
+  },
   {
     value: "Injury Risk",
     label: "Injury Risk",
     icon: "/icons/injury.svg",
     color: "#E60000",
     outline: "#FFFFFF",
-  }, // Red center, White border
+  },
   {
     value: "Breakout",
     label: "Breakout Potential",
     icon: "/icons/breakout.svg",
     color: "#87CEFA",
-  }, // Light Blue
+  },
   {
     value: "Rookie",
     label: "Rookie",
     icon: "/icons/rookie.svg",
     color: "#32CD32",
-  }, // Green
+  },
   {
     value: "Handcuff",
     label: "Premium Handcuff",
     icon: "/icons/handcuff.svg",
     color: "#C0C0C0",
-  }, // Silver
+  },
   {
     value: "DND",
     label: "Do Not Draft",
     icon: "/icons/dnd.svg",
     color: "#FF2400",
-  }, // Bright Red
-  { value: "Star", label: "Star", icon: "/icons/star.svg", color: "#FFD700" }, // Yellow
+  },
+  { value: "Star", label: "Star", icon: "/icons/star.svg", color: "#FFD700" },
   {
     value: "Regression",
     label: "Regression Candidate",
     icon: "/icons/regression.svg",
     color: "#B22222",
-  }, // Darker Red
+  },
   {
     value: "Hidden Gem",
     label: "Hidden Gem",
     icon: "/icons/gem.svg",
     color: "#9966CC",
-  }, // Amethyst
+  },
   {
     value: "Goalline",
     label: "Goalline Back",
     icon: "/icons/goalline.svg",
     color: "#4682B4",
-  }, // Steel
+  },
 ];
 
-// 2. Helper Component to Recolor Monochrome SVGs via CSS Masks
 const SvgIcon = ({ icon, color, outline }) => {
-  // Use a 4-way drop-shadow to create a solid stroke around the masked shape
   const filterStyle = outline
     ? `drop-shadow(1px 0px 0px ${outline}) drop-shadow(0px 1px 0px ${outline}) drop-shadow(-1px 0px 0px ${outline}) drop-shadow(0px -1px 0px ${outline})`
     : "none";
@@ -99,7 +96,6 @@ const SvgIcon = ({ icon, color, outline }) => {
   );
 };
 
-// 3. Custom Dropdown Option (Icon + Text)
 const CustomOption = (props) => (
   <components.Option {...props}>
     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -115,7 +111,6 @@ const CustomOption = (props) => (
   </components.Option>
 );
 
-// 4. Custom Selected Value (Icon Only with Hover Tooltip)
 const CustomMultiValueLabel = (props) => (
   <components.MultiValueLabel {...props}>
     <div
@@ -131,7 +126,6 @@ const CustomMultiValueLabel = (props) => (
   </components.MultiValueLabel>
 );
 
-// 5. Dark Waters Theme Styling for react-select
 const customSelectStyles = {
   control: (base) => ({
     ...base,
@@ -141,9 +135,7 @@ const customSelectStyles = {
     height: "auto",
     width: "170px",
     boxShadow: "none",
-    "&:hover": {
-      borderColor: "#FC4C02",
-    },
+    "&:hover": { borderColor: "#FC4C02" },
   }),
   valueContainer: (base) => ({
     ...base,
@@ -152,16 +144,8 @@ const customSelectStyles = {
     flexWrap: "wrap",
     gap: "2px",
   }),
-  placeholder: (base) => ({
-    ...base,
-    color: "#8BB2C9",
-    fontSize: "0.78rem",
-  }),
-  input: (base) => ({
-    ...base,
-    color: "#FFFFFF",
-    fontSize: "0.8rem",
-  }),
+  placeholder: (base) => ({ ...base, color: "#8BB2C9", fontSize: "0.78rem" }),
+  input: (base) => ({ ...base, color: "#FFFFFF", fontSize: "0.8rem" }),
   menu: (base) => ({
     ...base,
     backgroundColor: "#12223D",
@@ -184,10 +168,7 @@ const customSelectStyles = {
     ...base,
     color: "#FC4C02",
     cursor: "pointer",
-    ":hover": {
-      backgroundColor: "rgba(252, 76, 2, 0.2)",
-      color: "#FF6826",
-    },
+    ":hover": { backgroundColor: "rgba(252, 76, 2, 0.2)", color: "#FF6826" },
   }),
 };
 
@@ -199,7 +180,6 @@ const SortablePlayerRow = ({ player, displayRank, viewMode }) => {
 
   const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:8005";
 
-  // Format initial tags
   const getInitialTags = () => {
     const rawTags = player.custom_tags || [];
     return rawTags.map(
@@ -215,7 +195,6 @@ const SortablePlayerRow = ({ player, displayRank, viewMode }) => {
 
   const [selectedTags, setSelectedTags] = useState(getInitialTags);
 
-  // Sync state if player prop updates
   useEffect(() => {
     setSelectedTags(getInitialTags());
   }, [player.custom_tags]);
@@ -269,6 +248,11 @@ const SortablePlayerRow = ({ player, displayRank, viewMode }) => {
         <div className="name-col">
           <strong>{player.player_name}</strong> - {player.position} (
           {player.team || "FA"})
+          {player.pos_tier && (
+            <span className="badge tier-badge compact-tier">
+              {player.pos_tier}
+            </span>
+          )}
         </div>
         <div className="stat-col bye-col">Bye: {player.bye_week || "-"}</div>
         <div className="stat-col">TI: {player.ti_score}</div>
@@ -277,7 +261,6 @@ const SortablePlayerRow = ({ player, displayRank, viewMode }) => {
           Cons: {player.consistency_label || player.consistency_score || "-"}
         </div>
 
-        {/* Compact View Tag Icons Display */}
         <div
           className="tag-icon-bar"
           style={{
@@ -301,7 +284,7 @@ const SortablePlayerRow = ({ player, displayRank, viewMode }) => {
     );
   }
 
-  // Grid / Expanded Card View
+  // Expanded Grid Card View
   return (
     <div
       ref={setNodeRef}
@@ -327,7 +310,6 @@ const SortablePlayerRow = ({ player, displayRank, viewMode }) => {
         </div>
 
         <div className="header-right">
-          {/* Multi-Select Tag Dropdown */}
           <div
             className="tag-select-wrapper"
             onPointerDown={(e) => e.stopPropagation()}
@@ -348,6 +330,11 @@ const SortablePlayerRow = ({ player, displayRank, viewMode }) => {
               isClearable={false}
             />
           </div>
+
+          {/* Positional Tier Badge (e.g. QB - T1, WR - T2) */}
+          {player.pos_tier && (
+            <span className="badge tier-badge">{player.pos_tier}</span>
+          )}
 
           {player.depth_chart_order && (
             <span className="badge depth-badge">
@@ -373,6 +360,8 @@ const SortablePlayerRow = ({ player, displayRank, viewMode }) => {
           <label>Consistency</label>
           <div>{player.consistency_label || "-"}</div>
         </div>
+
+        {/* FantasyPros Cheatsheet Metrics */}
         {player.fp_rank && (
           <>
             <div className="stat-box">
@@ -389,9 +378,9 @@ const SortablePlayerRow = ({ player, displayRank, viewMode }) => {
             </div>
             <div className="stat-box">
               <label>SoS</label>
-              <div>
+              <div style={{ color: "#FFD700" }}>
                 {"★".repeat(player.fp_sos || 0)}
-                {"☆".repeat(5 - (player.fp_sos || 0))}
+                {"☆".repeat(Math.max(0, 5 - (player.fp_sos || 0)))}
               </div>
             </div>
             <div className="stat-box">
@@ -399,16 +388,18 @@ const SortablePlayerRow = ({ player, displayRank, viewMode }) => {
               <div
                 style={{
                   color:
-                    (player.fp_ecr_vs_adp || 0) > 0 ? "#00B5C1" : "#FC4C02",
+                    (player.fp_ecr_vs_adp || 0) >= 0 ? "#00B5C1" : "#FC4C02",
+                  fontWeight: 700,
                 }}
               >
                 {(player.fp_ecr_vs_adp || 0) > 0
                   ? `+${player.fp_ecr_vs_adp}`
-                  : player.fp_ecr_vs_adp}
+                  : player.fp_ecr_vs_adp || 0}
               </div>
             </div>
           </>
         )}
+
         <div className="stat-box">
           <label>2026 Proj</label>
           <div>{player.projected_points || "0.0"}</div>

@@ -387,6 +387,9 @@ const LiveDraftView = () => {
                     );
                   })}
                 </div>
+                {player.pos_tier && (
+                  <span className="badge tier-badge">{player.pos_tier}</span>
+                )}
                 {player.depth_chart_order && (
                   <span className="badge depth-badge">
                     Depth: {player.position}
@@ -418,7 +421,27 @@ const LiveDraftView = () => {
                     : player.vorp_score}
                 </div>
               </div>
-
+              {player.fp_rank && (
+                <>
+                  <div className="stat-box">
+                    <label>FP Rank</label>
+                    <div>#{player.fp_rank}</div>
+                  </div>
+                  <div className="stat-box">
+                    <label>Upside / Bust</label>
+                    <div>
+                      {player.fp_upside || 0}/5 · {player.fp_bust || 0}/5
+                    </div>
+                  </div>
+                  <div className="stat-box">
+                    <label>SoS</label>
+                    <div style={{ color: "#FFD700" }}>
+                      {"★".repeat(player.fp_sos || 0)}
+                      {"☆".repeat(Math.max(0, 5 - (player.fp_sos || 0)))}
+                    </div>
+                  </div>
+                </>
+              )}
               <div className="stat-box">
                 <label>Dynasty TI</label>
                 <div>{player.ti_score_dynasty || "-"}</div>

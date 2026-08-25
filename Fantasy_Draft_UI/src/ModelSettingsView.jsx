@@ -1,11 +1,11 @@
 // Fantasy_Draft_UI/src/ModelSettingsView.jsx
-import React, { useState } from 'react';
+import { useState } from "react";
 
 const ModelSettingsView = () => {
   const [roleDiscounts, setRoleDiscounts] = useState({
     RB2: 0.85,
-    WR2: 0.90,
-    WR3: 0.80,
+    WR2: 0.9,
+    WR3: 0.8,
   });
 
   const [rookieWeights, setRookieWeights] = useState({
@@ -13,56 +13,109 @@ const ModelSettingsView = () => {
     team: 40,
   });
 
-  const [savedMsg, setSavedMsg] = useState('');
+  const [savedMsg, setSavedMsg] = useState("");
+  const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:8005";
+
+  // --- Handcuff State ---
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState('');
+  const [uploadStatus, setUploadStatus] = useState("");
 
-  const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8005';
+  // --- FantasyPros Cheat Sheet State ---
+  const [fpFile, setFpFile] = useState(null);
+  const [fpUploading, setFpUploading] = useState(false);
+  const [fpUploadStatus, setFpUploadStatus] = useState("");
 
   const handleSaveSettings = () => {
-    setSavedMsg('Settings updated for current draft session!');
-    setTimeout(() => setSavedMsg(''), 3000);
+    setSavedMsg("Settings updated for current draft session!");
+    setTimeout(() => setSavedMsg(""), 3000);
   };
 
+  // --- Handcuff Handlers ---
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
       setSelectedFile(e.target.files[0]);
-      setUploadStatus('');
+      setUploadStatus("");
     }
   };
 
   const handleUploadHandcuffs = async () => {
     if (!selectedFile) {
-      setUploadStatus('Please select a FantasyPros CSV file first.');
+      setUploadStatus("Please select a FantasyPros CSV file first.");
       return;
     }
 
     setUploading(true);
-    setUploadStatus('');
+    setUploadStatus("");
 
     const formData = new FormData();
-    formData.append('file', selectedFile);
+    formData.append("file", selectedFile);
 
     try {
       const response = await fetch(`${apiBase}/api/handcuffs/upload`, {
-        method: 'POST',
+        method: "POST",
         body: formData,
       });
 
       if (response.ok) {
         const data = await response.json();
-        setUploadStatus(`Success! Updated depth charts for ${data.updated} players.`);
+        setUploadStatus(
+          `Success! Updated depth charts for ${data.updated} players.`,
+        );
         setSelectedFile(null);
       } else {
         const err = await response.json();
-        setUploadStatus(`Upload failed: ${err.detail || 'Server error'}`);
+        setUploadStatus(`Upload failed: ${err.detail || "Server error"}`);
       }
     } catch (err) {
-      console.error('Error uploading handcuffs CSV:', err);
-      setUploadStatus('Error connecting to backend server.');
+      console.error("Error uploading handcuffs CSV:", err);
+      setUploadStatus("Error connecting to backend server.");
     } finally {
       setUploading(false);
+    }
+  };
+
+  // --- FantasyPros Cheat Sheet Handlers ---
+  const handleFpFileChange = (e) => {
+    if (e.target.files && e.target.files[0]) {
+      setFpFile(e.target.files[0]);
+      setFpUploadStatus("");
+    }
+  };
+
+  const handleUploadFp = async () => {
+    if (!fpFile) {
+      setFpUploadStatus("Please select a FantasyPros Cheat Sheet CSV first.");
+      return;
+    }
+
+    setFpUploading(true);
+    setFpUploadStatus("");
+
+    const formData = new FormData();
+    formData.append("file", fpFile);
+
+    try {
+      const response = await fetch(`${apiBase}/api/fantasypros/upload`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setFpUploadStatus(
+          `Success! Processed ${data.processed_records} cheat sheet records.`,
+        );
+        setFpFile(null); // Clear input on success
+      } else {
+        const err = await response.json();
+        setFpUploadStatus(`Upload failed: ${err.detail || "Server error"}`);
+      }
+    } catch (err) {
+      console.error("Error uploading FantasyPros CSV:", err);
+      setFpUploadStatus("Error connecting to backend server.");
+    } finally {
+      setFpUploading(false);
     }
   };
 
@@ -77,34 +130,70 @@ const ModelSettingsView = () => {
 
       {savedMsg && <div className="save-status-msg">{savedMsg}</div>}
 
+      {/* --- FantasyPros Cheat Sheet Ingestion Section --- */}
+      <div className="draft-control-panel">
+        <h3>FantasyPros Cheat Sheet Ingestion</h3>
+        <p className="settings-description">
+          Upload a FantasyPros Cheat Sheet CSV to import player ranks, tiers,
+          upside, bust, SoS, and ECR vs ADP.
+        </p>
+
+        <div className="control-row upload-row">
+          <div className="control-group file-group">
+            <label>Select CSV/TSV File</label>
+            <input
+              type="file"
+              accept=".csv,.tsv,.txt"
+              onChange={handleFpFileChange}
+            />
+          </div>
+
+          <button
+            className="manual-fetch-btn upload-btn"
+            onClick={handleUploadFp}
+            disabled={fpUploading || !fpFile}
+            style={{ backgroundColor: "#00B5C1", borderColor: "#00B5C1" }} // Teal styling differentiation
+          >
+            {fpUploading ? "Processing..." : "Upload Cheat Sheet"}
+          </button>
+        </div>
+
+        {fpUploadStatus && (
+          <div
+            className={`upload-status-text ${fpUploadStatus.includes("Success") ? "status-success" : "status-error"}`}
+          >
+            {fpUploadStatus}
+          </div>
+        )}
+      </div>
+
       {/* --- Handcuff Rankings Ingestion Section --- */}
       <div className="draft-control-panel">
         <h3>FantasyPros Handcuff Rankings Ingestion</h3>
         <p className="settings-description">
-          Upload a 2026 FantasyPros Handcuffs CSV to update running back depth chart orders (RB1 vs RB2) across PostgreSQL.
+          Upload a 2026 FantasyPros Handcuffs CSV to update running back depth
+          chart orders (RB1 vs RB2) across PostgreSQL.
         </p>
 
         <div className="control-row upload-row">
           <div className="control-group file-group">
             <label>Select CSV File</label>
-            <input 
-              type="file" 
-              accept=".csv" 
-              onChange={handleFileChange} 
-            />
+            <input type="file" accept=".csv" onChange={handleFileChange} />
           </div>
 
-          <button 
-            className="manual-fetch-btn upload-btn" 
-            onClick={handleUploadHandcuffs} 
+          <button
+            className="manual-fetch-btn upload-btn"
+            onClick={handleUploadHandcuffs}
             disabled={uploading || !selectedFile}
           >
-            {uploading ? 'Processing...' : 'Upload & Process CSV'}
+            {uploading ? "Processing..." : "Upload & Process CSV"}
           </button>
         </div>
 
         {uploadStatus && (
-          <div className={`upload-status-text ${uploadStatus.includes('Success') ? 'status-success' : 'status-error'}`}>
+          <div
+            className={`upload-status-text ${uploadStatus.includes("Success") ? "status-success" : "status-error"}`}
+          >
             {uploadStatus}
           </div>
         )}
@@ -120,7 +209,12 @@ const ModelSettingsView = () => {
               type="number"
               step="0.05"
               value={roleDiscounts.RB2}
-              onChange={(e) => setRoleDiscounts({ ...roleDiscounts, RB2: parseFloat(e.target.value) })}
+              onChange={(e) =>
+                setRoleDiscounts({
+                  ...roleDiscounts,
+                  RB2: parseFloat(e.target.value),
+                })
+              }
             />
           </div>
           <div className="control-group">
@@ -129,7 +223,12 @@ const ModelSettingsView = () => {
               type="number"
               step="0.05"
               value={roleDiscounts.WR2}
-              onChange={(e) => setRoleDiscounts({ ...roleDiscounts, WR2: parseFloat(e.target.value) })}
+              onChange={(e) =>
+                setRoleDiscounts({
+                  ...roleDiscounts,
+                  WR2: parseFloat(e.target.value),
+                })
+              }
             />
           </div>
           <div className="control-group">
@@ -138,7 +237,12 @@ const ModelSettingsView = () => {
               type="number"
               step="0.05"
               value={roleDiscounts.WR3}
-              onChange={(e) => setRoleDiscounts({ ...roleDiscounts, WR3: parseFloat(e.target.value) })}
+              onChange={(e) =>
+                setRoleDiscounts({
+                  ...roleDiscounts,
+                  WR3: parseFloat(e.target.value),
+                })
+              }
             />
           </div>
         </div>
@@ -153,7 +257,12 @@ const ModelSettingsView = () => {
             <input
               type="number"
               value={rookieWeights.proj}
-              onChange={(e) => setRookieWeights({ ...rookieWeights, proj: parseInt(e.target.value, 10) })}
+              onChange={(e) =>
+                setRookieWeights({
+                  ...rookieWeights,
+                  proj: parseInt(e.target.value, 10),
+                })
+              }
             />
           </div>
           <div className="control-group">
@@ -161,7 +270,12 @@ const ModelSettingsView = () => {
             <input
               type="number"
               value={rookieWeights.team}
-              onChange={(e) => setRookieWeights({ ...rookieWeights, team: parseInt(e.target.value, 10) })}
+              onChange={(e) =>
+                setRookieWeights({
+                  ...rookieWeights,
+                  team: parseInt(e.target.value, 10),
+                })
+              }
             />
           </div>
         </div>

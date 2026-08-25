@@ -539,12 +539,15 @@ async def get_draft_board(board_type: str):
                 if board_type == "dynasty"
                 else score_data["ti_score"]
             )
+            pos_str = (p.get("position") or "WR").upper()
+            tier_val = p.get("fp_tier")
+            pos_tier_label = f"{pos_str} - T{tier_val}" if tier_val else None
 
             draft_board.append(
                 {
                     "player_id": p_id,
                     "player_name": p["player_name"],
-                    "position": p["position"],
+                    "position": pos_str,
                     "team": p["team_abbr"],
                     "age": p.get("age"),
                     "bye_week": p.get("bye_week"),
@@ -552,6 +555,13 @@ async def get_draft_board(board_type: str):
                     "depth_chart_order": p.get("depth_chart_order"),
                     "is_pinned": p["is_pinned"],
                     "manual_rank": p["manual_rank"],
+                    "pos_tier": pos_tier_label,
+                    "fp_rank": p.get("fp_rank"),
+                    "fp_tier": tier_val,
+                    "fp_upside": p.get("fp_upside"),
+                    "fp_bust": p.get("fp_bust"),
+                    "fp_sos": p.get("fp_sos"),
+                    "fp_ecr_vs_adp": p.get("fp_ecr_vs_adp"),
                     "ti_score": score_data["ti_score"],
                     "ti_score_dynasty": score_data["ti_score_dynasty"],
                     "consistency_score": cons_data["rating"],
@@ -560,12 +570,6 @@ async def get_draft_board(board_type: str):
                     "projected_points": p.get("projected_points") or 0.0,
                     "projected_next_game": p.get("projected_next_game") or 0.0,
                     "projected_next_4": p.get("projected_next_4") or 0.0,
-                    "fp_rank": p.get("fp_rank"),
-                    "fp_tier": p.get("fp_tier"),
-                    "fp_upside": p.get("fp_upside"),
-                    "fp_bust": p.get("fp_bust"),
-                    "fp_sos": p.get("fp_sos"),
-                    "fp_ecr_vs_adp": p.get("fp_ecr_vs_adp"),
                     "custom_tags": parsed_tags,
                     "details": score_data,
                 }
@@ -1060,7 +1064,8 @@ async def get_live_recommendations(
                 player_tags = raw_tags
             else:
                 player_tags = []
-
+            tier_val = p.get("fp_tier")
+            pos_tier_label = f"{pos} - T{tier_val}" if tier_val else None
             available_players.append(
                 {
                     "player_id": p["player_id"],
@@ -1072,6 +1077,13 @@ async def get_live_recommendations(
                     "bye_week": p.get("bye_week"),
                     "depth_chart_position": p.get("depth_chart_position"),
                     "depth_chart_order": p.get("depth_chart_order"),
+                    "pos_tier": pos_tier_label,
+                    "fp_rank": p.get("fp_rank"),
+                    "fp_tier": tier_val,
+                    "fp_upside": p.get("fp_upside"),
+                    "fp_bust": p.get("fp_bust"),
+                    "fp_sos": p.get("fp_sos"),
+                    "fp_ecr_vs_adp": p.get("fp_ecr_vs_adp"),
                     "ti_score": final_ti,
                     "ti_score_dynasty": score_data["ti_score_dynasty"],
                     "consistency_score": cons_data["rating"],
@@ -1080,12 +1092,6 @@ async def get_live_recommendations(
                     "is_starter": score_data["is_starter"],
                     "bye_status": bye_check["status"],
                     "bye_message": bye_check["message"],
-                    "fp_rank": p.get("fp_rank"),
-                    "fp_tier": p.get("fp_tier"),
-                    "fp_upside": p.get("fp_upside"),
-                    "fp_bust": p.get("fp_bust"),
-                    "fp_sos": p.get("fp_sos"),
-                    "fp_ecr_vs_adp": p.get("fp_ecr_vs_adp"),
                     "vorp_score": final_vorp,
                     "roster_need_mult": need_mult,
                     "custom_tags": player_tags,
