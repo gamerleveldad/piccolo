@@ -62,14 +62,22 @@ def calculate_survival_probability(adp: float, next_pick: int) -> int:
 
 def build_search_pattern(raw_name: str) -> str:
     """Safely normalizes names by stripping suffixes, punctuation, and team names."""
-    # 1. Strip team abbreviations if in parentheses
-    name = raw_name.split("(")[0].strip()
+    if not raw_name or not str(raw_name).strip():
+        return ""
 
-    # 2. Remove common suffixes (JR, SR, III, etc.)
-    name = re.sub(r"\b(JR|SR|II|III|IV|V)\b", "", name, flags=re.IGNORECASE)
+    # 1. Strip team abbreviations if in parentheses
+    name = str(raw_name).split("(")[0].strip()
+
+    # 2. Remove common suffixes (JR, SR, II, III, IV, V)
+    name = re.sub(r"\b(JR|SR|II|III|IV|V)\b", "", name, flags=re.IGNORECASE).strip()
+
+    # Split to check length safely before doing index lookups
+    parts = name.split()
+    if not parts:
+        return ""
 
     # 3. Detect if first name is just an initial (e.g. "B. Robinson" or "B Robinson")
-    is_initial = "." in name.split()[0] or len(name.split()[0]) == 1
+    is_initial = "." in parts[0] or len(parts[0]) == 1
 
     # 4. Remove all remaining punctuation
     name = re.sub(r"[^\w\s]", "", name).strip()
@@ -82,11 +90,13 @@ def build_search_pattern(raw_name: str) -> str:
     if len(parts) > 1 and len(parts[-1]) in [2, 3] and parts[-1].isupper():
         parts.pop()
 
+    if not parts:
+        return ""
+
     # 6. Build the SQL wildcard search pattern
     if len(parts) >= 2:
         last_name = parts[-1]
         first_name = parts[0]
-        # If it's an initial, match "B%Robinson%". Otherwise, match "%Bijan%Robinson%"
         return (
             f"{first_name[0]}%{last_name}%"
             if is_initial
