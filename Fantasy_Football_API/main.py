@@ -1376,10 +1376,47 @@ async def sync_sleeper_master_data():
     """
     Seeds/Updates the database with Sleeper's master NFL player list.
     Solves missing rookies and team changes prior to projection uploads.
+    Applies the official 2026 NFL Bye Week Schedule.
     """
     session = await get_session()
     async with session.get("https://api.sleeper.app/v1/players/nfl") as resp:
         players_data = await resp.json()
+
+    # Official 2026 NFL Bye Week Schedule
+    bye_map = {
+        "CAR": 5,
+        "KC": 5,
+        "CIN": 6,
+        "DET": 6,
+        "MIA": 6,
+        "MIN": 6,
+        "BUF": 7,
+        "JAX": 7,
+        "LAC": 7,
+        "WAS": 7,
+        "HOU": 8,
+        "NO": 8,
+        "NYG": 8,
+        "SF": 8,
+        "PIT": 9,
+        "TEN": 9,
+        "CHI": 10,
+        "DEN": 10,
+        "PHI": 10,
+        "TB": 10,
+        "ATL": 11,
+        "CLE": 11,
+        "GB": 11,
+        "LAR": 11,
+        "NE": 11,
+        "SEA": 11,
+        "BAL": 13,
+        "IND": 13,
+        "LV": 13,
+        "NYJ": 13,
+        "ARI": 14,
+        "DAL": 14,
+    }
 
     records = []
     for sleeper_id, p in players_data.items():
@@ -1390,11 +1427,14 @@ async def sync_sleeper_master_data():
         if pos not in ["QB", "RB", "WR", "TE", "K", "DEF"]:
             continue
 
-        # Extract the GSIS ID (00-00xxxx) to match your existing DB schema, fallback to sleeper_id
         player_id = (
             p.get("gsis_id") or p.get("sportradar_id") or f"sleeper_{sleeper_id}"
         )
         full_name = p.get("full_name") or f"{p.get('first_name')} {p.get('last_name')}"
+        team_abbr = p.get("team")
+
+        # Cross-reference the team abbreviation to attach the correct 2026 bye week
+        player_bye = bye_map.get(team_abbr, None) if team_abbr else None
 
         records.append(
             (
@@ -1402,10 +1442,11 @@ async def sync_sleeper_master_data():
                 sleeper_id,
                 full_name,
                 pos,
-                p.get("team"),
+                team_abbr,
                 p.get("age"),
                 p.get("years_exp"),
                 p.get("depth_chart_order"),
+                player_bye,
             )
         )
 
@@ -1413,8 +1454,8 @@ async def sync_sleeper_master_data():
     async with pool.acquire() as conn:
         upsert_query = """
             INSERT INTO player_ti (
-                player_id, sleeper_id, player_name, position, team_abbr, age, years_exp, depth_chart_order
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                player_id, sleeper_id, player_name, position, team_abbr, age, years_exp, depth_chart_order, bye_week
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ON CONFLICT (player_id) DO UPDATE SET
                 sleeper_id = EXCLUDED.sleeper_id,
                 player_name = EXCLUDED.player_name,
@@ -1423,10 +1464,10 @@ async def sync_sleeper_master_data():
                 age = EXCLUDED.age,
                 years_exp = EXCLUDED.years_exp,
                 depth_chart_order = EXCLUDED.depth_chart_order,
+                bye_week = EXCLUDED.bye_week,
                 updated_at = CURRENT_TIMESTAMP;
         """
         async with conn.transaction():
-            # executemany handles massive arrays efficiently in asyncpg
             await conn.executemany(upsert_query, records)
 
         return {"status": "success", "synced_players": len(records)}
