@@ -5,6 +5,7 @@ import logging
 import math
 import os
 import re
+import time
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -133,6 +134,125 @@ def get_intervening_picks(
             intervening_slots.append(slot)
 
     return intervening_slots
+
+
+# --- IN-MEMORY CACHE FOR SLEEPER PROJECTIONS & SCORING ---
+SLEEPER_PROJECTIONS_CACHE = {
+    "season": 2026,
+    "timestamp": 0,
+    "ttl_seconds": 86400,  # 24 hours
+    "data": {},  # Maps sleeper_id -> projected stats dict
+}
+
+LEAGUE_SETTINGS_CACHE = {}  # Maps league_id -> {"timestamp": float, "settings": dict}
+
+
+async def get_sleeper_raw_projections(season: int = 2026) -> dict:
+    """
+    Fetches raw season projections from Sleeper with a 24-hour in-memory cache.
+    Prevents flooding the Sleeper API and uses <3MB of RAM.
+    """
+    global SLEEPER_PROJECTIONS_CACHE
+    now = time.time()
+
+    # Return cache if valid
+    if SLEEPER_PROJECTIONS_CACHE["data"] and (
+        now - SLEEPER_PROJECTIONS_CACHE["timestamp"]
+        < SLEEPER_PROJECTIONS_CACHE["ttl_seconds"]
+    ):
+        return SLEEPER_PROJECTIONS_CACHE["data"]
+
+    url = f"https://api.sleeper.app/v1/projections/nfl/regular/{season}"
+    session = await get_session()
+
+    try:
+        async with session.get(url) as resp:
+            if resp.status == 200:
+                raw_list = await resp.json()
+                # Store compactly: sleeper_id -> stats dictionary
+                proj_dict = {}
+                for item in raw_list:
+                    p_id = str(item.get("player_id") or "")
+                    stats = item.get("stats") or {}
+                    if p_id and stats:
+                        proj_dict[p_id] = stats
+
+                SLEEPER_PROJECTIONS_CACHE["data"] = proj_dict
+                SLEEPER_PROJECTIONS_CACHE["timestamp"] = now
+                SLEEPER_PROJECTIONS_CACHE["season"] = season
+                return proj_dict
+    except Exception as e:
+        logger.error(f"Failed to fetch Sleeper projections: {e}")
+
+    return SLEEPER_PROJECTIONS_CACHE.get("data", {})
+
+
+async def get_sleeper_league_scoring(league_id: str) -> dict:
+    """Fetches and caches scoring settings for a specific Sleeper league."""
+    if not league_id:
+        return {}
+
+    global LEAGUE_SETTINGS_CACHE
+    now = time.time()
+    cached = LEAGUE_SETTINGS_CACHE.get(league_id)
+    if cached and (now - cached["timestamp"] < 3600):  # 1 hour cache per league
+        return cached["settings"]
+
+    url = f"https://api.sleeper.app/v1/league/{league_id}"
+    session = await get_session()
+    try:
+        async with session.get(url) as resp:
+            if resp.status == 200:
+                league_data = await resp.json()
+                settings = league_data.get("scoring_settings") or {}
+                LEAGUE_SETTINGS_CACHE[league_id] = {
+                    "timestamp": now,
+                    "settings": settings,
+                }
+                return settings
+    except Exception as e:
+        logger.error(f"Failed to fetch league scoring for {league_id}: {e}")
+
+    return {}
+
+
+def calculate_custom_league_points(
+    stats: dict, scoring_settings: dict, position: str = ""
+) -> float:
+    """
+    Applies custom league scoring multipliers to raw projected stats.
+    Handles standard stats, IDP, and position bonuses (e.g. TE Premium).
+    """
+    if not stats or not scoring_settings:
+        return 0.0
+
+    total_pts = 0.0
+    pos_upper = (position or "").upper()
+
+    for stat_key, stat_val in stats.items():
+        if not stat_val or not isinstance(stat_val, (int, float)):
+            continue
+
+        # Standard multiplier lookup
+        multiplier = scoring_settings.get(stat_key, 0.0)
+        if multiplier:
+            total_pts += float(stat_val) * float(multiplier)
+
+    # Apply positional bonuses (e.g. bonus_rec_te for TE Premium)
+    if pos_upper == "TE" and "bonus_rec_te" in scoring_settings:
+        total_pts += float(stats.get("rec", 0)) * float(
+            scoring_settings["bonus_rec_te"]
+        )
+    elif pos_upper == "RB" and "bonus_rec_rb" in scoring_settings:
+        total_pts += float(stats.get("rec", 0)) * float(
+            scoring_settings["bonus_rec_rb"]
+        )
+    elif pos_upper == "WR" and "bonus_rec_wr" in scoring_settings:
+        total_pts += float(stats.get("rec", 0)) * float(
+            scoring_settings["bonus_rec_wr"]
+        )
+
+    return round(total_pts, 2)
 
 
 # --- LAZY LOADERS: Bulletproof memory management ---
@@ -1045,11 +1165,21 @@ def calculate_roster_need_multiplier(pos: str, drafted_count: int) -> float:
 
 @app.get("/api/draft/recommendations")
 async def get_live_recommendations(
-    draft_id: str, user_id: str, format: str = "snake", roster_id: str = None
+    draft_id: str,
+    user_id: str,
+    format: str = "snake",
+    roster_id: str = None,
+    league_id: str = None,  # <-- Added league_id
 ):
     draft_state = await get_draft_state(draft_id, user_id, roster_id)
     drafted_set = {str(pid) for pid in draft_state["drafted_player_ids"]}
     my_roster_pids = [str(pid) for pid in draft_state["my_roster"]["ALL"]]
+
+    # Fetch custom scoring settings and raw projections (cached)
+    league_scoring = await get_sleeper_league_scoring(league_id) if league_id else {}
+    raw_sleeper_projs = (
+        await get_sleeper_raw_projections(2026) if league_scoring else {}
+    )
 
     pool = await get_db()
     async with pool.acquire() as conn:
@@ -1083,7 +1213,7 @@ async def get_live_recommendations(
         available_players = []
         positional_scores = {"QB": [], "RB": [], "WR": [], "TE": []}
 
-        # First Pass: Compute raw TI scores and build baselines
+        # First Pass: Compute raw TI scores and baselines
         raw_player_data = []
         for p in all_players:
             s_id = str(p.get("sleeper_id") or "")
@@ -1143,8 +1273,8 @@ async def get_live_recommendations(
         slot_to_roster = draft_state.get("slot_to_roster_id", {})
         intervening_needs = {"QB": 0, "RB": 0, "WR": 0, "TE": 0}
         for slot in intervening_slots:
-            roster_id = str(slot_to_roster.get(str(slot), slot))
-            roster = team_rosters.get(roster_id, {})
+            roster_id_key = str(slot_to_roster.get(str(slot), slot))
+            roster = team_rosters.get(roster_id_key, {})
             if roster.get("QB", 0) < 1:
                 intervening_needs["QB"] += 1
             if roster.get("RB", 0) < 2:
@@ -1164,9 +1294,10 @@ async def get_live_recommendations(
                 key = f"{pos}_T{tier_val}"
                 tier_counts[key] = tier_counts.get(key, 0) + 1
 
-        # Second Pass: Apply Multipliers, Survival Odds, and Scarcity
+        # Second Pass: Attach Custom League Projections & Attributes
         for item in raw_player_data:
             p = item["db_record"]
+            s_id = item["sleeper_id"]
             pos = item["pos"]
             score_data = item["score_data"]
             bye_check = item["bye_check"]
@@ -1185,15 +1316,9 @@ async def get_live_recommendations(
             cons_data = format_consistency_score(c_score)
 
             raw_tags = p.get("custom_tags")
-            if isinstance(raw_tags, str):
-                try:
-                    player_tags = json.loads(raw_tags)
-                except Exception:
-                    player_tags = []
-            elif isinstance(raw_tags, list):
-                player_tags = raw_tags
-            else:
-                player_tags = []
+            player_tags = (
+                json.loads(raw_tags) if isinstance(raw_tags, str) else (raw_tags or [])
+            )
 
             tier_val = p.get("fp_tier")
             pos_tier_label = f"{pos} - T{tier_val}" if tier_val else None
@@ -1211,10 +1336,20 @@ async def get_live_recommendations(
             adp_val = p.get("adp") or p.get("fp_rank") or (curr_pick + 10)
             survival_odds = calculate_survival_probability(adp_val, next_user_pick_no)
 
+            # Calculate Custom League Projection
+            league_proj_ppg = None
+            league_proj_total = None
+            if league_scoring and s_id in raw_sleeper_projs:
+                p_stats = raw_sleeper_projs[s_id]
+                league_proj_total = calculate_custom_league_points(
+                    p_stats, league_scoring, pos
+                )
+                league_proj_ppg = round(league_proj_total / 17.0, 2)
+
             available_players.append(
                 {
                     "player_id": p["player_id"],
-                    "sleeper_id": item["sleeper_id"],
+                    "sleeper_id": s_id,
                     "player_name": p["player_name"],
                     "position": pos,
                     "team": p["team_abbr"],
@@ -1226,6 +1361,8 @@ async def get_live_recommendations(
                     "tier_remaining": tier_remaining,
                     "scarcity_alert": scarcity_alert,
                     "survival_odds": survival_odds,
+                    "league_proj_ppg": league_proj_ppg,
+                    "league_proj_total": league_proj_total,
                     "fp_rank": p.get("fp_rank"),
                     "fp_tier": tier_val,
                     "fp_upside": p.get("fp_upside"),
@@ -1247,7 +1384,7 @@ async def get_live_recommendations(
                 }
             )
 
-        # 6. Auction "Don't Go Over" Calculation
+        # 6. Auction Calculation (if applicable)
         if format.lower() == "auction":
             total_budget = draft_state.get("budget", 200) or 200
             rem_budget = draft_state["remaining_budget"]
@@ -1290,7 +1427,7 @@ async def get_live_recommendations(
                     min(recommended_bid, absolute_max_bid) if recommended_bid > 0 else 1
                 )
 
-        # 7. Sort Recommendations by Adjusted VORP
+        # 7. Sort by Adjusted VORP
         def sort_key(x):
             status_weight = 2
             if x["bye_status"] == "BLOCKED":

@@ -221,7 +221,7 @@ const LiveDraftView = () => {
 
     try {
       const res = await fetch(
-        `${apiBase}/api/draft/recommendations?draft_id=${activeDraftId}&user_id=${username}&format=${draftFormat}&roster_id=${rosterId}`,
+        `${apiBase}/api/draft/recommendations?draft_id=${activeDraftId}&user_id=${username}&format=${draftFormat}&roster_id=${rosterId}&league_id=${selectedLeague}`,
       );
       if (res.ok) {
         const data = await res.json();
@@ -260,7 +260,7 @@ const LiveDraftView = () => {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isLiveSync, draftId, username, draftFormat, rosterId]);
+  }, [isLiveSync, draftId, username, draftFormat, rosterId, selectedLeague]);
 
   const filteredBoard = board.filter((player) => {
     if (positionFilter === "ALL") return true;
@@ -613,6 +613,21 @@ const LiveDraftView = () => {
                 <label>TI Score</label>
                 <div>{player.ti_score}</div>
               </div>
+
+              {/* Custom Sleeper League Projection */}
+              {player.league_proj_ppg !== undefined &&
+                player.league_proj_ppg !== null && (
+                  <div
+                    className="stat-box highlight-stat"
+                    title={`Calculated from Sleeper's raw player projections using this league's custom scoring rules (${player.league_proj_total} total season pts).`}
+                    style={{ border: "1px solid #00B5C1", cursor: "help" }}
+                  >
+                    <label style={{ color: "#00B5C1" }}>League Proj ℹ️</label>
+                    <div style={{ color: "#00B5C1", fontWeight: 800 }}>
+                      {player.league_proj_ppg} PPG
+                    </div>
+                  </div>
+                )}
 
               <div className="stat-box highlight-stat">
                 <label>Value Above Base (VORP)</label>
