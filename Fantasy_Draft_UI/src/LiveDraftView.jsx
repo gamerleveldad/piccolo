@@ -1,6 +1,77 @@
 // Fantasy_Draft_UI/src/LiveDraftView.jsx
 import { useEffect, useState } from "react";
 
+// Tooltip Descriptions
+const TOOLTIPS = {
+  fpRankTier: `The FP Rank is the ADP of that player from FantasyPros.\n\nTier 1 (The Elite): Top 3 to 5 overall picks. High-volume PPR anchors.\nTier 2 (Core Starters): 1st and early 2nd round cornerstones.\nTier 3 (Positional Advantages): Elite QBs/TEs alongside Rd 2/3 WRs.\nTier 4 & 5 (Solid Starters): Mid-round secure volume or high upside.\nTier 6-9 (Flex & Depth): WR3s, RB3s, and standard starting QBs.\nTier 10-11 (High-Upside Bench): Handcuffs, breakout candidates, rookies.\nTier 12-14 (Dart Throws & Defense): Speculative lotto tickets, platoon DSTs, kickers.`,
+  upside: `High-ceiling potential due to role, talent, or opportunity based on consensus expert opinions.`,
+  bust: `Higher risk due to injuries, volatility, or uncertain usage based on consensus expert opinions.`,
+  sos: `An estimation of how favorable the remaining games are to getting closer to the ceiling. A 5 star SOS has the max chance of booming and a 1 star SOS means there is a higher chance of bust.`,
+  ecrVsAdp: `This shows the Expert Consensus Ranking (ECR) compared to Average Draft Position. A positive number means that the player is more valued by the Experts and ranked higher. A negative number means that the player is more valued by general opinion.`,
+};
+
+// 5-Segment Battery Meter for Upside and Bust
+const BatteryMeter = ({ value = 0, type = "upside" }) => {
+  const score = Math.max(0, Math.min(5, Number(value) || 0));
+
+  const getFillColor = () => {
+    if (type === "upside") {
+      if (score >= 4) return "#32CD32"; // Green
+      if (score === 3) return "#FFD700"; // Yellow
+      if (score === 2) return "#FFA500"; // Orange
+      return "#FC4C02"; // Red
+    } else {
+      // Inverted for Bust: 1/5 is lowest risk (Green), 5/5 is highest risk (Red)
+      if (score <= 2) return "#32CD32"; // Low Risk = Green
+      if (score === 3) return "#FFD700"; // Moderate = Yellow
+      if (score === 4) return "#FFA500"; // High = Orange
+      return "#FC4C02"; // Severe Risk = Red
+    }
+  };
+
+  const activeColor = getFillColor();
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "3px",
+        marginTop: "4px",
+      }}
+    >
+      {[1, 2, 3, 4, 5].map((blockIdx) => {
+        const isFilled = blockIdx <= score;
+        return (
+          <div
+            key={blockIdx}
+            style={{
+              width: "8px",
+              height: "14px",
+              borderRadius: "2px",
+              backgroundColor: isFilled
+                ? activeColor
+                : "rgba(255, 255, 255, 0.1)",
+              border: `1px solid ${isFilled ? activeColor : "rgba(255, 255, 255, 0.2)"}`,
+              transition: "background-color 0.2s ease",
+            }}
+          />
+        );
+      })}
+      <span
+        style={{
+          fontSize: "0.78rem",
+          marginLeft: "5px",
+          color: "#8BB2C9",
+          fontWeight: 600,
+        }}
+      >
+        {score}/5
+      </span>
+    </div>
+  );
+};
+
 const LiveDraftView = () => {
   const [username, setUsername] = useState("");
   const [leagues, setLeagues] = useState([]);
@@ -13,14 +84,13 @@ const LiveDraftView = () => {
   const [positionFilter, setPositionFilter] = useState("ALL");
   const [board, setBoard] = useState([]);
   const [draftState, setDraftState] = useState(null);
-  const [draftIntel, setDraftIntel] = useState(null); // Draft Room Spying Intel
+  const [draftIntel, setDraftIntel] = useState(null);
   const [rosterByes, setRosterByes] = useState({});
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
   const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:8005";
 
-  // Helper to extract draft ID if user pastes full Sleeper URL
   const cleanDraftId = (input) => {
     if (!input) return "";
     const parts = input.trim().split("/");
@@ -277,7 +347,6 @@ const LiveDraftView = () => {
           </div>
         </div>
 
-        {/* Manual Refresh & Error Bar */}
         <div className="control-subrow">
           <button
             className="manual-fetch-btn"
@@ -289,7 +358,7 @@ const LiveDraftView = () => {
         </div>
       </div>
 
-      {/* Auction & Roster Summary Banner */}
+      {/* Summary Banner */}
       {draftState && (
         <div className="draft-summary-banner">
           {draftFormat === "auction" && (
@@ -330,7 +399,7 @@ const LiveDraftView = () => {
         ))}
       </div>
 
-      {/* NEW: Draft Room Radar / Opponent Needs Banner */}
+      {/* Opponent Needs & Turn Banner */}
       {draftIntel && draftFormat === "snake" && (
         <div
           className="intel-radar-banner"
@@ -352,11 +421,7 @@ const LiveDraftView = () => {
               NEXT SELECTION
             </span>
             <div
-              style={{
-                fontSize: "1.1rem",
-                fontWeight: 800,
-                color: "#00B5C1",
-              }}
+              style={{ fontSize: "1.1rem", fontWeight: 800, color: "#00B5C1" }}
             >
               Pick #{draftIntel.next_user_pick_no} (
               {draftIntel.picks_until_turn} picks away)
@@ -522,7 +587,12 @@ const LiveDraftView = () => {
 
                 {/* 4. Positional Tier Badge */}
                 {player.pos_tier && (
-                  <span className="badge tier-badge">{player.pos_tier}</span>
+                  <span
+                    className="badge tier-badge"
+                    title={TOOLTIPS.fpRankTier}
+                  >
+                    {player.pos_tier}
+                  </span>
                 )}
 
                 {/* 5. Depth, Age, Bye Badges */}
@@ -537,7 +607,7 @@ const LiveDraftView = () => {
               </div>
             </div>
 
-            {/* Card Body */}
+            {/* Card Body with Battery Meters & Tooltips */}
             <div className="card-body">
               <div className="stat-box main-stat">
                 <label>TI Score</label>
@@ -560,21 +630,65 @@ const LiveDraftView = () => {
 
               {player.fp_rank && (
                 <>
-                  <div className="stat-box">
-                    <label>FP Rank</label>
-                    <div>#{player.fp_rank}</div>
-                  </div>
-                  <div className="stat-box">
-                    <label>Upside / Bust</label>
+                  <div
+                    className="stat-box"
+                    title={TOOLTIPS.fpRankTier}
+                    style={{ cursor: "help" }}
+                  >
+                    <label>FP Rank / Tier ℹ️</label>
                     <div>
-                      {player.fp_upside || 0}/5 · {player.fp_bust || 0}/5
+                      #{player.fp_rank} (T{player.fp_tier || "?"})
                     </div>
                   </div>
-                  <div className="stat-box">
-                    <label>SoS</label>
-                    <div style={{ color: "#FFD700" }}>
+
+                  <div
+                    className="stat-box"
+                    title={TOOLTIPS.upside}
+                    style={{ cursor: "help" }}
+                  >
+                    <label>Upside ℹ️</label>
+                    <BatteryMeter value={player.fp_upside} type="upside" />
+                  </div>
+
+                  <div
+                    className="stat-box"
+                    title={TOOLTIPS.bust}
+                    style={{ cursor: "help" }}
+                  >
+                    <label>Bust Risk ℹ️</label>
+                    <BatteryMeter value={player.fp_bust} type="bust" />
+                  </div>
+
+                  <div
+                    className="stat-box"
+                    title={TOOLTIPS.sos}
+                    style={{ cursor: "help" }}
+                  >
+                    <label>SoS ℹ️</label>
+                    <div style={{ color: "#FFD700", fontSize: "0.95rem" }}>
                       {"★".repeat(player.fp_sos || 0)}
                       {"☆".repeat(Math.max(0, 5 - (player.fp_sos || 0)))}
+                    </div>
+                  </div>
+
+                  <div
+                    className="stat-box"
+                    title={TOOLTIPS.ecrVsAdp}
+                    style={{ cursor: "help" }}
+                  >
+                    <label>ECR vs ADP ℹ️</label>
+                    <div
+                      style={{
+                        color:
+                          (player.fp_ecr_vs_adp || 0) >= 0
+                            ? "#00B5C1"
+                            : "#FC4C02",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {(player.fp_ecr_vs_adp || 0) > 0
+                        ? `+${player.fp_ecr_vs_adp}`
+                        : player.fp_ecr_vs_adp || 0}
                     </div>
                   </div>
                 </>

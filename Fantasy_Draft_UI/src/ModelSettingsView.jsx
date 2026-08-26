@@ -30,7 +30,32 @@ const ModelSettingsView = () => {
     setSavedMsg("Settings updated for current draft session!");
     setTimeout(() => setSavedMsg(""), 3000);
   };
+  // --- Sleeper Sync State ---
+  const [syncingSleeper, setSyncingSleeper] = useState(false);
+  const [sleeperSyncStatus, setSleeperSyncStatus] = useState("");
 
+  const handleSyncSleeper = async () => {
+    setSyncingSleeper(true);
+    setSleeperSyncStatus("");
+    try {
+      const res = await fetch(`${apiBase}/api/admin/sync-sleeper`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSleeperSyncStatus(
+          `Success! Synced ${data.synced_players} players from Sleeper.`,
+        );
+      } else {
+        setSleeperSyncStatus("Failed to sync Sleeper data.");
+      }
+    } catch (err) {
+      console.error(err);
+      setSleeperSyncStatus("Error connecting to backend.");
+    } finally {
+      setSyncingSleeper(false);
+    }
+  };
   // --- Handcuff Handlers ---
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
@@ -127,7 +152,32 @@ const ModelSettingsView = () => {
           Save Settings
         </button>
       </div>
-
+      {/* --- Sleeper Master Sync Section --- */}
+      <div className="draft-control-panel">
+        <h3>Sleeper Master NFL Database Sync</h3>
+        <p className="settings-description">
+          Pulls the latest active NFL player list from Sleeper. Run this FIRST
+          to ensure all rookies and missing players are in the database before
+          uploading projections.
+        </p>
+        <div className="control-row upload-row">
+          <button
+            className="manual-fetch-btn upload-btn"
+            onClick={handleSyncSleeper}
+            disabled={syncingSleeper}
+            style={{ backgroundColor: "#28a745", borderColor: "#28a745" }}
+          >
+            {syncingSleeper ? "Syncing..." : "Sync Sleeper Database"}
+          </button>
+        </div>
+        {sleeperSyncStatus && (
+          <div
+            className={`upload-status-text ${sleeperSyncStatus.includes("Success") ? "status-success" : "status-error"}`}
+          >
+            {sleeperSyncStatus}
+          </div>
+        )}
+      </div>
       {savedMsg && <div className="save-status-msg">{savedMsg}</div>}
 
       {/* --- FantasyPros Cheat Sheet Ingestion Section --- */}

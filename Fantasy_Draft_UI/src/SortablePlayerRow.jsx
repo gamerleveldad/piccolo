@@ -63,6 +63,68 @@ const TAG_OPTIONS = [
   },
 ];
 
+// 5-Segment Battery Meter for Upside and Bust
+const BatteryMeter = ({ value = 0, type = "upside" }) => {
+  const score = Math.max(0, Math.min(5, Number(value) || 0));
+
+  const getFillColor = () => {
+    if (type === "upside") {
+      if (score >= 4) return "#32CD32"; // Green
+      if (score === 3) return "#FFD700"; // Yellow
+      if (score === 2) return "#FFA500"; // Orange
+      return "#FC4C02"; // Red
+    } else {
+      // Inverted for Bust: 1/5 is lowest risk (Green), 5/5 is highest risk (Red)
+      if (score <= 2) return "#32CD32"; // Low Risk = Green
+      if (score === 3) return "#FFD700"; // Moderate = Yellow
+      if (score === 4) return "#FFA500"; // High = Orange
+      return "#FC4C02"; // Severe Risk = Red
+    }
+  };
+
+  const activeColor = getFillColor();
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "3px",
+        marginTop: "4px",
+      }}
+    >
+      {[1, 2, 3, 4, 5].map((blockIdx) => {
+        const isFilled = blockIdx <= score;
+        return (
+          <div
+            key={blockIdx}
+            style={{
+              width: "8px",
+              height: "14px",
+              borderRadius: "2px",
+              backgroundColor: isFilled
+                ? activeColor
+                : "rgba(255, 255, 255, 0.1)",
+              border: `1px solid ${isFilled ? activeColor : "rgba(255, 255, 255, 0.2)"}`,
+              transition: "background-color 0.2s ease",
+            }}
+          />
+        );
+      })}
+      <span
+        style={{
+          fontSize: "0.78rem",
+          marginLeft: "5px",
+          color: "#8BB2C9",
+          fontWeight: 600,
+        }}
+      >
+        {score}/5
+      </span>
+    </div>
+  );
+};
+
 const SvgIcon = ({ icon, color, outline }) => {
   const filterStyle = outline
     ? `drop-shadow(1px 0px 0px ${outline}) drop-shadow(0px 1px 0px ${outline}) drop-shadow(-1px 0px 0px ${outline}) drop-shadow(0px -1px 0px ${outline})`
@@ -170,6 +232,15 @@ const customSelectStyles = {
     cursor: "pointer",
     ":hover": { backgroundColor: "rgba(252, 76, 2, 0.2)", color: "#FF6826" },
   }),
+};
+
+// Tooltip Descriptions
+const TOOLTIPS = {
+  fpRankTier: `The FP Rank is the ADP of that player from FantasyPros.\n\nTier 1 (The Elite): Top 3 to 5 overall picks. High-volume PPR anchors.\nTier 2 (Core Starters): 1st and early 2nd round cornerstones.\nTier 3 (Positional Advantages): Elite QBs/TEs alongside Rd 2/3 WRs.\nTier 4 & 5 (Solid Starters): Mid-round secure volume or high upside.\nTier 6-9 (Flex & Depth): WR3s, RB3s, and standard starting QBs.\nTier 10-11 (High-Upside Bench): Handcuffs, breakout candidates, rookies.\nTier 12-14 (Dart Throws & Defense): Speculative lotto tickets, platoon DSTs, kickers.`,
+  upside: `High-ceiling potential due to role, talent, or opportunity based on consensus expert opinions.`,
+  bust: `Higher risk due to injuries, volatility, or uncertain usage based on consensus expert opinions.`,
+  sos: `An estimation of how favorable the remaining games are to getting closer to the ceiling. A 5 star SOS has the max chance of booming and a 1 star SOS means there is a higher chance of bust.`,
+  ecrVsAdp: `This shows the Expert Consensus Ranking (ECR) compared to Average Draft Position. A positive number means that the player is more valued by the Experts and ranked higher. A negative number means that the player is more valued by general opinion.`,
 };
 
 const SortablePlayerRow = ({ player, displayRank, viewMode }) => {
@@ -331,9 +402,11 @@ const SortablePlayerRow = ({ player, displayRank, viewMode }) => {
             />
           </div>
 
-          {/* Positional Tier Badge (e.g. QB - T1, WR - T2) */}
+          {/* Positional Tier Badge */}
           {player.pos_tier && (
-            <span className="badge tier-badge">{player.pos_tier}</span>
+            <span className="badge tier-badge" title={TOOLTIPS.fpRankTier}>
+              {player.pos_tier}
+            </span>
           )}
 
           {player.depth_chart_order && (
@@ -361,30 +434,56 @@ const SortablePlayerRow = ({ player, displayRank, viewMode }) => {
           <div>{player.consistency_label || "-"}</div>
         </div>
 
-        {/* FantasyPros Cheatsheet Metrics */}
+        {/* FantasyPros Cheatsheet Metrics with Tooltips & Battery Meters */}
         {player.fp_rank && (
           <>
-            <div className="stat-box">
-              <label>FP Rank / Tier</label>
+            <div
+              className="stat-box"
+              title={TOOLTIPS.fpRankTier}
+              style={{ cursor: "help" }}
+            >
+              <label>FP Rank / Tier ℹ️</label>
               <div>
                 #{player.fp_rank} (T{player.fp_tier || "?"})
               </div>
             </div>
-            <div className="stat-box">
-              <label>Upside / Bust</label>
-              <div>
-                {player.fp_upside || 0}/5 · {player.fp_bust || 0}/5
-              </div>
+
+            <div
+              className="stat-box"
+              title={TOOLTIPS.upside}
+              style={{ cursor: "help" }}
+            >
+              <label>Upside ℹ️</label>
+              <BatteryMeter value={player.fp_upside} type="upside" />
             </div>
-            <div className="stat-box">
-              <label>SoS</label>
-              <div style={{ color: "#FFD700" }}>
+
+            <div
+              className="stat-box"
+              title={TOOLTIPS.bust}
+              style={{ cursor: "help" }}
+            >
+              <label>Bust Risk ℹ️</label>
+              <BatteryMeter value={player.fp_bust} type="bust" />
+            </div>
+
+            <div
+              className="stat-box"
+              title={TOOLTIPS.sos}
+              style={{ cursor: "help" }}
+            >
+              <label>SoS ℹ️</label>
+              <div style={{ color: "#FFD700", fontSize: "0.95rem" }}>
                 {"★".repeat(player.fp_sos || 0)}
                 {"☆".repeat(Math.max(0, 5 - (player.fp_sos || 0)))}
               </div>
             </div>
-            <div className="stat-box">
-              <label>ECR vs ADP</label>
+
+            <div
+              className="stat-box"
+              title={TOOLTIPS.ecrVsAdp}
+              style={{ cursor: "help" }}
+            >
+              <label>ECR vs ADP ℹ️</label>
               <div
                 style={{
                   color:
