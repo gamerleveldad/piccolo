@@ -205,7 +205,16 @@ img, svg {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.05); opacity: 0.85; }
+  100% { transform: scale(1); opacity: 1; }
+}
 
+.scarcity-badge {
+  letter-spacing: 0.4px;
+  box-shadow: 0 0 8px rgba(252, 76, 2, 0.6);
+}
 .name-col strong {
   color: #FFFFFF;
   font-weight: 800;

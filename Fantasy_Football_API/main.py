@@ -2,6 +2,7 @@ import csv
 import io
 import json
 import logging
+import math
 import os
 import re
 from contextlib import asynccontextmanager
@@ -37,6 +38,55 @@ POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres_db")
 # Global Resource Pointers
 db_pool = None
 http_session = None
+
+
+def calculate_survival_probability(adp: float, next_pick: int) -> int:
+    """
+    Estimates the probability (0-100%) that a player with given ADP
+    will still be on the board at next_pick using a Gaussian error function.
+    """
+    if not adp or adp <= 0:
+        return 50  # Fallback if no ADP data exists
+
+    # Standard deviation scales proportionally with ADP depth
+    sigma = max(2.5, adp * 0.12)
+
+    # Cumulative Distribution Function: P(Drafted after next_pick)
+    # Z-score relative to the target pick
+    z = (next_pick - adp) / (sigma * math.sqrt(2))
+    cdf = 0.5 * (1.0 + math.erf(z))
+
+    survival_prob = round((1.0 - cdf) * 100)
+    return max(1, min(99, survival_prob))
+
+
+def get_intervening_picks(
+    total_teams: int, current_overall_pick: int, user_slot: int
+) -> list[int]:
+    """
+    Calculates the sequence of roster slots picking between current pick and user's next pick in a snake draft.
+    """
+    intervening_slots = []
+    # Search up to 2 rounds ahead
+    for pick_num in range(
+        current_overall_pick, current_overall_pick + (total_teams * 2)
+    ):
+        round_num = (pick_num - 1) // total_teams + 1
+        pick_in_round = (pick_num - 1) % total_teams + 1
+
+        # Determine 1-indexed slot in snake format
+        if round_num % 2 == 1:
+            slot = pick_in_round
+        else:
+            slot = total_teams - pick_in_round + 1
+
+        if pick_num > current_overall_pick and slot == user_slot:
+            break  # Reached user's next turn
+
+        if pick_num > current_overall_pick:
+            intervening_slots.append(slot)
+
+    return intervening_slots
 
 
 # --- LAZY LOADERS: Bulletproof memory management ---
@@ -767,15 +817,10 @@ async def upload_projections_csv(file: UploadFile = File(...)):
 
 @app.get("/api/sleeper/draft/{draft_id}/state")
 async def get_draft_state(draft_id: str, user_id: str = None, roster_id: str = None):
-    """
-    Fetches live picks for a draft. Uses deep metadata extraction to bypass
-    Sleeper's hidden roster_ids in Auction Mock Drafts.
-    """
     draft_url = f"https://api.sleeper.app/v1/draft/{draft_id}"
     picks_url = f"https://api.sleeper.app/v1/draft/{draft_id}/picks"
     session = await get_session()
 
-    # Resolve numeric user_id if text username was provided
     if user_id and not user_id.isdigit():
         user_url = f"https://api.sleeper.app/v1/user/{user_id}"
         async with session.get(user_url) as user_resp:
@@ -790,13 +835,15 @@ async def get_draft_state(draft_id: str, user_id: str = None, roster_id: str = N
         picks = await picks_resp.json() if picks_resp.status == 200 else []
 
     user_id_str = str(user_id) if user_id is not None else None
-
-    # 1. Clean the manual override
     user_roster_id_str = str(roster_id).strip() if roster_id else None
 
-    # 2. Fallback auto-resolution if no override is provided
+    draft_order = draft_meta.get("draft_order") or {}
+    user_slot = draft_order.get(user_id_str, 1) if user_id_str else 1
+    total_teams = draft_meta.get("settings", {}).get("teams") or max(
+        len(draft_order), 12
+    )
+
     if not user_roster_id_str and user_id_str and draft_meta:
-        draft_order = draft_meta.get("draft_order") or {}
         d_slot = draft_order.get(user_id_str)
         if d_slot:
             slot_to_roster = draft_meta.get("slot_to_roster_id") or {}
@@ -804,6 +851,7 @@ async def get_draft_state(draft_id: str, user_id: str = None, roster_id: str = N
 
     drafted_player_ids = []
     my_roster = {"QB": [], "RB": [], "WR": [], "TE": [], "DEF": [], "K": [], "ALL": []}
+    team_rosters = {}
     amount_spent = 0
 
     for pick in picks:
@@ -812,11 +860,8 @@ async def get_draft_state(draft_id: str, user_id: str = None, roster_id: str = N
             continue
 
         drafted_player_ids.append(pid)
-
         metadata = pick.get("metadata") or {}
         pick_owner_user = str(pick.get("picked_by") or "")
-
-        # Deep extraction for Auction Mocks where roster_id is buried
         pick_roster_id = str(
             pick.get("roster_id")
             or metadata.get("roster_id")
@@ -824,20 +869,21 @@ async def get_draft_state(draft_id: str, user_id: str = None, roster_id: str = N
             or ""
         )
 
-        is_my_pick = False
+        pos = metadata.get("position", "ALL").upper()
+        if pick_roster_id:
+            if pick_roster_id not in team_rosters:
+                team_rosters[pick_roster_id] = {"QB": 0, "RB": 0, "WR": 0, "TE": 0}
+            if pos in team_rosters[pick_roster_id]:
+                team_rosters[pick_roster_id][pos] += 1
 
-        # Match 1: Manual Override matches the deep-extracted roster ID
+        is_my_pick = False
         if user_roster_id_str and pick_roster_id == user_roster_id_str:
             is_my_pick = True
-        # Match 2: Real user ID matches the pick owner
         elif user_id_str and user_id_str.isdigit() and pick_owner_user == user_id_str:
             is_my_pick = True
 
         if is_my_pick:
-            pos = metadata.get("position", "ALL")
-            # Extract amount from metadata or root
             amount_val = metadata.get("amount") or pick.get("amount") or 0
-
             my_roster["ALL"].append(pid)
             if pos in my_roster:
                 my_roster[pos].append(pid)
@@ -847,16 +893,20 @@ async def get_draft_state(draft_id: str, user_id: str = None, roster_id: str = N
             except (ValueError, TypeError):
                 pass
 
-    # Safety catch for budget setting
     total_budget = draft_meta.get("settings", {}).get("budget") or 200
+    current_pick_no = len(drafted_player_ids) + 1
 
     return {
         "draft_id": draft_id,
         "status": draft_meta.get("status"),
-        "draft_type": draft_meta.get("type"),
+        "draft_type": draft_meta.get("type", "snake"),
+        "total_teams": total_teams,
+        "user_slot": user_slot,
+        "current_pick_no": current_pick_no,
         "budget": total_budget,
         "total_roster_spots": draft_meta.get("settings", {}).get("roster_size", 16),
         "drafted_player_ids": drafted_player_ids,
+        "team_rosters": team_rosters,
         "my_roster": my_roster,
         "amount_spent": amount_spent,
         "remaining_budget": max(0, total_budget - amount_spent),
@@ -864,7 +914,6 @@ async def get_draft_state(draft_id: str, user_id: str = None, roster_id: str = N
 
 
 def check_bye_constraint(pos: str, player_bye: int, my_roster_byes: dict) -> dict:
-    """Evaluates a player's bye week against the user's drafted roster."""
     if not player_bye:
         return {"blocked": False, "status": "CLEAR", "message": None}
 
@@ -897,11 +946,8 @@ def check_bye_constraint(pos: str, player_bye: int, my_roster_byes: dict) -> dic
 
 
 def format_consistency_score(cv: float) -> dict:
-    """Converts raw CV into a 0-100 rating with a readable tier label."""
     if cv is None:
         cv = 0.40
-
-    # Softened curve: 0.20 or lower = 100 (Rock Solid), 0.75 or higher = 0 (Boom/Bust)
     rating = int(max(0.0, min(100.0, ((0.75 - cv) / 0.55) * 100.0)))
 
     if rating >= 80:
@@ -917,9 +963,6 @@ def format_consistency_score(cv: float) -> dict:
 
 
 def calculate_roster_need_multiplier(pos: str, drafted_count: int) -> float:
-    """
-    Calculates diminishing marginal utility as roster slots fill up for a given position.
-    """
     pos = pos.upper()
     if pos in ("QB", "TE"):
         if drafted_count == 1:
@@ -928,18 +971,18 @@ def calculate_roster_need_multiplier(pos: str, drafted_count: int) -> float:
             return 0.05
     elif pos == "RB":
         if drafted_count == 2:
-            return 0.85  # 3rd RB (1st bench RB)
+            return 0.85
         if drafted_count == 3:
-            return 0.65  # 4th RB
+            return 0.65
         if drafted_count >= 4:
-            return 0.40  # 5th+ RB
+            return 0.40
     elif pos == "WR":
         if drafted_count == 3:
-            return 0.90  # 4th WR (1st bench WR)
+            return 0.90
         if drafted_count == 4:
-            return 0.75  # 5th WR
+            return 0.75
         if drafted_count >= 5:
-            return 0.50  # 6th+ WR
+            return 0.50
     return 1.00
 
 
@@ -1031,14 +1074,44 @@ async def get_live_recommendations(
                 else (scores[-1] if scores else 10.0)
             )
 
-        # Second Pass: Apply Roster Need Multiplier to TI Score & VORP
+        # 4. Compute Intervening Opponents and Turn Distance
+        total_teams = draft_state.get("total_teams", 12)
+        curr_pick = draft_state.get("current_pick_no", 1)
+        user_slot = draft_state.get("user_slot", 1)
+        intervening_slots = get_intervening_picks(total_teams, curr_pick, user_slot)
+        picks_until_turn = len(intervening_slots)
+        next_user_pick_no = curr_pick + picks_until_turn + 1
+
+        team_rosters = draft_state.get("team_rosters", {})
+        intervening_needs = {"QB": 0, "RB": 0, "WR": 0, "TE": 0}
+        for slot in intervening_slots:
+            roster = team_rosters.get(str(slot), {})
+            if roster.get("QB", 0) < 1:
+                intervening_needs["QB"] += 1
+            if roster.get("RB", 0) < 2:
+                intervening_needs["RB"] += 1
+            if roster.get("WR", 0) < 3:
+                intervening_needs["WR"] += 1
+            if roster.get("TE", 0) < 1:
+                intervening_needs["TE"] += 1
+
+        # 5. Compute Tier Counts
+        tier_counts = {}
+        for item in raw_player_data:
+            p = item["db_record"]
+            pos = item["pos"]
+            tier_val = p.get("fp_tier")
+            if tier_val:
+                key = f"{pos}_T{tier_val}"
+                tier_counts[key] = tier_counts.get(key, 0) + 1
+
+        # Second Pass: Apply Multipliers, Survival Odds, and Scarcity
         for item in raw_player_data:
             p = item["db_record"]
             pos = item["pos"]
             score_data = item["score_data"]
             bye_check = item["bye_check"]
 
-            # --- APPLY ROSTER NEED MULTIPLIER HERE ---
             roster_count = my_roster_counts.get(pos, 0)
             need_mult = calculate_roster_need_multiplier(pos, roster_count)
 
@@ -1046,14 +1119,12 @@ async def get_live_recommendations(
             base = baselines.get(pos, 10.0)
             raw_vorp = raw_ti - base
 
-            # Apply need penalty
             final_ti = round(raw_ti * need_mult, 2)
             final_vorp = round(raw_vorp * need_mult, 2)
 
             c_score = p.get("consistency_score")
             cons_data = format_consistency_score(c_score)
 
-            # PARSE TAGS PER-PLAYER HERE:
             raw_tags = p.get("custom_tags")
             if isinstance(raw_tags, str):
                 try:
@@ -1064,8 +1135,23 @@ async def get_live_recommendations(
                 player_tags = raw_tags
             else:
                 player_tags = []
+
             tier_val = p.get("fp_tier")
             pos_tier_label = f"{pos} - T{tier_val}" if tier_val else None
+            tier_remaining = (
+                tier_counts.get(f"{pos}_T{tier_val}", 0) if tier_val else None
+            )
+
+            scarcity_alert = None
+            if tier_val and tier_remaining is not None:
+                if tier_remaining == 1:
+                    scarcity_alert = f"LAST in {pos_tier_label}!"
+                elif tier_remaining == 2:
+                    scarcity_alert = f"Only 2 left in {pos_tier_label}"
+
+            adp_val = p.get("adp") or p.get("fp_rank") or (curr_pick + 10)
+            survival_odds = calculate_survival_probability(adp_val, next_user_pick_no)
+
             available_players.append(
                 {
                     "player_id": p["player_id"],
@@ -1078,6 +1164,9 @@ async def get_live_recommendations(
                     "depth_chart_position": p.get("depth_chart_position"),
                     "depth_chart_order": p.get("depth_chart_order"),
                     "pos_tier": pos_tier_label,
+                    "tier_remaining": tier_remaining,
+                    "scarcity_alert": scarcity_alert,
+                    "survival_odds": survival_odds,
                     "fp_rank": p.get("fp_rank"),
                     "fp_tier": tier_val,
                     "fp_upside": p.get("fp_upside"),
@@ -1098,14 +1187,14 @@ async def get_live_recommendations(
                     "auction_max_bid": 0,
                 }
             )
-        # 4. Auction "Don't Go Over" Calculation
+
+        # 6. Auction "Don't Go Over" Calculation
         if format.lower() == "auction":
             total_budget = draft_state.get("budget", 200) or 200
             rem_budget = draft_state["remaining_budget"]
             open_spots = max(1, draft_state["total_roster_spots"] - len(my_roster_pids))
             absolute_max_bid = max(1, rem_budget - (open_spots - 1))
 
-            # Position target allocation % and starter count in standard lineup
             pos_config = {
                 "QB": {"alloc": 0.15, "starters": 1},
                 "RB": {"alloc": 0.35, "starters": 2},
@@ -1113,7 +1202,6 @@ async def get_live_recommendations(
                 "TE": {"alloc": 0.10, "starters": 1},
             }
 
-            # Calculate average starter TI score for each position
             starter_ti_avg = {}
             for pos, cfg in pos_config.items():
                 scores = sorted(positional_scores.get(pos, []), reverse=True)
@@ -1131,27 +1219,19 @@ async def get_live_recommendations(
 
                 cfg = pos_config[pos]
                 avg_starter_ti = starter_ti_avg.get(pos, 12.0)
-
-                # Average dollars allocated per starter slot
                 avg_slot_cost = (cfg["alloc"] * total_budget) / cfg["starters"]
-
-                # Ratio of player's TI relative to an average starter
                 ti_ratio = (
                     player["ti_score"] / avg_starter_ti if avg_starter_ti > 0 else 1.0
                 )
-
-                # Budget decay factor (scales bids as remaining budget diminishes)
                 budget_scale = rem_budget / total_budget if total_budget > 0 else 1.0
-
                 bid_calc = ti_ratio * avg_slot_cost * budget_scale
                 recommended_bid = round(bid_calc)
 
-                # Cap at absolute max capacity to ensure $1 is reserved for all open spots
                 player["auction_max_bid"] = (
                     min(recommended_bid, absolute_max_bid) if recommended_bid > 0 else 1
                 )
 
-        # 5. Sort Recommendations by Adjusted VORP
+        # 7. Sort Recommendations by Adjusted VORP
         def sort_key(x):
             status_weight = 2
             if x["bye_status"] == "BLOCKED":
@@ -1164,6 +1244,12 @@ async def get_live_recommendations(
 
         return {
             "draft_state": draft_state,
+            "draft_intel": {
+                "picks_until_turn": picks_until_turn,
+                "next_user_pick_no": next_user_pick_no,
+                "intervening_teams_count": len(intervening_slots),
+                "intervening_needs": intervening_needs,
+            },
             "my_roster_byes": my_roster_byes,
             "my_roster_counts": my_roster_counts,
             "baselines": baselines,

@@ -13,6 +13,7 @@ const LiveDraftView = () => {
   const [positionFilter, setPositionFilter] = useState("ALL");
   const [board, setBoard] = useState([]);
   const [draftState, setDraftState] = useState(null);
+  const [draftIntel, setDraftIntel] = useState(null); // Draft Room Spying Intel
   const [rosterByes, setRosterByes] = useState({});
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -26,7 +27,6 @@ const LiveDraftView = () => {
     return parts[parts.length - 1];
   };
 
-  // Add near top of LiveDraftView.jsx
   const TAG_OPTIONS = [
     {
       value: "PPR Monster",
@@ -119,7 +119,6 @@ const LiveDraftView = () => {
     );
   };
 
-  // Fetch leagues for entered username
   const handleFetchLeagues = async () => {
     if (!username) return;
     setLoading(true);
@@ -146,7 +145,6 @@ const LiveDraftView = () => {
     }
   };
 
-  // Primary function to fetch live recommendations & draft state
   const fetchDraftRecommendations = async () => {
     const activeDraftId = cleanDraftId(draftId);
     if (!activeDraftId) return;
@@ -159,6 +157,7 @@ const LiveDraftView = () => {
         const data = await res.json();
         setBoard(data.board || []);
         setDraftState(data.draft_state || null);
+        setDraftIntel(data.draft_intel || null);
         setRosterByes(data.my_roster_byes || {});
         setErrorMsg("");
       } else {
@@ -171,7 +170,6 @@ const LiveDraftView = () => {
     }
   };
 
-  // Handle dropdown league selection change
   const handleLeagueChange = (e) => {
     const leagueId = e.target.value;
     setSelectedLeague(leagueId);
@@ -181,11 +179,10 @@ const LiveDraftView = () => {
     }
   };
 
-  // Poll Sleeper every 3 seconds ONLY if Live Sync is ON
   useEffect(() => {
     let interval = null;
     if (isLiveSync) {
-      fetchDraftRecommendations(); // Immediate initial pull
+      fetchDraftRecommendations();
       interval = setInterval(() => {
         fetchDraftRecommendations();
       }, 3000);
@@ -193,9 +190,8 @@ const LiveDraftView = () => {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isLiveSync, draftId, username, draftFormat]);
+  }, [isLiveSync, draftId, username, draftFormat, rosterId]);
 
-  // Position filter logic
   const filteredBoard = board.filter((player) => {
     if (positionFilter === "ALL") return true;
     return player.position?.toUpperCase() === positionFilter;
@@ -258,7 +254,7 @@ const LiveDraftView = () => {
               <option value="auction">Auction</option>
             </select>
           </div>
-          {/* NEW TEAM OVERRIDE FIELD */}
+
           <div className="control-group">
             <label>My Team #</label>
             <input
@@ -334,6 +330,89 @@ const LiveDraftView = () => {
         ))}
       </div>
 
+      {/* NEW: Draft Room Radar / Opponent Needs Banner */}
+      {draftIntel && draftFormat === "snake" && (
+        <div
+          className="intel-radar-banner"
+          style={{
+            backgroundColor: "#0A1526",
+            border: "1px solid #00B5C1",
+            borderRadius: "8px",
+            padding: "12px 18px",
+            marginBottom: "16px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "12px",
+          }}
+        >
+          <div>
+            <span style={{ color: "#8BB2C9", fontSize: "0.85rem" }}>
+              NEXT SELECTION
+            </span>
+            <div
+              style={{
+                fontSize: "1.1rem",
+                fontWeight: 800,
+                color: "#00B5C1",
+              }}
+            >
+              Pick #{draftIntel.next_user_pick_no} (
+              {draftIntel.picks_until_turn} picks away)
+            </div>
+          </div>
+
+          <div>
+            <span style={{ color: "#8BB2C9", fontSize: "0.85rem" }}>
+              INTERVENING OPPONENT NEEDS
+            </span>
+            <div style={{ display: "flex", gap: "8px", marginTop: "3px" }}>
+              <span
+                className="badge"
+                style={{
+                  backgroundColor: "#12223D",
+                  border: "1px solid #00B5C1",
+                  color: "#FFFFFF",
+                }}
+              >
+                QB: {draftIntel.intervening_needs?.QB || 0}
+              </span>
+              <span
+                className="badge"
+                style={{
+                  backgroundColor: "#12223D",
+                  border: "1px solid #00B5C1",
+                  color: "#FFFFFF",
+                }}
+              >
+                RB: {draftIntel.intervening_needs?.RB || 0}
+              </span>
+              <span
+                className="badge"
+                style={{
+                  backgroundColor: "#12223D",
+                  border: "1px solid #00B5C1",
+                  color: "#FFFFFF",
+                }}
+              >
+                WR: {draftIntel.intervening_needs?.WR || 0}
+              </span>
+              <span
+                className="badge"
+                style={{
+                  backgroundColor: "#12223D",
+                  border: "1px solid #00B5C1",
+                  color: "#FFFFFF",
+                }}
+              >
+                TE: {draftIntel.intervening_needs?.TE || 0}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Recommended Player Cards List */}
       <div className="live-board-grid">
         {filteredBoard.map((player, idx) => (
@@ -360,6 +439,7 @@ const LiveDraftView = () => {
               </div>
 
               <div className="header-right">
+                {/* 1. Tag Icon Bar */}
                 <div
                   className="tag-icon-bar"
                   style={{
@@ -387,9 +467,65 @@ const LiveDraftView = () => {
                     );
                   })}
                 </div>
+
+                {/* 2. Tier Scarcity Alarm */}
+                {player.scarcity_alert && (
+                  <span
+                    className="badge scarcity-badge"
+                    style={{
+                      backgroundColor:
+                        player.tier_remaining === 1 ? "#FC4C02" : "#FFD700",
+                      color: "#0A1526",
+                      fontWeight: 900,
+                      animation:
+                        player.tier_remaining === 1
+                          ? "pulse 1.5s infinite"
+                          : "none",
+                    }}
+                  >
+                    ⚠️ {player.scarcity_alert}
+                  </span>
+                )}
+
+                {/* 3. Pick Predictor / Reach Odds */}
+                {draftFormat === "snake" &&
+                  player.survival_odds !== undefined && (
+                    <span
+                      className="badge odds-badge"
+                      title={`Estimated ${player.survival_odds}% chance of being available at your next pick.`}
+                      style={{
+                        backgroundColor:
+                          player.survival_odds >= 70
+                            ? "rgba(50, 205, 50, 0.15)"
+                            : player.survival_odds <= 25
+                              ? "rgba(252, 76, 2, 0.2)"
+                              : "rgba(255, 215, 0, 0.15)",
+                        border: `1px solid ${
+                          player.survival_odds >= 70
+                            ? "#32CD32"
+                            : player.survival_odds <= 25
+                              ? "#FC4C02"
+                              : "#FFD700"
+                        }`,
+                        color:
+                          player.survival_odds >= 70
+                            ? "#32CD32"
+                            : player.survival_odds <= 25
+                              ? "#FC4C02"
+                              : "#FFD700",
+                        fontWeight: 700,
+                      }}
+                    >
+                      🎲 {player.survival_odds}% Reach Odds
+                    </span>
+                  )}
+
+                {/* 4. Positional Tier Badge */}
                 {player.pos_tier && (
                   <span className="badge tier-badge">{player.pos_tier}</span>
                 )}
+
+                {/* 5. Depth, Age, Bye Badges */}
                 {player.depth_chart_order && (
                   <span className="badge depth-badge">
                     Depth: {player.position}
@@ -401,7 +537,7 @@ const LiveDraftView = () => {
               </div>
             </div>
 
-            {/* Inside LiveDraftView.jsx card-body */}
+            {/* Card Body */}
             <div className="card-body">
               <div className="stat-box main-stat">
                 <label>TI Score</label>
@@ -421,6 +557,7 @@ const LiveDraftView = () => {
                     : player.vorp_score}
                 </div>
               </div>
+
               {player.fp_rank && (
                 <>
                   <div className="stat-box">
@@ -442,6 +579,7 @@ const LiveDraftView = () => {
                   </div>
                 </>
               )}
+
               <div className="stat-box">
                 <label>Dynasty TI</label>
                 <div>{player.ti_score_dynasty || "-"}</div>
