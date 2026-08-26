@@ -150,7 +150,7 @@ LEAGUE_SETTINGS_CACHE = {}  # Maps league_id -> {"timestamp": float, "settings":
 async def get_sleeper_raw_projections(season: int = 2026) -> dict:
     """
     Fetches raw season projections from Sleeper with a 24-hour in-memory cache.
-    Prevents flooding the Sleeper API and uses <3MB of RAM.
+    Safely handles both dictionary and list JSON responses.
     """
     global SLEEPER_PROJECTIONS_CACHE
     now = time.time()
@@ -168,14 +168,25 @@ async def get_sleeper_raw_projections(season: int = 2026) -> dict:
     try:
         async with session.get(url) as resp:
             if resp.status == 200:
-                raw_list = await resp.json()
-                # Store compactly: sleeper_id -> stats dictionary
+                raw_data = await resp.json()
                 proj_dict = {}
-                for item in raw_list:
-                    p_id = str(item.get("player_id") or "")
-                    stats = item.get("stats") or {}
-                    if p_id and stats:
-                        proj_dict[p_id] = stats
+
+                # Handle dictionary response (e.g., {"4046": {"stats": {...}}})
+                if isinstance(raw_data, dict):
+                    for p_id, item in raw_data.items():
+                        if isinstance(item, dict):
+                            # Sleeper sometimes nests data under "stats", sometimes it's flat
+                            stats = item.get("stats") if "stats" in item else item
+                            proj_dict[str(p_id)] = stats
+
+                # Handle list response just in case the API format shifts
+                elif isinstance(raw_data, list):
+                    for item in raw_data:
+                        if isinstance(item, dict):
+                            p_id = str(item.get("player_id") or "")
+                            if p_id:
+                                stats = item.get("stats") if "stats" in item else item
+                                proj_dict[p_id] = stats
 
                 SLEEPER_PROJECTIONS_CACHE["data"] = proj_dict
                 SLEEPER_PROJECTIONS_CACHE["timestamp"] = now
