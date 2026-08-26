@@ -896,6 +896,8 @@ async def get_draft_state(draft_id: str, user_id: str = None, roster_id: str = N
     total_budget = draft_meta.get("settings", {}).get("budget") or 200
     current_pick_no = len(drafted_player_ids) + 1
 
+    slot_to_roster = draft_meta.get("slot_to_roster_id") or {}
+
     return {
         "draft_id": draft_id,
         "status": draft_meta.get("status"),
@@ -1083,9 +1085,11 @@ async def get_live_recommendations(
         next_user_pick_no = curr_pick + picks_until_turn + 1
 
         team_rosters = draft_state.get("team_rosters", {})
+        slot_to_roster = draft_state.get("slot_to_roster_id", {})
         intervening_needs = {"QB": 0, "RB": 0, "WR": 0, "TE": 0}
         for slot in intervening_slots:
-            roster = team_rosters.get(str(slot), {})
+            roster_id = str(slot_to_roster.get(str(slot), slot))
+            roster = team_rosters.get(roster_id, {})
             if roster.get("QB", 0) < 1:
                 intervening_needs["QB"] += 1
             if roster.get("RB", 0) < 2:
