@@ -60,6 +60,42 @@ def calculate_survival_probability(adp: float, next_pick: int) -> int:
     return max(1, min(99, survival_prob))
 
 
+def build_search_pattern(raw_name: str) -> str:
+    """Safely normalizes names by stripping suffixes, punctuation, and team names."""
+    # 1. Strip team abbreviations if in parentheses
+    name = raw_name.split("(")[0].strip()
+
+    # 2. Remove common suffixes (JR, SR, III, etc.)
+    name = re.sub(r"\b(JR|SR|II|III|IV|V)\b", "", name, flags=re.IGNORECASE)
+
+    # 3. Detect if first name is just an initial (e.g. "B. Robinson" or "B Robinson")
+    is_initial = "." in name.split()[0] or len(name.split()[0]) == 1
+
+    # 4. Remove all remaining punctuation
+    name = re.sub(r"[^\w\s]", "", name).strip()
+
+    parts = name.split()
+    if not parts:
+        return ""
+
+    # 5. Drop trailing team abbreviations (e.g. "Bijan Robinson ATL")
+    if len(parts) > 1 and len(parts[-1]) in [2, 3] and parts[-1].isupper():
+        parts.pop()
+
+    # 6. Build the SQL wildcard search pattern
+    if len(parts) >= 2:
+        last_name = parts[-1]
+        first_name = parts[0]
+        # If it's an initial, match "B%Robinson%". Otherwise, match "%Bijan%Robinson%"
+        return (
+            f"{first_name[0]}%{last_name}%"
+            if is_initial
+            else f"%{first_name}%{last_name}%"
+        )
+
+    return f"%{parts[0]}%"
+
+
 def get_intervening_picks(
     total_teams: int, current_overall_pick: int, user_slot: int
 ) -> list[int]:
@@ -728,59 +764,67 @@ async def reset_board_order(board_type: str):
 
 @app.post("/api/projections/upload")
 async def upload_projections_csv(file: UploadFile = File(...)):
-    """
-    Accepts a CSV file downloaded from a projections site,
-    parses the Player and FPTS columns, and updates the database.
-    """
+    """Accepts a CSV file, parses Player, FPTS, and Team to update projections."""
     content = await file.read()
-
     try:
-        # Read the CSV into a pandas DataFrame
         df = pd.read_csv(io.StringIO(content.decode("utf-8")))
-
-        # Standardize column names to uppercase for easy matching
         df.columns = [str(c).upper().strip() for c in df.columns]
 
         pool = await get_db()
         async with pool.acquire() as conn:
             updated_count = 0
 
+            # Requires BOTH a name match and a team match (if team is provided)
             update_query = """
                 UPDATE player_ti 
-                SET projected_points = $1,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE LOWER(player_name) LIKE LOWER($2);
+                SET projected_points = $1, updated_at = CURRENT_TIMESTAMP
+                WHERE LOWER(player_name) LIKE LOWER($2)
+                AND ($3 = '' OR team_abbr = $3);
             """
 
             for _, row in df.iterrows():
-                # Find the player name and fantasy points columns dynamically
                 player_col = next((col for col in df.columns if "PLAYER" in col), None)
                 fpts_col = next(
                     (col for col in df.columns if "FPTS" in col or "POINTS" in col),
                     None,
                 )
 
-                if not player_col or not fpts_col:
-                    continue
-
-                # --- Skip completely empty rows or NaN values ---
-                if pd.isna(row[player_col]) or pd.isna(row[fpts_col]):
-                    continue
-
-                # Clean full name from CSV (e.g. "Josh Allen" or "Josh Allen BUF")
-                raw_name = str(row[player_col]).split("(")[0].strip()
-                if not raw_name:
-                    continue
-
-                name_parts = raw_name.split()
                 if (
-                    len(name_parts) > 1
-                    and len(name_parts[-1]) in [2, 3]
-                    and name_parts[-1].isupper()
+                    not player_col
+                    or not fpts_col
+                    or pd.isna(row[player_col])
+                    or pd.isna(row[fpts_col])
                 ):
-                    clean_name = " ".join(name_parts[:-1])
+                    continue
+
+                raw_name = str(row[player_col]).strip()
+                search_pattern = build_search_pattern(raw_name)
+                if not search_pattern:
+                    continue
+
+                # Attempt to extract team for safe matching
+                team = ""
+                team_col = next((c for c in df.columns if c == "TEAM"), None)
+                if team_col and pd.notna(row[team_col]):
+                    team = str(row[team_col]).upper().strip()
                 else:
-                    clean_name = raw_name
+                    m = re.search(r"\(([A-Z]{2,3})\)", raw_name)
+                    if m:
+                        team = m.group(1)
+                    else:
+                        parts = raw_name.split()
+                        if (
+                            len(parts) > 1
+                            and len(parts[-1]) in [2, 3]
+                            and parts[-1].isupper()
+                        ):
+                            team = parts[-1]
+
+                # Standardize common alternative abbreviations
+                if team == "JAC":
+                    team = "JAX"
+                if team == "WSH":
+                    team = "WAS"
 
                 try:
                     proj_pts = float(row[fpts_col])
@@ -788,20 +832,21 @@ async def upload_projections_csv(file: UploadFile = File(...)):
                         continue
 
                     proj_ppg = round(proj_pts / 17.0, 2)
-
-                    # Direct full-name matching against PostgreSQL full names
-                    search_pattern = f"%{clean_name}%"
-
-                    result = await conn.execute(update_query, proj_ppg, search_pattern)
+                    result = await conn.execute(
+                        update_query, proj_ppg, search_pattern, team
+                    )
 
                     if result.startswith("UPDATE"):
-                        count = int(result.split(" ")[1])
-                        updated_count += count
+                        updated_count += int(result.split(" ")[1])
 
                 except ValueError:
                     continue
 
             return {"status": "success", "updated": updated_count}
+
+    except Exception as e:
+        logger.error(f"Projections Upload failed: {e}")
+        return {"status": "error", "message": str(e)}
 
     except (
         asyncpg.PostgresError,
@@ -1379,72 +1424,53 @@ async def sync_sleeper_master_data():
 
 @app.post("/api/fantasypros/upload")
 async def upload_fantasypros_csv(file: UploadFile = File(...)):
-    """
-    Ingests FantasyPros cheatsheet CSV/TSV.
-    Parses RK, TIERS, PLAYER NAME, UPSIDE, BUST, SOS, and ECR VS ADP.
-    """
+    """Ingests FantasyPros cheatsheet using strict Team + Name matching."""
     content = await file.read()
-    decoded = content.decode("utf-8-sig")  # Strips Excel BOM if present
+    decoded = content.decode("utf-8-sig")
 
-    # Auto-detect tab vs comma delimiter
     delimiter = "\t" if "\t" in decoded[:300] else ","
     reader = csv.DictReader(io.StringIO(decoded), delimiter=delimiter)
 
     records = []
     for row in reader:
-        # Standardize header keys safely
         clean_row = {}
         for k, v in row.items():
             if k is not None:
-                clean_key = str(k).strip().upper()
-                clean_value = str(v).strip() if v is not None else ""
-                clean_row[clean_key] = clean_value
+                clean_row[str(k).strip().upper()] = (
+                    str(v).strip() if v is not None else ""
+                )
 
-        # Substring search for Player Name in case of header variations like "PLAYER NAME (?)"
         raw_name = ""
         for k, v in clean_row.items():
             if "PLAYER" in k:
                 raw_name = v
                 break
 
-        if not raw_name:
+        search_pattern = build_search_pattern(raw_name)
+        if not search_pattern:
             continue
 
-        # Strip team abbreviations if concatenated (e.g., "J. Chase CIN" -> "J. Chase")
-        clean_name = raw_name.split("(")[0].strip()
-        parts = clean_name.split()
-        if (
-            len(parts) > 1
-            and len(parts[-1]) in (2, 3)
-            and parts[-1].isupper()
-            and parts[-1] not in ("II", "III", "IV", "JR", "SR")
-        ):
-            clean_name = " ".join(parts[:-1])
+        team = clean_row.get("TEAM", "").upper()
+        if team == "JAC":
+            team = "JAX"
+        if team == "WSH":
+            team = "WAS"
 
         def parse_num(val_str):
-            if not val_str:
-                return None
-            m = re.search(r"(\d+)", str(val_str))
+            m = re.search(r"(\d+)", str(val_str)) if val_str else None
             return int(m.group(1)) if m else None
 
         def parse_diff(diff_str):
             if not diff_str or diff_str in ("-", "N/A", "0", ""):
                 return 0
             try:
-                # Keep '-' but remove '+' and spaces safely
-                cleaned = str(diff_str).replace("+", "").strip()
-                return int(float(cleaned))
+                return int(float(str(diff_str).replace("+", "").strip()))
             except ValueError:
                 return 0
 
-        fp_rk = None
-        fp_tier = None
-        fp_upside = None
-        fp_bust = None
-        fp_sos = None
+        fp_rk = fp_tier = fp_upside = fp_bust = fp_sos = None
         fp_ecr_vs_adp = 0
 
-        # Substring matching for metrics to bypass invisible characters or spacing changes
         for k, v in clean_row.items():
             if k in ("RK", "RANK"):
                 fp_rk = parse_num(v)
@@ -1459,15 +1485,17 @@ async def upload_fantasypros_csv(file: UploadFile = File(...)):
             elif "ECR" in k and "ADP" in k:
                 fp_ecr_vs_adp = parse_diff(v)
 
-        # Support matching abbreviated first names ("J. Chase" -> "%Chase%") as well as full names
-        if "." in clean_name and len(clean_name.split(".")[0].strip()) <= 2:
-            last_name = clean_name.split(".")[-1].strip()
-            search_pattern = f"%{last_name}%"
-        else:
-            search_pattern = f"%{clean_name}%"
-
         records.append(
-            (fp_rk, fp_tier, fp_upside, fp_bust, fp_sos, fp_ecr_vs_adp, search_pattern)
+            (
+                fp_rk,
+                fp_tier,
+                fp_upside,
+                fp_bust,
+                fp_sos,
+                fp_ecr_vs_adp,
+                search_pattern,
+                team,
+            )
         )
 
     pool = await get_db()
@@ -1482,7 +1510,8 @@ async def upload_fantasypros_csv(file: UploadFile = File(...)):
                 fp_sos = $5,
                 fp_ecr_vs_adp = $6,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE LOWER(player_name) LIKE LOWER($7);
+            WHERE LOWER(player_name) LIKE LOWER($7)
+            AND ($8 = '' OR team_abbr = $8);
         """
         async with conn.transaction():
             await conn.executemany(update_sql, records)
