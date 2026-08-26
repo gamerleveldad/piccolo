@@ -473,10 +473,10 @@ def run_anime_pipeline():
     scan_live_calendar()
 
 def anime_scheduler_worker():
-    # Execute daily sweep at 1:15 PM
-    schedule.every().day.at("13:15").do(run_anime_pipeline)
+    # Execute daily sweep at 17:00
+    schedule.every().day.at("17:00").do(run_anime_pipeline)
     
-    print("⏰ Crunchyroll Tracker online. Awaiting 13:15 PM window...")
+    print("⏰ Crunchyroll Tracker online. Awaiting 17:00 PM window...")
     while True:
         schedule.run_pending()
         time.sleep(1)
