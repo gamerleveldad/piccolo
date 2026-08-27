@@ -230,7 +230,14 @@ export default function WeatherWidget() {
             }),
             temp: Math.round(item.temp_f),
             condition: item.conditions,
-            pop: item.precip_probability ?? 0,
+            // Cast a wide net for different API probability variable names
+            pop:
+              item.pop ??
+              item.precip_probability ??
+              item.precipitationProbability ??
+              0,
+            // Extract the actual rain accumulation volume
+            precip_in: item.precip_in ?? item.precipitationAccumulation ?? 0,
             iconClass: ICON_MAP[item.icon] || "wi wi-day-sunny",
             heatMisery: match.heat_misery_index ?? 0,
             humidityMisery: match.humidity_misery_index ?? 0,
@@ -245,15 +252,32 @@ export default function WeatherWidget() {
         let accData = [];
         if (accRes.ok) accData = await accRes.json();
 
-        const parsedDaily = dailyData.slice(0, 10).map((day, idx) => {
-          const accuracy = accData.find((a) => a.lead_days === idx);
-          return {
-            ...day,
-            dateObj: new Date(day.date),
-            iconClass: ICON_MAP[day.icon] || "wi wi-day-sunny",
-            tempMae: accuracy ? accuracy.temp_mae_f : null,
-          };
-        });
+        // Get local midnight today for filtering
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const parsedDaily = dailyData
+          .filter((day) => {
+            // Replacing '-' with '/' forces JS to parse in local time instead of UTC
+            const localDate = new Date(day.date.replace(/-/g, "/"));
+            return localDate >= today; // Strip out yesterday's historical data
+          })
+          .slice(0, 10)
+          .map((day, idx) => {
+            const accuracy = accData.find((a) => a.lead_days === idx);
+            const safeDate = new Date(day.date.replace(/-/g, "/"));
+
+            return {
+              ...day,
+              dateObj: safeDate,
+              // Force the day name to match the corrected local date
+              day_name: safeDate.toLocaleDateString("en-US", {
+                weekday: "short",
+              }),
+              iconClass: ICON_MAP[day.icon] || "wi wi-day-sunny",
+              tempMae: accuracy ? accuracy.temp_mae_f : null,
+            };
+          });
         setDailyForecast(parsedDaily);
       }
 
@@ -490,8 +514,13 @@ export default function WeatherWidget() {
                 <span className="text-sm font-bold text-slate-100">
                   {hour.temp}°
                 </span>
-                <div className="text-[10px] text-cyan-400 font-medium mb-2">
-                  {hour.pop > 0 ? `${hour.pop}%` : "0%"}
+                <div className="text-[10px] text-cyan-400 font-medium mb-1.5 flex flex-col items-center gap-[1px]">
+                  <span>{hour.pop > 0 ? `${hour.pop}%` : "0%"}</span>
+                  {hour.precip_in > 0 && (
+                    <span className="text-[9px] text-blue-300 bg-blue-900/30 px-1 rounded">
+                      {hour.precip_in.toFixed(2)}"
+                    </span>
+                  )}
                 </div>
                 <div
                   title={`Heat Misery: ${hour.heatMisery}/10`}
