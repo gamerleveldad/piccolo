@@ -56,6 +56,50 @@ const ModelSettingsView = () => {
       setSyncingSleeper(false);
     }
   };
+
+  // --- Global App Settings State ---
+  const [defaultTab, setDefaultTab] = useState(
+    localStorage.getItem("defaultAppTab") || "LiveDraft",
+  );
+  const [sleeperUsername, setSleeperUsername] = useState(
+    localStorage.getItem("sleeperUsername") || "",
+  );
+  const [sleeperLeagues, setSleeperLeagues] = useState([]);
+  const [awardsConfig, setAwardsConfig] = useState(
+    JSON.parse(localStorage.getItem("awardsConfig")) || {},
+  );
+  const [fetchingLeagues, setFetchingLeagues] = useState(false);
+
+  const handleTabChange = (e) => {
+    setDefaultTab(e.target.value);
+    localStorage.setItem("defaultAppTab", e.target.value);
+  };
+
+  const handleFetchLeaguesForSettings = async () => {
+    if (!sleeperUsername) return;
+    setFetchingLeagues(true);
+    localStorage.setItem("sleeperUsername", sleeperUsername); // Save so other tabs auto-load it
+    try {
+      const res = await fetch(
+        `${apiBase}/api/sleeper/leagues/${sleeperUsername}`,
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setSleeperLeagues(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch leagues:", err);
+    } finally {
+      setFetchingLeagues(false);
+    }
+  };
+
+  const toggleLeagueAward = (leagueId) => {
+    const updated = { ...awardsConfig, [leagueId]: !awardsConfig[leagueId] };
+    setAwardsConfig(updated);
+    localStorage.setItem("awardsConfig", JSON.stringify(updated));
+  };
+
   // --- Handcuff Handlers ---
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
@@ -151,6 +195,108 @@ const ModelSettingsView = () => {
         <button className="save-btn" onClick={handleSaveSettings}>
           Save Settings
         </button>
+      </div>
+      {/* --- Global App Preferences --- */}
+      <div className="draft-control-panel">
+        <h3>Application Preferences</h3>
+
+        <div className="control-row">
+          <div className="control-group">
+            <label>Default Startup Tab</label>
+            <select
+              value={defaultTab}
+              onChange={handleTabChange}
+              style={{ minWidth: "200px" }}
+            >
+              <option value="DraftBoard">Draft Board</option>
+              <option value="LiveDraft">Live Draft</option>
+              <option value="WeeklyManager">Weekly Manager</option>
+              <option value="Settings">Settings</option>
+            </select>
+          </div>
+        </div>
+
+        <h4
+          style={{ color: "#00B5C1", marginTop: "24px", marginBottom: "8px" }}
+        >
+          Weekly Awards Configuration
+        </h4>
+        <p className="settings-description">
+          Load your leagues to toggle which specific leagues should calculate
+          and display Weekly Awards.
+        </p>
+
+        <div
+          className="control-row upload-row"
+          style={{ marginBottom: "16px" }}
+        >
+          <div className="control-group file-group">
+            <input
+              type="text"
+              placeholder="Sleeper Username"
+              value={sleeperUsername}
+              onChange={(e) => setSleeperUsername(e.target.value)}
+              style={{ width: "250px" }}
+            />
+          </div>
+          <button
+            className="manual-fetch-btn"
+            onClick={handleFetchLeaguesForSettings}
+            disabled={fetchingLeagues || !sleeperUsername}
+          >
+            {fetchingLeagues ? "Loading..." : "Load Leagues"}
+          </button>
+        </div>
+
+        {sleeperLeagues.length > 0 && (
+          <div
+            className="league-awards-toggles"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "12px",
+              marginTop: "12px",
+            }}
+          >
+            {sleeperLeagues.map((lg) => {
+              // Default to true if the user hasn't explicitly disabled it yet
+              const isEnabled = awardsConfig[lg.league_id] !== false;
+
+              return (
+                <div
+                  key={lg.league_id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    backgroundColor: "#0A1526",
+                    padding: "12px",
+                    borderRadius: "6px",
+                    border: "1px solid #1B3054",
+                  }}
+                >
+                  <span style={{ fontWeight: 600 }}>
+                    {lg.name} ({lg.season})
+                  </span>
+                  <button
+                    onClick={() => toggleLeagueAward(lg.league_id)}
+                    style={{
+                      backgroundColor: isEnabled ? "#32CD32" : "#FC4C02",
+                      color: "#0A1526",
+                      border: "none",
+                      padding: "6px 12px",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {isEnabled ? "Awards Enabled" : "Awards Disabled"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
       {/* --- Sleeper Master Sync Section --- */}
       <div className="draft-control-panel">

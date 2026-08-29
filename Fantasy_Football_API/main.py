@@ -107,6 +107,64 @@ def build_search_pattern(raw_name: str) -> str:
     return f"%{parts[0]}%"
 
 
+def calculate_player_gems(history: list[dict], favorability_stars: int) -> list[str]:
+    """
+    Evaluates player performance over the last 4 weeks against expectations.
+    - Lunchpail: Hit proj +/- 3 pts in >= 3 of last 4 weeks.
+    - Breakout: Outperformed proj by >= +4 pts in >= 3 of last 4 weeks.
+    - Underperformer: Underperformed proj by >= -4 pts in >= 3 of last 4 weeks.
+    - Sleeper: Steady recently (<= 3.5 delta) AND favorability >= 4 stars this week.
+    """
+    if len(history) < 2:
+        return []
+
+    gems = []
+    recent_4 = history[-4:]
+    n = len(recent_4)
+
+    lunchpail_count = sum(
+        1 for h in recent_4 if abs(h["actual"] - h["projected"]) <= 3.0
+    )
+    breakout_count = sum(1 for h in recent_4 if (h["actual"] - h["projected"]) >= 4.0)
+    underperform_count = sum(
+        1 for h in recent_4 if (h["projected"] - h["actual"]) >= 4.0
+    )
+    steady_count = sum(1 for h in recent_4 if abs(h["actual"] - h["projected"]) <= 3.5)
+
+    if lunchpail_count >= min(3, n):
+        gems.append("Lunchpail")
+    if breakout_count >= min(3, n):
+        gems.append("Breakout")
+    if underperform_count >= min(3, n):
+        gems.append("Underperformer")
+    if steady_count >= min(2, n) and favorability_stars >= 4:
+        gems.append("Sleeper")
+
+    return gems
+
+
+def get_favorability_index(pos: str, opp_team: str, def_ranks: dict) -> tuple[int, str]:
+    """Returns a 1-5 star favorability rating based on opponent defensive rank vs position."""
+    if not opp_team or opp_team not in def_ranks:
+        return 3, "Neutral Matchup (16th vs Pos)"
+
+    pos_key = f"{pos.lower()}_rank"
+    rank = def_ranks[opp_team].get(
+        pos_key, 16
+    )  # 1 = stingiest defense, 32 = easiest matchup
+
+    if rank >= 26:
+        return 5, f"Smash Matchup (Opponent ranks #{rank} vs {pos})"
+    elif rank >= 19:
+        return 4, f"Favorable Matchup (Opponent ranks #{rank} vs {pos})"
+    elif rank >= 13:
+        return 3, f"Neutral Matchup (Opponent ranks #{rank} vs {pos})"
+    elif rank >= 7:
+        return 2, f"Tough Matchup (Opponent ranks #{rank} vs {pos})"
+    else:
+        return 1, f"Brutal Matchup (Opponent ranks #{rank} vs {pos})"
+
+
 def get_intervening_picks(
     total_teams: int, current_overall_pick: int, user_slot: int
 ) -> list[int]:
@@ -368,6 +426,40 @@ async def lifespan(app: FastAPI):
                 ADD COLUMN IF NOT EXISTS fp_bust INT,
                 ADD COLUMN IF NOT EXISTS fp_sos INT,
                 ADD COLUMN IF NOT EXISTS fp_ecr_vs_adp INT;
+            """)
+
+            # In-Season Weekly Projections & Historical Actuals
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS weekly_projections (
+                    id SERIAL PRIMARY KEY,
+                    season INT NOT NULL,
+                    week INT NOT NULL,
+                    player_name TEXT NOT NULL,
+                    position TEXT,
+                    team_abbr TEXT,
+                    projected_points NUMERIC(6, 2),
+                    pos_rank INT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(season, week, player_name, team_abbr)
+                );
+
+                CREATE TABLE IF NOT EXISTS weekly_actuals (
+                    id SERIAL PRIMARY KEY,
+                    season INT NOT NULL,
+                    week INT NOT NULL,
+                    sleeper_id TEXT NOT NULL,
+                    actual_points NUMERIC(6, 2),
+                    projected_points NUMERIC(6, 2),
+                    UNIQUE(season, week, sleeper_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS opponent_defense_rank (
+                    team_abbr TEXT PRIMARY KEY,
+                    qb_rank INT DEFAULT 16,
+                    rb_rank INT DEFAULT 16,
+                    wr_rank INT DEFAULT 16,
+                    te_rank INT DEFAULT 16
+                );
             """)
 
         logger.info("Database schemas verified successfully via lifespan startup.")
@@ -1716,3 +1808,454 @@ async def upload_fantasypros_csv(file: UploadFile = File(...)):
             await conn.executemany(update_sql, records)
 
     return {"status": "success", "processed_records": len(records)}
+
+
+@app.post("/api/weekly-projections/upload")
+async def upload_weekly_projections(
+    week: int = Form(...), season: int = Form(2026), file: UploadFile = File(...)
+):
+    """Memory-efficient upload for FantasyPros Weekly Projections CSV."""
+    content = await file.read()
+    decoded = content.decode("utf-8-sig")
+    delimiter = "\t" if "\t" in decoded[:300] else ","
+    reader = csv.DictReader(io.StringIO(decoded), delimiter=delimiter)
+
+    records = []
+    for row in reader:
+        clean_row = {
+            str(k).strip().upper(): str(v).strip() for k, v in row.items() if k
+        }
+        raw_name = clean_row.get("PLAYER") or clean_row.get("PLAYER NAME") or ""
+        if not raw_name:
+            continue
+
+        clean_name = raw_name.split("(")[0].strip()
+        team = clean_row.get("TEAM", "").upper()
+        pos = clean_row.get("POS", "").upper()
+
+        # Extract numeric rank if pos is formatted like 'WR12'
+        pos_rank = None
+        m_rank = re.search(r"(\d+)", pos)
+        if m_rank:
+            pos_rank = int(m_rank.group(1))
+            pos = re.sub(r"\d+", "", pos)
+
+        try:
+            fpts = float(clean_row.get("FPTS") or clean_row.get("POINTS") or 0.0)
+        except ValueError:
+            fpts = 0.0
+
+        records.append((season, week, clean_name, pos, team, fpts, pos_rank))
+
+    pool = await get_db()
+    async with pool.acquire() as conn:
+        upsert_query = """
+            INSERT INTO weekly_projections (season, week, player_name, position, team_abbr, projected_points, pos_rank)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (season, week, player_name, team_abbr) DO UPDATE SET
+                projected_points = EXCLUDED.projected_points,
+                pos_rank = EXCLUDED.pos_rank,
+                position = EXCLUDED.position;
+        """
+        async with conn.transaction():
+            await conn.executemany(upsert_query, records)
+
+    return {"status": "success", "processed_records": len(records), "week": week}
+
+
+@app.get("/api/weekly/roster-analysis")
+async def get_weekly_roster_analysis(
+    league_id: str, week: int, user_id: str, season: int = 2026
+):
+    """
+    Aggregates:
+    - User starting lineup vs bench
+    - Opponent starting lineup (head-to-head comparison)
+    - Injury designations, bye statuses, favorability index, player gems
+    - Top waiver wire targets sorted by weekly projection
+    """
+    session = await get_session()
+
+    # 1. Fetch League Rosters, Users, and Matchups concurrently
+    async with (
+        session.get(f"https://api.sleeper.app/v1/league/{league_id}/rosters") as r_resp,
+        session.get(
+            f"https://api.sleeper.app/v1/league/{league_id}/matchups/{week}"
+        ) as m_resp,
+        session.get(f"https://api.sleeper.app/v1/league/{league_id}/users") as u_resp,
+    ):
+        rosters = await r_resp.json()
+        matchups = await m_resp.json()
+        users = await u_resp.json()
+
+    # Identify user roster_id
+    user_map = {u["user_id"]: u.get("display_name", "Unknown") for u in users}
+    user_roster_id = None
+    for r in rosters:
+        if (
+            str(r.get("owner_id")) == str(user_id)
+            or user_map.get(r.get("owner_id")) == user_id
+        ):
+            user_roster_id = r.get("roster_id")
+            break
+
+    # Locate opponent matchup
+    my_matchup = next((m for m in matchups if m.get("roster_id") == user_roster_id), {})
+    matchup_id = my_matchup.get("matchup_id")
+    opp_matchup = next(
+        (
+            m
+            for m in matchups
+            if m.get("matchup_id") == matchup_id
+            and m.get("roster_id") != user_roster_id
+        ),
+        {},
+    )
+
+    # 2. Query DB for Player TI metadata, weekly projections, defensive ranks, and performance history
+    pool = await get_db()
+    async with pool.acquire() as conn:
+        all_meta = await conn.fetch("SELECT * FROM player_ti")
+        proj_records = await conn.fetch(
+            "SELECT * FROM weekly_projections WHERE season = $1 AND week = $2",
+            season,
+            week,
+        )
+        actuals_records = await conn.fetch(
+            "SELECT * FROM weekly_actuals WHERE season = $1 AND week < $2", season, week
+        )
+        def_rank_rows = await conn.fetch("SELECT * FROM opponent_defense_rank")
+
+    meta_map = {str(p["sleeper_id"]): dict(p) for p in all_meta if p.get("sleeper_id")}
+    proj_map = {p["player_name"].lower(): dict(p) for p in proj_records}
+    def_ranks = {d["team_abbr"]: dict(d) for d in def_rank_rows}
+
+    # Map historical actuals: sleeper_id -> list[{actual, projected}]
+    history_map = {}
+    for a in actuals_records:
+        s_id = str(a["sleeper_id"])
+        if s_id not in history_map:
+            history_map[s_id] = []
+        history_map[s_id].append(
+            {
+                "actual": float(a["actual_points"]),
+                "projected": float(a["projected_points"]),
+            }
+        )
+
+    def enrich_player(
+        sleeper_id: str, is_starter: bool = False, slot: str = "BN"
+    ) -> dict:
+        meta = meta_map.get(str(sleeper_id), {})
+        name = meta.get("player_name", "Unknown Player")
+        pos = meta.get("position", "WR")
+        team = meta.get("team_abbr", "FA")
+        bye = meta.get("bye_week")
+        is_on_bye = bye == week
+
+        proj_data = proj_map.get(name.lower(), {})
+        proj_pts = float(
+            proj_data.get("projected_points") or meta.get("projected_points") or 0.0
+        )
+        pos_rank = proj_data.get("pos_rank")
+
+        fav_stars, fav_desc = get_favorability_index(pos, team, def_ranks)
+        history = history_map.get(str(sleeper_id), [])
+        gems = calculate_player_gems(history, fav_stars)
+        injury_status = (
+            meta.get("status") or "Active"
+        )  # 'Questionable', 'Doubtful', 'Out', 'IR'
+
+        return {
+            "sleeper_id": str(sleeper_id),
+            "player_name": name,
+            "position": pos,
+            "team": team,
+            "slot": slot,
+            "is_starter": is_starter,
+            "projected_points": proj_pts,
+            "pos_rank_label": f"{pos}#{pos_rank}" if pos_rank else pos,
+            "is_on_bye": is_on_bye,
+            "injury_status": injury_status,
+            "favorability_stars": fav_stars,
+            "favorability_desc": fav_desc,
+            "gems": gems,
+        }
+
+    # Build My Lineup
+    my_starters_ids = my_matchup.get("starters") or []
+    my_all_pids = next(
+        (r.get("players", []) for r in rosters if r.get("roster_id") == user_roster_id),
+        [],
+    )
+    my_starter_slots = my_matchup.get("starter_slots") or [
+        "QB",
+        "RB",
+        "RB",
+        "WR",
+        "WR",
+        "TE",
+        "FLEX",
+        "K",
+        "DEF",
+    ]
+
+    my_starters = [
+        enrich_player(
+            pid, True, my_starter_slots[idx] if idx < len(my_starter_slots) else "FLEX"
+        )
+        for idx, pid in enumerate(my_starters_ids)
+    ]
+    my_bench = [
+        enrich_player(pid, False, "BN")
+        for pid in my_all_pids
+        if pid not in my_starters_ids
+    ]
+
+    # Build Opponent Lineup
+    opp_starters_ids = opp_matchup.get("starters") or []
+    opp_starters = [
+        enrich_player(
+            pid, True, my_starter_slots[idx] if idx < len(my_starter_slots) else "FLEX"
+        )
+        for idx, pid in enumerate(opp_starters_ids)
+    ]
+
+    # Compute Totals
+    my_total_proj = sum(p["projected_points"] for p in my_starters)
+    opp_total_proj = sum(p["projected_points"] for p in opp_starters)
+
+    # 3. Scan Waiver Wire (Free Agents)
+    all_rostered_pids = set()
+    for r in rosters:
+        for p in r.get("players") or []:
+            all_rostered_pids.add(str(p))
+
+    waiver_candidates = []
+    for s_id, meta in meta_map.items():
+        if s_id not in all_rostered_pids and meta.get("team_abbr") not in (
+            "FA",
+            "UNK",
+            None,
+        ):
+            enriched = enrich_player(s_id, False, "FA")
+            if (
+                enriched["projected_points"] > 5.0
+                or "Breakout" in enriched["gems"]
+                or "Sleeper" in enriched["gems"]
+            ):
+                waiver_candidates.append(enriched)
+
+    waiver_candidates.sort(key=lambda x: x["projected_points"], reverse=True)
+
+    return {
+        "week": week,
+        "my_team": {
+            "roster_id": user_roster_id,
+            "total_projected": round(my_total_proj, 2),
+            "starters": my_starters,
+            "bench": my_bench,
+        },
+        "opponent_team": {
+            "roster_id": opp_matchup.get("roster_id"),
+            "owner_name": user_map.get(str(opp_matchup.get("roster_id")), "Opponent"),
+            "total_projected": round(opp_total_proj, 2),
+            "starters": opp_starters,
+        },
+        "projected_diff": round(my_total_proj - opp_total_proj, 2),
+        "waiver_recommendations": waiver_candidates[:15],
+    }
+
+
+@app.post("/api/weekly/calculate-awards")
+async def calculate_weekly_awards(league_id: str, week: int):
+    """Evaluates the 10 league awards for a completed matchup week."""
+    session = await get_session()
+    async with (
+        session.get(
+            f"https://api.sleeper.app/v1/league/{league_id}/matchups/{week}"
+        ) as m_resp,
+        session.get(f"https://api.sleeper.app/v1/league/{league_id}/users") as u_resp,
+        session.get(f"https://api.sleeper.app/v1/league/{league_id}/rosters") as r_resp,
+    ):
+        matchups = await m_resp.json()
+        users = await u_resp.json()
+        rosters = await r_resp.json()
+
+    user_map = {u["user_id"]: u.get("display_name", "Unknown") for u in users}
+    roster_owner_map = {
+        r["roster_id"]: user_map.get(r.get("owner_id"), f"Team {r['roster_id']}")
+        for r in rosters
+    }
+
+    # Group matchups by matchup_id
+    games = {}
+    team_scores = []
+    for m in matchups:
+        m_id = m.get("matchup_id")
+        r_id = m.get("roster_id")
+        pts = float(m.get("points") or 0.0)
+        team_scores.append(
+            {
+                "roster_id": r_id,
+                "name": roster_owner_map.get(r_id),
+                "points": pts,
+                "data": m,
+            }
+        )
+        if m_id not in games:
+            games[m_id] = []
+        games[m_id].append(
+            {
+                "roster_id": r_id,
+                "name": roster_owner_map.get(r_id),
+                "points": pts,
+                "data": m,
+            }
+        )
+
+    all_scores = [t["points"] for t in team_scores]
+    median_score = sorted(all_scores)[len(all_scores) // 2] if all_scores else 0
+
+    awards = []
+
+    # 1. Most Points & 2. Least Points
+    sorted_teams = sorted(team_scores, key=lambda x: x["points"], reverse=True)
+    awards.append(
+        {
+            "award": "🏆 Most Points",
+            "team": sorted_teams[0]["name"],
+            "desc": f"Exploded for {sorted_teams[0]['points']} pts!",
+        }
+    )
+    awards.append(
+        {
+            "award": "💩 Least Points",
+            "team": sorted_teams[-1]["name"],
+            "desc": f"Stumbled with only {sorted_teams[-1]['points']} pts.",
+        }
+    )
+
+    # 3. Nailbiter (Smallest Margin of Victory)
+    game_margins = []
+    for m_id, teams in games.items():
+        if len(teams) == 2:
+            diff = abs(teams[0]["points"] - teams[1]["points"])
+            winner = teams[0] if teams[0]["points"] > teams[1]["points"] else teams[1]
+            loser = teams[1] if winner == teams[0] else teams[0]
+            game_margins.append(
+                {"diff": diff, "winner": winner["name"], "loser": loser["name"]}
+            )
+
+    if game_margins:
+        closest = min(game_margins, key=lambda x: x["diff"])
+        awards.append(
+            {
+                "award": "😱 Nailbiter",
+                "team": f"{closest['winner']} vs {closest['loser']}",
+                "desc": f"Decided by a razor-thin {round(closest['diff'], 2)} pts!",
+            }
+        )
+
+    # 4. Tough Break (Lost despite beating > 50% of league)
+    tough_breaks = []
+    for g in game_margins:
+        loser_pts = next(t["points"] for t in team_scores if t["name"] == g["loser"])
+        beaten_count = sum(1 for s in all_scores if loser_pts > s)
+        if beaten_count >= len(all_scores) / 2:
+            tough_breaks.append(
+                {"name": g["loser"], "pts": loser_pts, "beaten": beaten_count}
+            )
+    if tough_breaks:
+        tb_winner = max(tough_breaks, key=lambda x: x["pts"])
+        awards.append(
+            {
+                "award": "💔 Tough Break",
+                "team": tb_winner["name"],
+                "desc": f"Scored {tb_winner['pts']} pts (would have beaten {tb_winner['beaten']} other teams), but took the L.",
+            }
+        )
+
+    # 5. Lucky Week (Won despite scoring below median)
+    lucky_winners = []
+    for g in game_margins:
+        win_pts = next(t["points"] for t in team_scores if t["name"] == g["winner"])
+        lost_to_count = sum(1 for s in all_scores if win_pts < s)
+        if lost_to_count >= len(all_scores) / 2:
+            lucky_winners.append(
+                {"name": g["winner"], "pts": win_pts, "lost_to": lost_to_count}
+            )
+    if lucky_winners:
+        lucky = min(lucky_winners, key=lambda x: x["pts"])
+        awards.append(
+            {
+                "award": "🍀 Lucky Week",
+                "team": lucky["name"],
+                "desc": f"Won with only {lucky['pts']} pts (would have lost to {lucky['lost_to']} other teams)!",
+            }
+        )
+
+    # 6. Bench Star & 7. Nostradamus
+    # Evaluates starters vs bench points
+    for t in team_scores:
+        players_points = t["data"].get("players_points") or {}
+        starters = t["data"].get("starters") or []
+        all_pids = t["data"].get("players") or []
+        bench = [pid for pid in all_pids if pid not in starters]
+
+        starter_pts = [players_points.get(pid, 0.0) for pid in starters]
+        bench_pts = [players_points.get(pid, 0.0) for pid in bench]
+
+        min_starter = min(starter_pts) if starter_pts else 0
+        max_bench = max(bench_pts) if bench_pts else 0
+
+        # Bench Star: 2+ bench outscoring starters
+        outscoring_bench_count = sum(1 for bp in bench_pts if bp > min_starter)
+        if outscoring_bench_count >= 2:
+            awards.append(
+                {
+                    "award": "🪑 Bench Star",
+                    "team": t["name"],
+                    "desc": f"Left massive points on the bench ({outscoring_bench_count} bench players outscored active starters).",
+                }
+            )
+
+        # Nostradamus: Perfect lineup
+        if max_bench <= min_starter and starter_pts:
+            awards.append(
+                {
+                    "award": "🔮 Nostradamus",
+                    "team": t["name"],
+                    "desc": f"Flawless lineup management! Lowest starter ({min_starter} pts) beat highest bench player ({max_bench} pts).",
+                }
+            )
+
+    return {"week": week, "awards": awards}
+
+
+@app.post("/api/discord/post-awards")
+async def post_awards_to_discord(webhook_url: str, payload: dict):
+    """Dispatches a formatted Discord Embed for the weekly league awards."""
+    awards = payload.get("awards", [])
+    week = payload.get("week", 1)
+
+    fields = [
+        {"name": a["award"], "value": f"**{a['team']}**\n{a['desc']}", "inline": False}
+        for a in awards
+    ]
+
+    embed = {
+        "title": f"⚡ Week {week} League Awards Recap",
+        "description": "Here are this week's official honors, lucky escapes, and heartbreaking beats!",
+        "color": 48065,  # Deep Teal (#00B5C1)
+        "fields": fields,
+        "footer": {"text": "Trey Index Analytics • Generated automatically"},
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(webhook_url, json={"embeds": [embed]}) as resp:
+            if resp.status in (200, 204):
+                return {"status": "success", "message": "Dispatched to Discord!"}
+            else:
+                text = await resp.text()
+                return {"status": "error", "detail": text}

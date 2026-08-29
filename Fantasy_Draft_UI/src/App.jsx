@@ -1,77 +1,59 @@
-// Fantasy_Draft_UI/src/App.jsx
-import {
-  NavLink,
-  Navigate,
-  Route,
-  BrowserRouter as Router,
-  Routes,
-} from "react-router-dom";
+import { useEffect, useState } from "react";
 import "./App.css";
-import BoardView from "./BoardView";
+import DraftBoardView from "./DraftBoardView"; // Adjust this import name if your standard board file is named differently
 import LiveDraftView from "./LiveDraftView";
 import ModelSettingsView from "./ModelSettingsView";
-import TeamRankingsView from "./TeamRankingsView";
+import WeeklyManagerView from "./WeeklyManagerView";
 
 function App() {
-  return (
-    <Router>
-      <div className="app-container">
-        <header className="app-header">
-          <h1>Draft Room</h1>
-          <nav className="tabs">
-            <NavLink
-              to="/board/standard"
-              className={({ isActive }) => (isActive ? "tab active" : "tab")}
-            >
-              Standard Board
-            </NavLink>
-            <NavLink
-              to="/board/dynasty"
-              className={({ isActive }) => (isActive ? "tab active" : "tab")}
-            >
-              Dynasty Board
-            </NavLink>
-            <NavLink
-              to="/board/chopped"
-              className={({ isActive }) => (isActive ? "tab active" : "tab")}
-            >
-              Chopped Board
-            </NavLink>
-            <NavLink
-              to="/rankings"
-              className={({ isActive }) => (isActive ? "tab active" : "tab")}
-            >
-              Team Unit Ranks
-            </NavLink>
-            <NavLink
-              to="/live-draft"
-              className={({ isActive }) => (isActive ? "tab active" : "tab")}
-            >
-              Live Assistant
-            </NavLink>
-            <NavLink
-              to="/settings"
-              className={({ isActive }) => (isActive ? "tab active" : "tab")}
-            >
-              Model Settings
-            </NavLink>
-          </nav>
-        </header>
+  const [activeTab, setActiveTab] = useState("Settings");
 
-        <main className="board-content">
-          <Routes>
-            <Route
-              path="/"
-              element={<Navigate to="/board/standard" replace />}
-            />
-            <Route path="/board/:boardType" element={<BoardView />} />
-            <Route path="/rankings" element={<TeamRankingsView />} />
-            <Route path="/live-draft" element={<LiveDraftView />} />
-            <Route path="/settings" element={<ModelSettingsView />} />
-          </Routes>
-        </main>
+  useEffect(() => {
+    const savedTab = localStorage.getItem("defaultAppTab") || "LiveDraft";
+    setActiveTab(savedTab);
+  }, []);
+
+  return (
+    <div className="app-container">
+      {/* Unified Navigation Bar (No Emojis) */}
+      <nav className="top-nav-bar">
+        <div className="nav-brand">TREY INDEX HUB</div>
+        <div className="nav-links">
+          <button
+            className={activeTab === "DraftBoard" ? "active" : ""}
+            onClick={() => setActiveTab("DraftBoard")}
+          >
+            Draft Board
+          </button>
+          <button
+            className={activeTab === "LiveDraft" ? "active" : ""}
+            onClick={() => setActiveTab("LiveDraft")}
+          >
+            Live Draft
+          </button>
+          <button
+            className={activeTab === "WeeklyManager" ? "active" : ""}
+            onClick={() => setActiveTab("WeeklyManager")}
+          >
+            Weekly Manager
+          </button>
+          <button
+            className={activeTab === "Settings" ? "active" : ""}
+            onClick={() => setActiveTab("Settings")}
+          >
+            Settings
+          </button>
+        </div>
+      </nav>
+
+      {/* Main Tab Content Routing */}
+      <div className="tab-content">
+        {activeTab === "DraftBoard" && <DraftBoardView />}
+        {activeTab === "LiveDraft" && <LiveDraftView />}
+        {activeTab === "WeeklyManager" && <WeeklyManagerView />}
+        {activeTab === "Settings" && <ModelSettingsView />}
       </div>
-    </Router>
+    </div>
   );
 }
 

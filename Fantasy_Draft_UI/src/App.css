@@ -210,7 +210,61 @@ img, svg {
   50% { transform: scale(1.05); opacity: 0.85; }
   100% { transform: scale(1); opacity: 1; }
 }
+/* Top Navigation Bar */
+.top-nav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #0A1526;
+  padding: 0 24px;
+  height: 60px;
+  border-bottom: 2px solid #00B5C1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+}
 
+.nav-brand {
+  color: #00B5C1;
+  font-size: 1.4rem;
+  font-weight: 900;
+  letter-spacing: 1px;
+}
+
+.nav-links {
+  display: flex;
+  gap: 16px;
+  height: 100%;
+}
+
+.nav-links button {
+  background: none;
+  border: none;
+  color: #8BB2C9;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0 16px;
+  height: 100%;
+  transition: all 0.2s ease;
+  border-bottom: 3px solid transparent;
+}
+
+.nav-links button:hover {
+  color: #FFFFFF;
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.nav-links button.active {
+  color: #00B5C1;
+  border-bottom: 3px solid #00B5C1;
+  background-color: rgba(0, 181, 193, 0.1);
+}
+
+.tab-content {
+  padding: 20px;
+}
 .scarcity-badge {
   letter-spacing: 0.4px;
   box-shadow: 0 0 8px rgba(252, 76, 2, 0.6);
