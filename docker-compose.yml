@@ -359,6 +359,7 @@ services:
       # Tells Netdata to only update metrics every 2 seconds instead of every 1 second (Cuts CPU usage in half)
       - NETDATA_UPDATE_EVERY=2
     volumes:
+      - netdata_config:/etc/netdata
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /etc/os-release:/host/etc/os-release:ro
@@ -579,3 +580,5 @@ services:
       - fantasy_football_api
     networks:
       - piccolo_net
+volumes:
+  netdata_config:
