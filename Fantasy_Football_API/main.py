@@ -1876,6 +1876,14 @@ async def get_weekly_roster_analysis(
     """
     session = await get_session()
 
+    # NEW: Resolve string username to Sleeper's internal numeric ID
+    real_user_id = str(user_id)
+    if not user_id.isdigit():
+        async with session.get(f"https://api.sleeper.app/v1/user/{user_id}") as u_resp:
+            if u_resp.status == 200:
+                user_data = await u_resp.json()
+                real_user_id = str(user_data.get("user_id", user_id))
+
     # 1. Fetch League Rosters, Users, and Matchups concurrently
     async with (
         session.get(f"https://api.sleeper.app/v1/league/{league_id}/rosters") as r_resp,
@@ -1888,14 +1896,12 @@ async def get_weekly_roster_analysis(
         matchups = await m_resp.json()
         users = await u_resp.json()
 
-    # Identify user roster_id
+    # Identify user roster_id safely
     user_map = {u["user_id"]: u.get("display_name", "Unknown") for u in users}
     user_roster_id = None
     for r in rosters:
-        if (
-            str(r.get("owner_id")) == str(user_id)
-            or user_map.get(r.get("owner_id")) == user_id
-        ):
+        # Match against the resolved numeric ID
+        if str(r.get("owner_id")) == real_user_id:
             user_roster_id = r.get("roster_id")
             break
 

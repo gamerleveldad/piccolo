@@ -19,7 +19,19 @@ const WeeklyManagerView = () => {
   const [awardsData, setAwardsData] = useState(null);
   const awardsConfig = JSON.parse(localStorage.getItem("awardsConfig")) || {};
   const awardsEnabled = awardsConfig[selectedLeague] !== false; // Defaults to true
-  const [discordWebhook, setDiscordWebhook] = useState("");
+  // Read from .env first, fallback to localStorage, fallback to empty string
+  const [discordWebhook, setDiscordWebhook] = useState(
+    import.meta.env.VITE_DISCORD_WEBHOOK_FANTASY_FOOTBALL ||
+      localStorage.getItem("discordWebhook") ||
+      "",
+  );
+
+  // Save to localStorage whenever it changes (in case you edit it in the UI)
+  useEffect(() => {
+    if (discordWebhook && !discordWebhook.includes("VITE")) {
+      localStorage.setItem("discordWebhook", discordWebhook);
+    }
+  }, [discordWebhook]);
   const [discordStatus, setDiscordStatus] = useState("");
   const [loading, setLoading] = useState(false);
   const [csvFile, setCsvFile] = useState(null);
@@ -102,6 +114,41 @@ const WeeklyManagerView = () => {
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const loadMockAwards = () => {
+    setAwardsData([
+      {
+        award: "Most Points",
+        team: "Wishfulthinking",
+        desc: "Exploded for 156.4 pts!",
+      },
+      {
+        award: "Least Points",
+        team: "BoyDozNotRich",
+        desc: "Stumbled with only 72.1 pts.",
+      },
+      {
+        award: "Nailbiter",
+        team: "Ray Ricers vs Wishfulthinking",
+        desc: "Decided by a razor-thin 1.2 pts!",
+      },
+      {
+        award: "Bench Star",
+        team: "GamerLevelDad",
+        desc: "Left massive points on the bench (3 bench players outscored active starters).",
+      },
+      {
+        award: "Lucky Week",
+        team: "Ray Ricers",
+        desc: "Won with only 92.1 pts (would have lost to 8 other teams)!",
+      },
+      {
+        award: "Nostradamus",
+        team: "Wishfulthinking",
+        desc: "Flawless lineup management! Lowest starter (12.4 pts) beat highest bench player (11.1 pts).",
+      },
+    ]);
   };
 
   const handlePostToDiscord = async () => {
@@ -444,6 +491,13 @@ const WeeklyManagerView = () => {
               style={{ backgroundColor: "#FFD700", color: "#0A1526" }}
             >
               Calculate Awards
+            </button>
+            <button
+              className="manual-fetch-btn"
+              onClick={loadMockAwards}
+              style={{ backgroundColor: "#8BB2C9", color: "#0A1526" }}
+            >
+              Load Mock Data
             </button>
             <button
               className="manual-fetch-btn"
