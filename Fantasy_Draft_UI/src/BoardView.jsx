@@ -1,16 +1,30 @@
 // src/BoardView.jsx
-import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
-import { DndContext, closestCenter } from '@dnd-kit/core';
-import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import SortablePlayerRow from './SortablePlayerRow';
+import { DndContext, closestCenter } from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
+import SortablePlayerRow from "./SortablePlayerRow";
 
 const BoardView = () => {
-  const { boardType } = useParams();
+  // Safe fallback if not accessed via a React Router route parameter
+  let routeParams = {};
+  try {
+    routeParams = useParams() || {};
+  } catch (e) {
+    routeParams = {};
+  }
+
+  const [boardType, setBoardType] = useState(
+    routeParams.boardType || "standard",
+  );
   const [players, setPlayers] = useState([]);
-  const [viewMode, setViewMode] = useState('compact');
-  
-  const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8005';
+  const [viewMode, setViewMode] = useState("compact");
+
+  const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:8005";
 
   useEffect(() => {
     const fetchBoard = async () => {
@@ -26,31 +40,32 @@ const BoardView = () => {
     };
     fetchBoard();
   }, [boardType, apiBase]);
+
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
 
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append("file", file);
 
     try {
       const res = await fetch(`${apiBase}/api/projections/upload`, {
-        method: 'POST',
+        method: "POST",
         body: formData,
       });
-      
+
       const result = await res.json();
       if (res.ok) {
         alert(`Successfully updated ${result.updated} player projections!`);
-        // Refresh the board to recalculate the TI scores
-        window.location.reload(); 
+        window.location.reload();
       } else {
         alert(`Upload failed: ${result.message}`);
       }
     } catch (err) {
-      console.error('Upload failed', err);
+      console.error("Upload failed", err);
     }
   };
+
   const handleDragEnd = async (event) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -59,46 +74,74 @@ const BoardView = () => {
     const newIndex = players.findIndex((p) => p.player_id === over.id);
 
     const newPlayers = arrayMove(players, oldIndex, newIndex);
-    setPlayers(newPlayers); // Optimistic UI update
+    setPlayers(newPlayers);
 
-    const targetAbovePlayerId = newIndex > 0 ? newPlayers[newIndex - 1].player_id : null;
-    const targetBelowPlayerId = newIndex < newPlayers.length - 1 ? newPlayers[newIndex + 1].player_id : null;
+    const targetAbovePlayerId =
+      newIndex > 0 ? newPlayers[newIndex - 1].player_id : null;
+    const targetBelowPlayerId =
+      newIndex < newPlayers.length - 1
+        ? newPlayers[newIndex + 1].player_id
+        : null;
 
     try {
       await fetch(`${apiBase}/api/ti/board/${boardType}/reorder`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           player_id: active.id,
           target_above_player_id: targetAbovePlayerId,
-          target_below_player_id: targetBelowPlayerId
-        })
+          target_below_player_id: targetBelowPlayerId,
+        }),
       });
     } catch (error) {
       console.error("Failed to persist drag order:", error);
     }
   };
 
+  const title =
+    (boardType || "Standard").charAt(0).toUpperCase() +
+    (boardType || "Standard").slice(1);
+
   return (
     <div>
       <div className="board-controls">
-        <h2>{boardType.charAt(0).toUpperCase() + boardType.slice(1)} Rankings</h2>
+        <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+          <h2>{title} Rankings</h2>
+          <div
+            className="board-type-toggles"
+            style={{ display: "flex", gap: "6px" }}
+          >
+            <button
+              className={boardType === "standard" ? "active" : ""}
+              onClick={() => setBoardType("standard")}
+            >
+              Standard
+            </button>
+            <button
+              className={boardType === "dynasty" ? "active" : ""}
+              onClick={() => setBoardType("dynasty")}
+            >
+              Dynasty
+            </button>
+          </div>
+        </div>
+
         <div className="view-toggles">
-          <input 
-            type="file" 
-            accept=".csv" 
-            onChange={handleFileUpload} 
-            style={{ marginRight: '15px' }}
+          <input
+            type="file"
+            accept=".csv"
+            onChange={handleFileUpload}
+            style={{ marginRight: "15px" }}
           />
-          <button 
-            className={viewMode === 'compact' ? 'active' : ''} 
-            onClick={() => setViewMode('compact')}
+          <button
+            className={viewMode === "compact" ? "active" : ""}
+            onClick={() => setViewMode("compact")}
           >
             Compact View
           </button>
-          <button 
-            className={viewMode === 'grid' ? 'active' : ''} 
-            onClick={() => setViewMode('grid')}
+          <button
+            className={viewMode === "grid" ? "active" : ""}
+            onClick={() => setViewMode("grid")}
           >
             Grid View
           </button>
@@ -107,13 +150,16 @@ const BoardView = () => {
 
       <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <div className={`player-list ${viewMode}`}>
-          <SortableContext items={players.map((p) => p.player_id)} strategy={verticalListSortingStrategy}>
+          <SortableContext
+            items={players.map((p) => p.player_id)}
+            strategy={verticalListSortingStrategy}
+          >
             {players.map((player, index) => (
-              <SortablePlayerRow 
-                key={player.player_id} 
-                player={player} 
-                displayRank={index + 1} 
-                viewMode={viewMode} 
+              <SortablePlayerRow
+                key={player.player_id}
+                player={player}
+                displayRank={index + 1}
+                viewMode={viewMode}
               />
             ))}
           </SortableContext>

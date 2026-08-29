@@ -1,6 +1,7 @@
+// Fantasy_Draft_UI/src/App.jsx
 import { useEffect, useState } from "react";
 import "./App.css";
-import DraftBoardView from "./DraftBoardView"; // Adjust this import name if your standard board file is named differently
+import BoardView from "./BoardView";
 import LiveDraftView from "./LiveDraftView";
 import ModelSettingsView from "./ModelSettingsView";
 import WeeklyManagerView from "./WeeklyManagerView";
@@ -48,7 +49,7 @@ function App() {
 
       {/* Main Tab Content Routing */}
       <div className="tab-content">
-        {activeTab === "DraftBoard" && <DraftBoardView />}
+        {activeTab === "DraftBoard" && <BoardView />}
         {activeTab === "LiveDraft" && <LiveDraftView />}
         {activeTab === "WeeklyManager" && <WeeklyManagerView />}
         {activeTab === "Settings" && <ModelSettingsView />}
