@@ -598,6 +598,10 @@ async def poll_calendar_events():
                     start_data = e["start"].get("dateTime", e["start"].get("date"))
                     is_all_day = "date" in e["start"] and "dateTime" not in e["start"]
 
+                    # Force local midnight for all-day events to prevent timezone shift
+                    if is_all_day and len(start_data) == 10:
+                        start_data = f"{start_data}T00:00:00"
+
                     event_forecast = None
                     if not is_all_day and start_data:
                         hourly_data = rest_cache.get("forecast_hourly", [])
@@ -756,19 +760,19 @@ async def poll_local_microservices():
                                 "overnight": [],
                             }
                             local_tz = ZoneInfo("America/New_York")
-                            now_ts = datetime.datetime.now(
-                                datetime.timezone.utc
-                            ).timestamp()
+                            current_local_date = datetime.datetime.now(local_tz).date()
 
                             for h in hourly:
                                 try:
                                     dt_utc = datetime.datetime.fromisoformat(
                                         h["time"].replace("Z", "+00:00")
                                     )
-                                    if dt_utc.timestamp() > now_ts + 86400:
+                                    dt_local = dt_utc.astimezone(local_tz)
+
+                                    # ONLY process hours that belong strictly to today
+                                    if dt_local.date() != current_local_date:
                                         continue
 
-                                    dt_local = dt_utc.astimezone(local_tz)
                                     hr = dt_local.hour
                                     prob = int(h.get("precip_probability", 0))
 
@@ -970,7 +974,9 @@ async def get_tasks():
                     "id": t.get("id"),
                     "title": t.get("title", "Unnamed Task"),
                     "notes": t.get("notes", ""),
-                    "due_date_str": due_day.isoformat() if due_day else None,
+                    "due_date_str": f"{due_day.isoformat()}T00:00:00"
+                    if due_day
+                    else None,
                 }
             )
 
