@@ -92,6 +92,7 @@ services:
       - family_dashboard_api
     networks:
       - piccolo_net
+
   # --- Agentic Video Game Metadata Microservice ---
   game_scanner_api:
     build:
@@ -182,6 +183,7 @@ services:
       - postgres_db
     networks:
       - piccolo_net
+
   crunchyroll_api:
     build:
       context: ./Crunchyroll_API
@@ -411,6 +413,7 @@ services:
       - postgres_db
     networks:
       - piccolo_net
+
   # --- Maverick Front End ---
   maverick_front_end:
     build:
@@ -426,38 +429,7 @@ services:
       - "8084:80"
     networks:
       - piccolo_net
-  # --- Reverse Proxy (The Traffic Cop) ---
-  caddy:
-    image: caddy:2-alpine
-    container_name: caddy_proxy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./data/caddy_data:/data
-      - ./data/caddy_config:/config
-    networks:
-      - piccolo_net
 
-  # --- Local DNS (Network Phonebook) ---
-  pihole:
-    image: pihole/pihole:latest
-    container_name: pihole
-    restart: unless-stopped
-    ports:
-      - "53:53/tcp"
-      - "53:53/udp"
-      # Port 80 is intentionally omitted so Caddy can handle it
-    environment:
-      - TZ=America/New_York
-      - WEBPASSWORD=${PIHOLE_PASSWORD}
-    volumes:
-      - ./data/pihole:/etc/pihole
-      - ./data/dnsmasq.d:/etc/dnsmasq.d
-    networks:
-      - piccolo_net
   # --- ADS-B / SDR Decoder Hub ---
   ultrafeeder:
     image: ghcr.io/sdr-enthusiasts/docker-adsb-ultrafeeder
@@ -546,8 +518,6 @@ services:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
     networks:
       - piccolo_net
-    # Note: We removed the custom `command` and `environment` variables
-    # because the container natively looks for the config file at the path we just mounted.
 
   # --- UDP to MQTT Bridge ---
   tempest_bridge:
@@ -564,13 +534,13 @@ services:
       - "50222:50222/udp"
     networks:
       - piccolo_net
+
   # --- New Fantasy Draft UI ---
   fantasy_draft_ui:
     build:
       context: ./Fantasy_Draft_UI
       dockerfile: Dockerfile
       args:
-        # Bake the API URL into the React build process
         - VITE_API_BASE_URL=http://192.168.4.55:8005
     container_name: fantasy_draft_ui
     restart: unless-stopped
@@ -580,5 +550,34 @@ services:
       - fantasy_football_api
     networks:
       - piccolo_net
+
+  # --- Home Assistant ---
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: homeassistant
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+    volumes:
+      - ./data/homeassistant:/config
+      - /etc/localtime:/etc/localtime:ro
+      - /run/dbus:/run/dbus:ro
+
+  # --- Obsidian Sync (CouchDB) ---
+  couchdb:
+    image: couchdb:latest
+    container_name: obsidian_sync
+    restart: unless-stopped
+    environment:
+      - COUCHDB_USER=${COUCHDB_USER}
+      - COUCHDB_PASSWORD=${COUCHDB_PASSWORD}
+    volumes:
+      - ./data/couchdb:/opt/couchdb/data
+      - ./data/couchdb_ini:/opt/couchdb/etc/local.d
+    ports:
+      - "5984:5984"
+    networks:
+      - piccolo_net
+
 volumes:
   netdata_config:
