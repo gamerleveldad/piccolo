@@ -357,17 +357,37 @@ CALENDAR_TARGETS = {
 }
 
 GOOGLE_COLOR_MAP = {
-    "1": "#a4bdfc",
-    "2": "#7ae7bf",
-    "3": "#dbadff",
-    "4": "#ff887c",
-    "5": "#fbd75b",
-    "6": "#ffb878",
-    "7": "#46d6db",
-    "8": "#e1e1e1",
-    "9": "#5484ed",
-    "10": "#51b749",
-    "11": "#dc2127",
+    # Original 1-11 Event Colors
+    "1": "#a4bdfc",  # Lavender
+    "2": "#7ae7bf",  # Sage
+    "3": "#dbadff",  # Grape
+    "4": "#ff887c",  # Flamingo
+    "5": "#fbd75b",  # Banana
+    "6": "#ffb878",  # Tangerine
+    "7": "#46d6db",  # Peacock
+    "8": "#e1e1e1",  # Graphite
+    "9": "#5484ed",  # Blueberry
+    "10": "#51b749",  # Basil
+    "11": "#dc2127",  # Tomato
+    # Extended Modern Calendar Colors
+    "12": "#F6BF26",  # Banana
+    "13": "#33B679",  # Sage (Modern)
+    "14": "#039BE5",  # Peacock
+    "15": "#4285F4",  # Cobalt
+    "16": "#3F51B5",  # Blueberry
+    "17": "#7986CB",  # Lavender
+    "18": "#B39DDB",  # Wisteria
+    "19": "#616161",  # Graphite (Modern)
+    "20": "#A79B8E",  # Birch
+    "21": "#AD1457",  # Radicchio
+    "22": "#D81B60",  # Cherry Blossom
+    "23": "#8E24AA",  # Grape (Modern)
+    "24": "#9E69AF",  # Amethyst
+    # Text-based fallbacks just in case the API passes raw names
+    "cocoa": "#795548",
+    "eucalyptus": "#009688",
+    "avocado": "#C0CA33",
+    "tangerine": "#F4511E",
 }
 
 
