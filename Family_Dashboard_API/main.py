@@ -390,6 +390,16 @@ GOOGLE_COLOR_MAP = {
     "tangerine": "#F4511E",
 }
 
+CALENDAR_DEFAULT_COLORS = {
+    "display_board": "#C0CA33",  # Avocado
+    "family": "#9E69AF",  # Amethyst
+    "holidays": "#009688",  # Eucalyptus
+}
+
+# Hex Reference for your other requested colors if you want to swap them:
+# Graphite: #616161, Cobalt: #4285F4, Cocoa: #795548
+# Cherry Blossom: #D81B60, Radicchio: #AD1457, Sage: #33B679, Tangerine: #F4511E
+
 
 def match_event_weather(event_start_iso, hourly_periods):
     if not hourly_periods:
@@ -628,10 +638,14 @@ async def poll_calendar_events():
                         event_forecast = match_event_weather(start_data, hourly_data)
 
                     raw_color_id = str(e.get("colorId", ""))
-                    event_color = e.get(
-                        "backgroundColor", GOOGLE_COLOR_MAP.get(raw_color_id, "#38bdf8")
-                    )
 
+                    # Fetch the calendar's base color instead of defaulting to blue
+                    fallback_color = CALENDAR_DEFAULT_COLORS.get(source_tag, "#38bdf8")
+
+                    event_color = e.get(
+                        "backgroundColor",
+                        GOOGLE_COLOR_MAP.get(raw_color_id, fallback_color),
+                    )
                     aggregated_events.append(
                         {
                             "id": e.get("id"),
