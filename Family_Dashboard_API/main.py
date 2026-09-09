@@ -494,7 +494,6 @@ def match_event_weather(start_iso, is_all_day, hourly_periods, daily_periods):
         event_dt = datetime.datetime.fromisoformat(start_iso.replace("Z", "+00:00"))
         event_ts = int(event_dt.timestamp())
 
-        matched_period = None
         for period in hourly_periods:
             p_time = int(
                 datetime.datetime.fromisoformat(
@@ -502,18 +501,13 @@ def match_event_weather(start_iso, is_all_day, hourly_periods, daily_periods):
                 ).timestamp()
             )
 
-            # Keep overwriting matched_period to ensure we get the LATEST forecast for this hour
+            # Return IMMEDIATELY on the first exact match to prevent stale data overwrites
             if p_time <= event_ts < (p_time + 3600):
-                matched_period = period
-
-        if matched_period:
-            return {
-                "temp": int(safe_float(matched_period.get("temp_f"), 72)),
-                "icon": matched_period.get("icon", "clear-day"),
-                "rain_pct": int(
-                    safe_float(matched_period.get("precip_probability"), 0)
-                ),
-            }
+                return {
+                    "temp": int(safe_float(period.get("temp_f"), 72)),
+                    "icon": period.get("icon", "clear-day"),
+                    "rain_pct": int(safe_float(period.get("precip_probability"), 0)),
+                }
     except Exception as e:
         logger.error(f"Event weather match error: {e}")
 
@@ -699,13 +693,31 @@ async def poll_calendar_events():
             time_min = now.isoformat()
             time_max = (now + datetime.timedelta(days=28)).isoformat()
 
-            # 1. Dynamically fetch your exact Calendar colors directly from Google
+            # 1. Dynamically fetch Google's absolute truth for color hex codes
+            colors_info = service.colors().get().execute()
+            google_event_colors = {
+                k: v.get("background", "#38bdf8")
+                for k, v in colors_info.get("event", {}).items()
+            }
+            google_calendar_colors = {
+                k: v.get("background", "#38bdf8")
+                for k, v in colors_info.get("calendar", {}).items()
+            }
+
             calendar_colors = {}
             try:
                 cal_list = service.calendarList().list().execute()
                 for cal in cal_list.get("items", []):
-                    # Cache the parent calendar's exact hex background color
-                    calendar_colors[cal["id"]] = cal.get("backgroundColor", "#38bdf8")
+                    cal_theme_id = cal.get("colorId")
+                    # Map the calendar to its exact Google Theme hex
+                    if cal_theme_id and cal_theme_id in google_calendar_colors:
+                        calendar_colors[cal["id"]] = google_calendar_colors[
+                            cal_theme_id
+                        ]
+                    else:
+                        calendar_colors[cal["id"]] = cal.get(
+                            "backgroundColor", "#38bdf8"
+                        )
             except Exception as e:
                 logger.error(f"Failed to fetch calendar colors: {e}")
 
@@ -723,7 +735,6 @@ async def poll_calendar_events():
                     .execute()
                 )
 
-                # Assign the dynamic fallback color based on the calendar ID
                 base_cal_color = calendar_colors.get(cal_id, "#38bdf8")
 
                 for e in events_result.get("items", []):
@@ -743,9 +754,9 @@ async def poll_calendar_events():
 
                     raw_color_id = str(e.get("colorId", ""))
 
-                    # If the event has a specific color override, use it. Otherwise, use the true calendar color.
+                    # Use Google's exact hex code for the event color, or fallback to the parent calendar color
                     event_color = (
-                        GOOGLE_COLOR_MAP.get(raw_color_id)
+                        google_event_colors.get(raw_color_id)
                         if raw_color_id
                         else base_cal_color
                     )
