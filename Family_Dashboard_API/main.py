@@ -401,33 +401,45 @@ CALENDAR_DEFAULT_COLORS = {
 # Cherry Blossom: #D81B60, Radicchio: #AD1457, Sage: #33B679, Tangerine: #F4511E
 
 
-def match_event_weather(event_start_iso, hourly_periods):
-    if not hourly_periods:
-        return None
+def match_event_weather(start_iso, is_all_day, hourly_periods, daily_periods):
     try:
-        event_dt = datetime.datetime.fromisoformat(
-            event_start_iso.replace("Z", "+00:00")
-        )
-        event_ts = int(event_dt.timestamp())
-    except Exception:
-        return None
+        if is_all_day:
+            event_date = start_iso.split("T")[0] if "T" in start_iso else start_iso
+            for day in daily_periods:
+                if day.get("date") == event_date:
+                    return {
+                        "temp": int(safe_float(day.get("temp_max_f"), 72)),
+                        "icon": day.get("icon", "clear-day"),
+                        "rain_pct": int(safe_float(day.get("precip_probability"), 0)),
+                    }
+            return None
 
-    for period in hourly_periods:
-        try:
+        event_dt = datetime.datetime.fromisoformat(start_iso.replace("Z", "+00:00"))
+        event_ts = int(event_dt.timestamp())
+
+        matched_period = None
+        for period in hourly_periods:
             p_time = int(
                 datetime.datetime.fromisoformat(
                     period["time"].replace("Z", "+00:00")
                 ).timestamp()
             )
-            # Check if the event falls within this specific forecasted hour
+
+            # Keep overwriting matched_period to ensure we get the LATEST forecast for this hour
             if p_time <= event_ts < (p_time + 3600):
-                return {
-                    "temp": int(period.get("temp_f", 72)),
-                    "icon": period.get("icon", "clear-day"),
-                    "rain_pct": int(period.get("precip_probability", 0)),
-                }
-        except Exception:
-            continue
+                matched_period = period
+
+        if matched_period:
+            return {
+                "temp": int(safe_float(matched_period.get("temp_f"), 72)),
+                "icon": matched_period.get("icon", "clear-day"),
+                "rain_pct": int(
+                    safe_float(matched_period.get("precip_probability"), 0)
+                ),
+            }
+    except Exception as e:
+        logger.error(f"Event weather match error: {e}")
+
     return None
 
 
@@ -610,6 +622,16 @@ async def poll_calendar_events():
             time_min = now.isoformat()
             time_max = (now + datetime.timedelta(days=28)).isoformat()
 
+            # 1. Dynamically fetch your exact Calendar colors directly from Google
+            calendar_colors = {}
+            try:
+                cal_list = service.calendarList().list().execute()
+                for cal in cal_list.get("items", []):
+                    # Cache the parent calendar's exact hex background color
+                    calendar_colors[cal["id"]] = cal.get("backgroundColor", "#38bdf8")
+            except Exception as e:
+                logger.error(f"Failed to fetch calendar colors: {e}")
+
             aggregated_events = []
             for source_tag, cal_id in CALENDAR_TARGETS.items():
                 events_result = (
@@ -624,28 +646,33 @@ async def poll_calendar_events():
                     .execute()
                 )
 
+                # Assign the dynamic fallback color based on the calendar ID
+                base_cal_color = calendar_colors.get(cal_id, "#38bdf8")
+
                 for e in events_result.get("items", []):
                     start_data = e["start"].get("dateTime", e["start"].get("date"))
                     is_all_day = "date" in e["start"] and "dateTime" not in e["start"]
 
-                    # Force local midnight for all-day events to prevent timezone shift
-                    if is_all_day and len(start_data) == 10:
+                    if is_all_day and start_data and len(start_data) == 10:
                         start_data = f"{start_data}T00:00:00"
 
                     event_forecast = None
-                    if not is_all_day and start_data:
+                    if start_data:
                         hourly_data = rest_cache.get("forecast_hourly", [])
-                        event_forecast = match_event_weather(start_data, hourly_data)
+                        daily_data = rest_cache.get("forecast_daily", [])
+                        event_forecast = match_event_weather(
+                            start_data, is_all_day, hourly_data, daily_data
+                        )
 
                     raw_color_id = str(e.get("colorId", ""))
 
-                    # Fetch the calendar's base color instead of defaulting to blue
-                    fallback_color = CALENDAR_DEFAULT_COLORS.get(source_tag, "#38bdf8")
-
-                    event_color = e.get(
-                        "backgroundColor",
-                        GOOGLE_COLOR_MAP.get(raw_color_id, fallback_color),
+                    # If the event has a specific color override, use it. Otherwise, use the true calendar color.
+                    event_color = (
+                        GOOGLE_COLOR_MAP.get(raw_color_id)
+                        if raw_color_id
+                        else base_cal_color
                     )
+
                     aggregated_events.append(
                         {
                             "id": e.get("id"),
@@ -667,84 +694,6 @@ async def poll_calendar_events():
         except Exception as err:
             logger.error(f"Calendar Thread Error: {err}")
         await asyncio.sleep(300)
-
-
-async def poll_google_drive_photos():
-    logger.info("Google Drive Photo sync worker online.")
-    photo_dir = os.path.join(BASE_DIR, "assets", "photos")
-    os.makedirs(photo_dir, exist_ok=True)
-    MIME_MAP = {
-        "image/jpeg": ".jpg",
-        "image/png": ".png",
-        "image/gif": ".gif",
-        "image/webp": ".webp",
-    }
-
-    def sync_logic():
-        creds = get_calendar_credentials()
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            with open("token.json", "w") as token:
-                token.write(creds.to_json())
-
-        service = build("drive", "v3", credentials=creds, cache_discovery=False)
-        results = (
-            service.files()
-            .list(
-                q="mimeType='application/vnd.google-apps.folder' and name='DisplayBoard' and trashed=false",
-                fields="files(id, name)",
-            )
-            .execute()
-        )
-        folders = results.get("files", [])
-        if not folders:
-            return
-
-        folder_id = folders[0]["id"]
-        results = (
-            service.files()
-            .list(
-                q=f"'{folder_id}' in parents and mimeType contains 'image/' and trashed=false",
-                fields="files(id, name, mimeType)",
-            )
-            .execute()
-        )
-        cloud_images = results.get("files", [])
-
-        cloud_safe_names = {}
-        for img in cloud_images:
-            original_name = img["name"]
-            ext = os.path.splitext(original_name)[1].lower()
-            if not ext:
-                inferred_ext = MIME_MAP.get(img.get("mimeType", ""), ".png")
-                safe_name = f"{original_name}{inferred_ext}"
-            else:
-                safe_name = original_name
-            cloud_safe_names[safe_name] = img
-
-        local_filenames = set(
-            [f for f in os.listdir(photo_dir) if not f.startswith(".")]
-        )
-        for local_file in local_filenames:
-            if local_file not in cloud_safe_names:
-                os.remove(os.path.join(photo_dir, local_file))
-
-        for safe_name, img in cloud_safe_names.items():
-            if safe_name not in local_filenames:
-                request = service.files().get_media(fileId=img["id"])
-                # FIX: Wrap the file IO in a 'with' context manager to guarantee it closes
-                with io.FileIO(os.path.join(photo_dir, safe_name), "wb") as fh:
-                    downloader = MediaIoBaseDownload(fh, request)
-                    done = False
-                    while done is False:
-                        status, done = downloader.next_chunk()
-
-    while True:
-        try:
-            await asyncio.to_thread(sync_logic)
-        except Exception as e:
-            logger.error(f"Drive Sync error: {e}", exc_info=True)
-        await asyncio.sleep(3600)
 
 
 async def poll_local_microservices():
