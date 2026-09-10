@@ -356,44 +356,33 @@ CALENDAR_TARGETS = {
     "holidays": "en.usa#holiday@group.v.calendar.google.com",
 }
 
-GOOGLE_COLOR_MAP = {
-    # Original 1-11 Event Colors
-    "1": "#a4bdfc",  # Lavender
-    "2": "#7ae7bf",  # Sage
-    "3": "#dbadff",  # Grape
-    "4": "#ff887c",  # Flamingo
-    "5": "#fbd75b",  # Banana
-    "6": "#ffb878",  # Tangerine
-    "7": "#46d6db",  # Peacock
-    "8": "#e1e1e1",  # Graphite
-    "9": "#5484ed",  # Blueberry
-    "10": "#51b749",  # Basil
-    "11": "#dc2127",  # Tomato
-    # Extended Modern Calendar Colors
-    "12": "#F6BF26",  # Banana
-    "13": "#33B679",  # Sage (Modern)
-    "14": "#039BE5",  # Peacock
-    "15": "#4285F4",  # Cobalt
-    "16": "#3F51B5",  # Blueberry
-    "17": "#7986CB",  # Lavender
-    "18": "#B39DDB",  # Wisteria
-    "19": "#616161",  # Graphite (Modern)
-    "20": "#A79B8E",  # Birch
-    "21": "#AD1457",  # Radicchio
-    "22": "#D81B60",  # Cherry Blossom
-    "23": "#8E24AA",  # Grape (Modern)
-    "24": "#9E69AF",  # Amethyst
-    # Text-based fallbacks just in case the API passes raw names
-    "cocoa": "#795548",
-    "eucalyptus": "#009688",
-    "avocado": "#C0CA33",
-    "tangerine": "#F4511E",
-}
-
-CALENDAR_DEFAULT_COLORS = {
-    "display_board": "#C0CA33",  # Avocado
-    "family": "#9E69AF",  # Amethyst
-    "holidays": "#009688",  # Eucalyptus
+ALL_GOOGLE_COLORS = {
+    # Standard Event Colors
+    "1": "#7986CB",
+    "2": "#33B679",
+    "3": "#8E24AA",
+    "4": "#E67C73",
+    "5": "#F6BF26",
+    "6": "#F4511E",
+    "7": "#039BE5",
+    "8": "#616161",
+    "9": "#3F51B5",
+    "10": "#0B8043",
+    "11": "#D50000",
+    # Extended Calendar Colors (12-24)
+    "12": "#F6BF26",
+    "13": "#33B679",
+    "14": "#039BE5",
+    "15": "#4285F4",
+    "16": "#3F51B5",
+    "17": "#7986CB",
+    "18": "#B39DDB",
+    "19": "#616161",
+    "20": "#A79B8E",
+    "21": "#AD1457",
+    "22": "#D81B60",
+    "23": "#8E24AA",
+    "24": "#9E69AF",
 }
 
 
@@ -480,8 +469,9 @@ async def poll_google_drive_photos():
 
 def match_event_weather(start_iso, is_all_day, hourly_periods, daily_periods):
     try:
+        # 1. Handle All-Day Events
         if is_all_day:
-            event_date = start_iso.split("T")[0] if "T" in start_iso else start_iso
+            event_date = start_iso.split("T")[0] if "T" in start_iso else start_iso[:10]
             for day in daily_periods:
                 if day.get("date") == event_date:
                     return {
@@ -491,8 +481,12 @@ def match_event_weather(start_iso, is_all_day, hourly_periods, daily_periods):
                     }
             return None
 
+        # 2. Handle Timed Events (Find the absolute closest forecast block)
         event_dt = datetime.datetime.fromisoformat(start_iso.replace("Z", "+00:00"))
         event_ts = int(event_dt.timestamp())
+
+        best_match = None
+        smallest_diff = float("inf")
 
         for period in hourly_periods:
             p_time = int(
@@ -501,13 +495,21 @@ def match_event_weather(start_iso, is_all_day, hourly_periods, daily_periods):
                 ).timestamp()
             )
 
-            # Return IMMEDIATELY on the first exact match to prevent stale data overwrites
-            if p_time <= event_ts < (p_time + 3600):
-                return {
-                    "temp": int(safe_float(period.get("temp_f"), 72)),
-                    "icon": period.get("icon", "clear-day"),
-                    "rain_pct": int(safe_float(period.get("precip_probability"), 0)),
-                }
+            # Calculate absolute time difference in seconds
+            diff = abs(p_time - event_ts)
+
+            # If the forecast is within 1.5 hours of the event start time, track the closest one
+            if diff < smallest_diff and diff <= 5400:
+                smallest_diff = diff
+                best_match = period
+
+        if best_match:
+            return {
+                "temp": int(safe_float(best_match.get("temp_f"), 72)),
+                "icon": best_match.get("icon", "clear-day"),
+                "rain_pct": int(safe_float(best_match.get("precip_probability"), 0)),
+            }
+
     except Exception as e:
         logger.error(f"Event weather match error: {e}")
 
@@ -693,19 +695,7 @@ async def poll_calendar_events():
             time_min = now.isoformat()
             time_max = (now + datetime.timedelta(days=28)).isoformat()
 
-            # 1. Fetch Google's official color palette directly from the API
-            google_event_colors = {}
-            try:
-                colors_info = service.colors().get().execute()
-                # Map the event colorIds directly to their hex backgrounds
-                google_event_colors = {
-                    k: v.get("background", "#38bdf8") 
-                    for k, v in colors_info.get("event", {}).items()
-                }
-            except Exception as e:
-                logger.error(f"Failed to fetch Google colors: {e}")
-
-            # 2. Fetch the specific background colors assigned to your parent calendars
+            # Cache the specific background colors assigned to your parent calendars
             calendar_colors = {}
             try:
                 cal_list = service.calendarList().list().execute()
@@ -728,7 +718,6 @@ async def poll_calendar_events():
                     .execute()
                 )
 
-                # Identify the parent calendar's native color
                 base_cal_color = calendar_colors.get(cal_id, "#38bdf8")
 
                 for e in events_result.get("items", []):
@@ -748,8 +737,13 @@ async def poll_calendar_events():
 
                     raw_color_id = str(e.get("colorId", ""))
 
-                    # Resolve the color: Use official event color if specified, otherwise fallback to the calendar default
-                    event_color = google_event_colors.get(raw_color_id, base_cal_color) if raw_color_id else base_cal_color
+                    # Apply event color if one exists, otherwise apply the parent calendar color
+                    if raw_color_id:
+                        event_color = ALL_GOOGLE_COLORS.get(
+                            raw_color_id, base_cal_color
+                        )
+                    else:
+                        event_color = base_cal_color
 
                     aggregated_events.append(
                         {

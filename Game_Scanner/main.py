@@ -3,11 +3,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import requests
 import json
+import time
 from datetime import datetime, timedelta
 import psycopg2
 from psycopg2 import errors
 import os
 from google.genai import Client
+from google.genai.errors import APIError, ServerError
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -62,9 +64,12 @@ def call_gemini_with_retry(contents, model='gemini-3.5-flash', max_retries=3, in
     for attempt in range(max_retries):
         try:
             return client.models.generate_content(model=model, contents=contents)
-        except APIError as e:
-            if e.code in [503, 429] and attempt < max_retries - 1:
-                print(f"Gemini API busy ({e.code}). Retrying in {delay}s...")
+        except (APIError, ServerError) as e:
+            # Safely extract the status code whether it is a ServerError or APIError
+            error_code = getattr(e, 'code', None) or (503 if "503" in str(e) else None)
+            
+            if error_code in [503, 429] and attempt < max_retries - 1:
+                print(f"Gemini API busy (Error {error_code}). Retrying in {delay}s...")
                 time.sleep(delay)
                 delay *= 2
             else:
