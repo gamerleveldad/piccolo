@@ -176,11 +176,8 @@ def get_open_meteo_data(model_type):
 
 def get_nhc_data():
     try:
-        # Fetch the feed using requests to enforce a strict 10-second timeout
         resp = requests.get("https://www.nhc.noaa.gov/index-at.xml", timeout=10)
         resp.raise_for_status()
-
-        # Parse the raw content locally so feedparser doesn't touch the network
         feed = feedparser.parse(resp.content)
 
         entries = []
@@ -189,6 +186,15 @@ def get_nhc_data():
         return entries
     except Exception as e:
         return f"NHC Error: {e}"
+
+
+def get_nhc_twd_data():
+    try:
+        resp = requests.get("https://www.nhc.noaa.gov/text/MIATWDAT.shtml", timeout=10)
+        # Slicing the first 5000 characters to capture the synopsis and waves
+        return resp.text[:5000]
+    except Exception as e:
+        return f"NHC TWD Error: {e}"
 
 
 def get_metar_data():
@@ -247,7 +253,7 @@ def fetch_and_store_storm_data():
                         ob.get("mda"),
                         ob.get("vil"),
                         ob.get("htFT"),
-                        ob.get("topFT"),  # <--- Updated this line
+                        ob.get("topFT"),
                         hail.get("prob"),
                         hail.get("probSevere"),
                         hail.get("maxSizeIN"),
@@ -285,17 +291,15 @@ def fetch_and_store_storm_data():
         conn.commit()
         cursor.close()
         conn.close()
-        # Transition state: We went from clear skies to storms nearby
+
         if cells_found and not STORM_NEARBY:
             alert_msg = "⚠️ **Storm Alert: Convective Activity Within 20 Miles**\n"
 
-            # If the trigger was a cell, grab the closest one for details
             if cells_resp.get("success") and cells_resp.get("response"):
                 cell = cells_resp["response"][0]
                 dist = cell.get("relativeTo", {}).get("distanceMI", "Unknown")
                 bearing = cell.get("relativeTo", {}).get("bearing", "Unknown")
 
-                # Fix: Target the correct stormcell movement keys and convert KTS to MPH
                 movement = cell.get("ob", {}).get("movement", {})
                 speed_kts = movement.get("speedKTS")
                 speed_mph = (
@@ -305,7 +309,6 @@ def fetch_and_store_storm_data():
                 )
                 dir_deg = movement.get("dirDEG", "Unknown")
 
-                # Clarify the severity definitions
                 is_severe = cell.get("traits", {}).get("isSevere", False)
                 severity_text = (
                     "🔴 **SEVERE Thunderstorm/Cell**"
@@ -361,28 +364,32 @@ def parse_nhc_outlook_with_gemini(raw_nhc_text):
     Raw NHC Feed:
     {raw_nhc_text}
     """
-    try:
-        response = client.models.generate_content(
-            model="gemini-3.6-flash", contents=prompt
-        )
-        text_resp = response.text.strip()
-        # Clean JSON if backticks were returned
-        if text_resp.startswith("```json"):
-            text_resp = text_resp[7:]
-        if text_resp.startswith("```"):
-            text_resp = text_resp[3:]
-        if text_resp.endswith("```"):
-            text_resp = text_resp[:-3]
-        return json.loads(text_resp.strip())
-    except Exception as e:
-        print(f"Error parsing NHC text with Gemini: {e}")
-        return {
-            "atlantic_favor": "Low",
-            "carrib_favor": "Low",
-            "gulf_favor": "Low",
-            "outlook_2day_pct": 0,
-            "outlook_7day_pct": 0,
-        }
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.6-flash", contents=prompt
+            )
+            text_resp = response.text.strip()
+            if text_resp.startswith("```json"):
+                text_resp = text_resp[7:]
+            if text_resp.startswith("```"):
+                text_resp = text_resp[3:]
+            if text_resp.endswith("```"):
+                text_resp = text_resp[:-3]
+            return json.loads(text_resp.strip())
+        except Exception as e:
+            print(f"Error parsing NHC text with Gemini on attempt {attempt + 1}: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(10)
+
+    return {
+        "atlantic_favor": "Low",
+        "carrib_favor": "Low",
+        "gulf_favor": "Low",
+        "outlook_2day_pct": 0,
+        "outlook_7day_pct": 0,
+    }
 
 
 def fetch_and_store_tropics():
@@ -399,11 +406,9 @@ def fetch_and_store_tropics():
         now = datetime.now(timezone.utc)
         has_atlantic_storm = False
 
-        # 1. Extract regional favorability using Gemini and raw NHC data
         nhc_entries = get_nhc_data()
         regional_outlook = parse_nhc_outlook_with_gemini("\n".join(nhc_entries))
 
-        # Sanitize percentage inputs for Postgres integer columns
         try:
             p_2day = int(
                 str(regional_outlook.get("outlook_2day_pct", 0))
@@ -422,7 +427,6 @@ def fetch_and_store_tropics():
         except Exception:
             p_7day = 0
 
-        # 2. ALWAYS insert/update the system outlook record first
         cursor.execute(
             """
             INSERT INTO tropical_storms (
@@ -450,18 +454,15 @@ def fetch_and_store_tropics():
             ),
         )
 
-        # 3. Fetch Active Cyclones from Xweather
-        trop_url = f"https://api.aerisapi.com/tropicalcyclones?client_id={XWEATHER_ID}&client_secret={XWEATHER_SECRET}"
+        trop_url = f"[https://api.aerisapi.com/tropicalcyclones?client_id=](https://api.aerisapi.com/tropicalcyclones?client_id=){XWEATHER_ID}&client_secret={XWEATHER_SECRET}"
         trop_resp = requests.get(trop_url, timeout=10).json()
 
         if trop_resp.get("success") and trop_resp.get("response"):
             for storm in trop_resp["response"]:
-                # FIX: Extract 'id' from top-level storm object, not 'profile'
                 storm_id = storm.get("id", "")
                 profile = storm.get("profile", {})
                 basin = profile.get("basinCurrent") or profile.get("basinOrigin") or ""
 
-                # Filter specifically for Atlantic basin storms
                 if not (storm_id.startswith("AL") or basin == "AL"):
                     continue
 
@@ -473,7 +474,6 @@ def fetch_and_store_tropics():
                 movement = details.get("movement", {})
                 pos_ts = position.get("timestamp", 0)
 
-                # Format future track array & calculate lead hours from timestamps
                 track_points = []
                 for point in storm.get("forecast", []):
                     point_details = point.get("details", {})
@@ -600,6 +600,7 @@ def build_discord_message():
     gfs_data = get_open_meteo_data("gfs")
     euro_data = get_open_meteo_data("ecmwf")
     nhc_data = get_nhc_data()
+    nhc_twd = get_nhc_twd_data()
     metar_data = get_metar_data()
 
     today_date = datetime.now().strftime("%B %d, %Y")
@@ -621,6 +622,7 @@ def build_discord_message():
     Euro (ECMWF): {euro_data}
     GFS: {gfs_data}
     Tropics (NHC RSS): {nhc_data}
+    Tropics (NHC Discussion): {nhc_twd}
     METARs: {metar_data}
     
     Template to fill out:
@@ -655,11 +657,14 @@ def build_discord_message():
     
     ### Areas of Interest
     [List areas of interest and their development probabilities from NHC data. If none, write "No areas of interest at this time".]
+
+    ### Tropical Waves
+    [Identify and summarize any active tropical waves mentioned in the Tropics (NHC Discussion) data. If none, write "No active tropical waves noted."]
     
     ### Favorability of development
-    * Gulf: [Determine from NHC outlook: High/Moderate/Low]
-    * Caribbean: [Determine from NHC outlook: High/Moderate/Low]
-    * Atlantic: [Determine from NHC outlook: High/Moderate/Low]
+    * Gulf: [Determine from NHC outlook and discussion: High/Moderate/Low]
+    * Caribbean: [Determine from NHC outlook and discussion: High/Moderate/Low]
+    * Atlantic: [Determine from NHC outlook and discussion: High/Moderate/Low]
     
     ## Aviation Update
     ### METAR
@@ -669,14 +674,35 @@ def build_discord_message():
     """
 
     print(f"[{datetime.now()}] Sending payload to Gemini...")
-    try:
-        response = client.models.generate_content(
-            model="gemini-3.6-flash", contents=prompt
-        )
-        final_message = response.text.strip()
-    except Exception as e:
-        print(f"Error communicating with Gemini: {e}")
-        return
+    final_message = ""
+    max_retries = 3
+
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.6-flash", contents=prompt
+            )
+            final_message = response.text.strip()
+            print(
+                f"[{datetime.now()}] Gemini request successful on attempt {attempt + 1}."
+            )
+            break
+        except Exception as e:
+            print(f"[{datetime.now()}] Gemini API error on attempt {attempt + 1}: {e}")
+            if attempt < max_retries - 1:
+                print(f"[{datetime.now()}] Retrying in 15 seconds...")
+                time.sleep(15)
+            else:
+                print(
+                    f"[{datetime.now()}] Max retries reached. Falling back to error message."
+                )
+                final_message = (
+                    f"# Daily Weather Update\n"
+                    f"-# _{today_date}_\n\n"
+                    f"**Notice:** The AI model is currently unavailable after {max_retries} attempts ({e}). "
+                    f"The automated summary could not be generated today.\n\n"
+                    f"### Raw METAR Data Fallback:\n```\n{metar_data}\n```"
+                )
 
     print(f"[{datetime.now()}] Posting payload to Discord Webhook...")
     payload = {"content": final_message}
@@ -691,23 +717,19 @@ def build_discord_message():
 if __name__ == "__main__":
     print("Weather and Storm Tracking Daemon started.")
 
-    # Initialize PostgreSQL tables automatically
     setup_database()
 
-    # Schedule Daily Brief
     schedule.every().day.at("06:00").do(build_discord_message)
 
     while True:
         now = datetime.now(timezone.utc)
         schedule.run_pending()
 
-        # Dynamic Polling: Local Storms (3 min if active storm/lightning near, else 15 min)
         storm_interval = timedelta(minutes=3) if STORM_NEARBY else timedelta(minutes=15)
         if now - LAST_STORM_CHECK >= storm_interval:
             fetch_and_store_storm_data()
             LAST_STORM_CHECK = now
 
-        # Dynamic Polling: Tropics (3 hours if active hurricane, else 6 hours)
         tropics_interval = (
             timedelta(hours=3) if ACTIVE_HURRICANE else timedelta(hours=6)
         )

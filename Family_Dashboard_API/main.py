@@ -469,7 +469,8 @@ async def poll_google_drive_photos():
 
 def match_event_weather(start_iso, is_all_day, hourly_periods, daily_periods):
     try:
-        # 1. Handle All-Day Events
+        local_tz = ZoneInfo("America/New_York")
+
         if is_all_day:
             event_date = start_iso.split("T")[0] if "T" in start_iso else start_iso[:10]
             for day in daily_periods:
@@ -481,34 +482,23 @@ def match_event_weather(start_iso, is_all_day, hourly_periods, daily_periods):
                     }
             return None
 
-        # 2. Handle Timed Events (Find the absolute closest forecast block)
-        event_dt = datetime.datetime.fromisoformat(start_iso.replace("Z", "+00:00"))
-        event_ts = int(event_dt.timestamp())
-
-        best_match = None
-        smallest_diff = float("inf")
+        # Pinpoint exact matching using localized Date and Hour
+        event_dt = datetime.datetime.fromisoformat(
+            start_iso.replace("Z", "+00:00")
+        ).astimezone(local_tz)
 
         for period in hourly_periods:
-            p_time = int(
-                datetime.datetime.fromisoformat(
-                    period["time"].replace("Z", "+00:00")
-                ).timestamp()
-            )
+            p_dt = datetime.datetime.fromisoformat(
+                period["time"].replace("Z", "+00:00")
+            ).astimezone(local_tz)
 
-            # Calculate absolute time difference in seconds
-            diff = abs(p_time - event_ts)
-
-            # If the forecast is within 1.5 hours of the event start time, track the closest one
-            if diff < smallest_diff and diff <= 5400:
-                smallest_diff = diff
-                best_match = period
-
-        if best_match:
-            return {
-                "temp": int(safe_float(best_match.get("temp_f"), 72)),
-                "icon": best_match.get("icon", "clear-day"),
-                "rain_pct": int(safe_float(best_match.get("precip_probability"), 0)),
-            }
+            # Match strictly on the exact same day and hour
+            if p_dt.date() == event_dt.date() and p_dt.hour == event_dt.hour:
+                return {
+                    "temp": int(safe_float(period.get("temp_f"), 72)),
+                    "icon": period.get("icon", "clear-day"),
+                    "rain_pct": int(safe_float(period.get("precip_probability"), 0)),
+                }
 
     except Exception as e:
         logger.error(f"Event weather match error: {e}")
@@ -695,7 +685,20 @@ async def poll_calendar_events():
             time_min = now.isoformat()
             time_max = (now + datetime.timedelta(days=28)).isoformat()
 
-            # Cache the specific background colors assigned to your parent calendars
+            # 1. FETCH GOOGLE'S MASTER COLOR PALETTE
+            master_color_map = {}
+            try:
+                colors_info = service.colors().get().execute()
+                # Merge calendar colors first
+                for k, v in colors_info.get("calendar", {}).items():
+                    master_color_map[k] = v.get("background", "#38bdf8")
+                # Merge event colors (overwriting any duplicates)
+                for k, v in colors_info.get("event", {}).items():
+                    master_color_map[k] = v.get("background", "#38bdf8")
+            except Exception as e:
+                logger.error(f"Failed to fetch Google API colors: {e}")
+
+            # 2. FETCH PARENT CALENDAR BASE COLORS
             calendar_colors = {}
             try:
                 cal_list = service.calendarList().list().execute()
@@ -737,11 +740,9 @@ async def poll_calendar_events():
 
                     raw_color_id = str(e.get("colorId", ""))
 
-                    # Apply event color if one exists, otherwise apply the parent calendar color
-                    if raw_color_id:
-                        event_color = ALL_GOOGLE_COLORS.get(
-                            raw_color_id, base_cal_color
-                        )
+                    # USE EXACT HEX FROM GOOGLE
+                    if raw_color_id and raw_color_id in master_color_map:
+                        event_color = master_color_map[raw_color_id]
                     else:
                         event_color = base_cal_color
 
