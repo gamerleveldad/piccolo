@@ -454,7 +454,7 @@ def fetch_and_store_tropics():
             ),
         )
 
-        trop_url = f"[https://api.aerisapi.com/tropicalcyclones?client_id=](https://api.aerisapi.com/tropicalcyclones?client_id=){XWEATHER_ID}&client_secret={XWEATHER_SECRET}"
+        trop_url = f"https://api.aerisapi.com/tropicalcyclones?filter=active&client_id={XWEATHER_ID}&client_secret={XWEATHER_SECRET}"
         trop_resp = requests.get(trop_url, timeout=10).json()
 
         if trop_resp.get("success") and trop_resp.get("response"):
