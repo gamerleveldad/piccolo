@@ -458,6 +458,10 @@ def fetch_and_store_tropics():
         trop_resp = requests.get(trop_url, timeout=10).json()
 
         if trop_resp.get("success") and trop_resp.get("response"):
+            # --- NEW: Clear out old active states before processing new ones ---
+            cursor.execute(
+                "UPDATE tropical_storms SET is_active = False WHERE id != 'SYSTEM_OUTLOOK'"
+            )
             for storm in trop_resp["response"]:
                 storm_id = storm.get("id", "")
                 profile = storm.get("profile", {})
