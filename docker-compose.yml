@@ -559,7 +559,7 @@ services:
     container_name: ops_agent
     restart: unless-stopped
     ports:
-      - "8005:8000"
+      - "8006:8000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
@@ -570,7 +570,7 @@ services:
       - POSTGRES_HOST=postgres_db
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - OPS_DISCORD_WEBHOOK=${OPS_DISCORD_WEBHOOK}
-      - OPS_UI_URL=http://192.168.4.55:8005
+      - OPS_UI_URL=http://192.168.4.55:8006
       - AUDIT_HOUR=7
       - EXCLUDED_CONTAINERS=ultrafeeder,fr24feed,piaware # <--- UPDATED
     depends_on:

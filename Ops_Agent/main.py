@@ -221,7 +221,31 @@ def run_daily_audit():
         for i in open_issues
         if i["status"] == "Fix Deployed"
     ]
+    # Check if any container has error logs, high resource usage, or stopped/restarting status
+    has_container_problems = any(
+        c["error_logs"]
+        or c["status"] != "running"
+        or c["oom_killed"]
+        or c["cpu_percent"] > 80
+        or c["mem_percent"] > 80
+        for c in snapshot["containers"]
+    )
+    has_host_problems = (
+        snapshot["host_metrics"]["cpu_percent"] > 85
+        or snapshot["host_metrics"]["memory_percent"] > 85
+        or snapshot["host_metrics"]["disk_percent"] > 85
+    )
 
+    # Skip the Gemini API call completely (0 requests / 0 tokens used) if the system is clean
+    if not has_container_problems and not has_host_problems and not fix_deployed_list:
+        send_discord_summary([], [], [], len(known_unfixed), snapshot["host_metrics"])
+        return {
+            "new_issues_count": 0,
+            "verified_count": 0,
+            "fix_failed_count": 0,
+            "skipped_open_count": len(known_unfixed),
+            "api_call_skipped": True,
+        }
     prompt = f"""
 You are the automated reliability engineer for a Raspberry Pi 5 Docker home lab ('Piccolo').
 Analyze the following 24-hour system telemetry and container error logs.
