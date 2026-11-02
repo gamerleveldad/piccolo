@@ -70,6 +70,76 @@ class DailyAuditReport(BaseModel):
     fix_evaluations: List[FixEvaluation]
 
 
+# <--- ADDED: Flat types.Schema definition (avoids Pydantic $defs / $ref validation error)
+AUDIT_RESPONSE_SCHEMA = types.Schema(
+    type=types.Type.OBJECT,
+    required=["new_issues", "fix_evaluations"],
+    properties={
+        "new_issues": types.Schema(
+            type=types.Type.ARRAY,
+            items=types.Schema(
+                type=types.Type.OBJECT,
+                required=[
+                    "fingerprint",
+                    "container_name",
+                    "severity",
+                    "title",
+                    "evidence",
+                    "remediation_steps",
+                ],
+                properties={
+                    "fingerprint": types.Schema(
+                        type=types.Type.STRING,
+                        description="Unique slug combining container_name and short issue key, e.g., 'weather_api:influx_connection_timeout'",
+                    ),
+                    "container_name": types.Schema(
+                        type=types.Type.STRING,
+                        description="Name of the container or 'host' for system-level issues",
+                    ),
+                    "severity": types.Schema(
+                        type=types.Type.STRING,
+                        enum=["Critical", "Warning", "Info"],
+                    ),
+                    "title": types.Schema(
+                        type=types.Type.STRING,
+                        description="Concise summary of the problem",
+                    ),
+                    "evidence": types.Schema(
+                        type=types.Type.STRING,
+                        description="Specific log lines or metric values proving the issue",
+                    ),
+                    "remediation_steps": types.Schema(
+                        type=types.Type.STRING,
+                        description="Step-by-step actionable instructions to fix the issue",
+                    ),
+                },
+            ),
+        ),
+        "fix_evaluations": types.Schema(
+            type=types.Type.ARRAY,
+            items=types.Schema(
+                type=types.Type.OBJECT,
+                required=["fingerprint", "still_occurring", "notes"],
+                properties={
+                    "fingerprint": types.Schema(
+                        type=types.Type.STRING,
+                        description="The exact fingerprint of the 'Fix Deployed' issue being checked",
+                    ),
+                    "still_occurring": types.Schema(
+                        type=types.Type.BOOLEAN,
+                        description="True if the error/problem is still present in current logs/stats, False if resolved",
+                    ),
+                    "notes": types.Schema(
+                        type=types.Type.STRING,
+                        description="Brief explanation of why it is considered verified or still failing",
+                    ),
+                },
+            ),
+        ),
+    },
+)
+
+
 # --- Database Helpers ---
 def get_db_conn():
     return psycopg2.connect(
@@ -271,12 +341,13 @@ Instructions:
         contents=prompt,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
-            response_schema=DailyAuditReport,
+            response_schema=AUDIT_RESPONSE_SCHEMA,  # <--- UPDATED: Use flat schema instead of DailyAuditReport
             temperature=0.1,
         ),
     )
 
-    report: DailyAuditReport = response.parsed
+    # <--- UPDATED: Parse JSON string directly into the Pydantic model
+    report: DailyAuditReport = DailyAuditReport.model_validate_json(response.text)
 
     added_issues = []
     verified_fixes = []
