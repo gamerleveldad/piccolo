@@ -26,6 +26,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 DISCORD_WEBHOOK_URL = os.getenv("OPS_DISCORD_WEBHOOK", "")
 UI_URL = os.getenv("OPS_UI_URL", "http://192.168.4.55:8005")
 AUDIT_HOUR = int(os.getenv("AUDIT_HOUR", "7"))  # 7:00 AM daily
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
 # <--- UPDATED: Exclude noisy containers (e.g., ADS-B feeders) from scanning
 EXCLUDED_CONTAINERS = {
@@ -337,11 +338,11 @@ Instructions:
 
     ai_client = genai.Client(api_key=GEMINI_API_KEY)
     response = ai_client.models.generate_content(
-        model="gemini-2.5-flash",
+        model=GEMINI_MODEL,  # <--- UPDATED: Uses gemini-3.8-flash
         contents=prompt,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
-            response_schema=AUDIT_RESPONSE_SCHEMA,  # <--- UPDATED: Use flat schema instead of DailyAuditReport
+            response_schema=AUDIT_RESPONSE_SCHEMA,
             temperature=0.1,
         ),
     )
