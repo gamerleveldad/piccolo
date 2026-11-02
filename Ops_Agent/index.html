@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Piccolo Ops Agent</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen p-4 md:p-8">
+  <div class="max-w-5xl mx-auto">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 pb-4 border-b border-slate-800">
+      <div>
+        <h1 class="text-2xl font-bold text-white flex items-center gap-2">🩺 Piccolo Ops & Log Auditor</h1>
+        <p class="text-sm text-slate-400">Automated container log & performance remediation tracker</p>
+      </div>
+      <button id="runAuditBtn" onclick="runAuditNow()"
+        class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-4 py-2 rounded-lg text-sm transition">
+        Run Audit Now
+      </button>
+    </div>
+
+    <!-- Filter Tabs -->
+    <div class="flex flex-wrap gap-2 mb-6" id="filterTabs">
+      <button onclick="setFilter('ALL')" data-filter="ALL" class="tab-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-800 text-white">All</button>
+      <button onclick="setFilter('New')" data-filter="New" class="tab-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-900 text-slate-400">New</button>
+      <!-- UPDATED: Added Fix Failed Filter Tab -->
+      <button onclick="setFilter('Fix Failed')" data-filter="Fix Failed" class="tab-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-900 text-slate-400">Fix Failed</button>
+      <button onclick="setFilter('Fix Deployed')" data-filter="Fix Deployed" class="tab-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-900 text-slate-400">Fix Deployed</button>
+      <button onclick="setFilter('Fix Verified')" data-filter="Fix Verified" class="tab-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-900 text-slate-400">Fix Verified</button>
+    </div>
+
+    <!-- Issues List -->
+    <div id="issuesContainer" class="space-y-4"></div>
+  </div>
+
+  <script>
+    let allIssues = [];
+    let currentFilter = 'ALL';
+
+    // <--- UPDATED: Added 'Fix Failed' badge styling
+    const statusStyles = {
+      'New': 'bg-red-500/20 text-red-400 border-red-500/30',
+      'Fix Failed': 'bg-rose-600/30 text-rose-300 border-rose-500/50',
+      'Fix Deployed': 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+      'Fix Verified': 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+    };
+
+    async function fetchIssues() {
+      const res = await fetch('/api/issues');
+      allIssues = await res.json();
+      renderIssues();
+    }
+
+    function setFilter(filter) {
+      currentFilter = filter;
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        const active = btn.dataset.filter === filter;
+        btn.className = `tab-btn px-3 py-1.5 rounded-lg text-sm font-medium ${active ? 'bg-slate-800 text-white' : 'bg-slate-900 text-slate-400'}`;
+      });
+      renderIssues();
+    }
+
+    async function updateStatus(id, newStatus) {
+      await fetch(`/api/issues/${id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+      await fetchIssues();
+    }
+
+    async function runAuditNow() {
+      const btn = document.getElementById('runAuditBtn');
+      btn.disabled = true;
+      btn.textContent = 'Scanning Logs & Metrics...';
+      try {
+        await fetch('/api/audit/run', { method: 'POST' });
+        await fetchIssues();
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Run Audit Now';
+      }
+    }
+
+    function renderIssues() {
+      const container = document.getElementById('issuesContainer');
+      const filtered = currentFilter === 'ALL'
+        ? allIssues
+        : allIssues.filter(i => i.status === currentFilter);
+
+      if (!filtered.length) {
+        container.innerHTML = `<div class="text-center py-12 text-slate-500 bg-slate-900/40 rounded-xl border border-slate-800">No issues in this view.</div>`;
+        return;
+      }
+
+      container.innerHTML = filtered.map(issue => `
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="px-2.5 py-0.5 text-xs font-semibold rounded-full border ${statusStyles[issue.status] || statusStyles['New']}">${issue.status}</span>
+              <span class="px-2 py-0.5 text-xs font-mono bg-slate-800 text-indigo-300 rounded">${issue.container_name}</span>
+              <span class="text-xs text-slate-500">${issue.severity}</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <!-- UPDATED: Show 'Mark Fix Deployed' for both 'New' and 'Fix Failed' -->
+              ${(issue.status === 'New' || issue.status === 'Fix Failed') ? `
+                <button onclick="updateStatus(${issue.id}, 'Fix Deployed')"
+                  class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold px-3 py-1.5 rounded-lg text-xs transition">
+                  Mark Fix Deployed
+                </button>
+              ` : ''}
+              ${issue.status === 'Fix Deployed' ? `
+                <button onclick="updateStatus(${issue.id}, 'Fix Failed')"
+                  class="bg-rose-900/60 hover:bg-rose-800/80 text-rose-200 px-3 py-1.5 rounded-lg text-xs transition">
+                  Mark Fix Failed
+                </button>
+                <button onclick="updateStatus(${issue.id}, 'New')"
+                  class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg text-xs transition">
+                  Revert to New
+                </button>
+              ` : ''}
+            </div>
+          </div>
+
+          <h3 class="text-lg font-semibold text-white mb-2">${issue.title}</h3>
+
+          <div class="mb-3">
+            <div class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Evidence / Logs</div>
+            <pre class="bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-slate-300 overflow-x-auto whitespace-pre-wrap">${issue.evidence}</pre>
+          </div>
+
+          <div>
+            <div class="text-xs font-semibold uppercase tracking-wider text-emerald-400 mb-1">Suggested Remediation</div>
+            <div class="bg-slate-950/60 border border-slate-800/80 rounded-lg p-3 text-sm text-slate-200 whitespace-pre-line">${issue.remediation_steps}</div>
+          </div>
+
+          <div class="mt-3 pt-2 border-t border-slate-800/60 flex justify-between text-xs text-slate-500">
+            <span>Fingerprint: <code>${issue.fingerprint}</code></span>
+            <span>Last seen: ${new Date(issue.last_seen).toLocaleString()}</span>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    fetchIssues();
+  </script>
+</body>
+</html>

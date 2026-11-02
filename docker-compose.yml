@@ -551,6 +551,33 @@ services:
     networks:
       - piccolo_net
 
+  # --- Automated Daily Ops & Log Auditor ---
+  ops_agent:
+    build:
+      context: ./Ops_Agent
+      dockerfile: Dockerfile
+    container_name: ops_agent
+    restart: unless-stopped
+    ports:
+      - "8005:8000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - TZ=America/New_York
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=postgres_db
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - OPS_DISCORD_WEBHOOK=${OPS_DISCORD_WEBHOOK}
+      - OPS_UI_URL=http://192.168.4.55:8005
+      - AUDIT_HOUR=7
+      - EXCLUDED_CONTAINERS=ultrafeeder,fr24feed,piaware # <--- UPDATED
+    depends_on:
+      - postgres_db
+    networks:
+      - piccolo_net
+
   # --- Home Assistant ---
   homeassistant:
     image: ghcr.io/home-assistant/home-assistant:stable

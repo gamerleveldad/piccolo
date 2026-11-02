@@ -46,11 +46,15 @@ for DIR in $CHANGED_DIRS; do
             SERVICES_TO_BUILD="ALL"
             DEPLOYED_PROJECTS="$DEPLOYED_PROJECTS\n- Core Infrastructure"
             ;;
+        "Ops_Agent")
+            SERVICES_TO_BUILD="$SERVICES_TO_BUILD ops_agent"
+            DEPLOYED_PROJECTS="$DEPLOYED_PROJECTS\n- Ops Agent"
+            ;;
     esac
 done
 
 # Execute builds
-if [ "$SERVICES_TO_BUILD" == "ALL" ]; then
+if [[ "$SERVICES_TO_BUILD" == *"ALL"* ]]; then
     docker compose up -d --build
 elif [ -n "$SERVICES_TO_BUILD" ]; then
     docker compose up -d --build $SERVICES_TO_BUILD
