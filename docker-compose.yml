@@ -578,6 +578,31 @@ services:
     networks:
       - piccolo_net
 
+  # --- openHASP 5-Inch Telemetry Publisher ---
+  hasp_publisher:
+    build:
+      context: ./hasp-publisher
+      dockerfile: Dockerfile
+    container_name: hasp_publisher
+    restart: unless-stopped
+    environment:
+      - TZ=America/New_York
+      - MQTT_BROKER=mosquitto
+      - MQTT_PORT=1883
+      - HASP_NODE=plate_5inch
+      - HOME_LATITUDE=${HOME_LATITUDE}
+      - HOME_LONGITUDE=${HOME_LONGITUDE}
+      - AIRCRAFT_JSON_URL=http://ultrafeeder:80/data/aircraft.json
+      - WEATHER_API_URL=http://weather_api:8000
+      - DASHBOARD_API_URL=http://family_dashboard_api:8000
+      - FLIGHT_API_URL=http://flight_api:8000
+    depends_on:
+      - mosquitto
+      - ultrafeeder
+      - weather_api
+    networks:
+      - piccolo_net
+
   # --- Home Assistant ---
   homeassistant:
     image: ghcr.io/home-assistant/home-assistant:stable
@@ -608,28 +633,3 @@ services:
 
 volumes:
   netdata_config:
-
-  # --- openHASP 5-Inch Telemetry Publisher ---
-  hasp_publisher:
-    build:
-      context: ./hasp-publisher
-      dockerfile: Dockerfile
-    container_name: hasp_publisher
-    restart: unless-stopped
-    environment:
-      - TZ=America/New_York
-      - MQTT_BROKER=mosquitto
-      - MQTT_PORT=1883
-      - HASP_NODE=plate_5inch
-      - HOME_LATITUDE=${HOME_LATITUDE}
-      - HOME_LONGITUDE=${HOME_LONGITUDE}
-      - AIRCRAFT_JSON_URL=http://ultrafeeder:80/data/aircraft.json
-      - WEATHER_API_URL=http://weather_api:8000
-      - DASHBOARD_API_URL=http://family_dashboard_api:8000
-      - FLIGHT_API_URL=http://flight_api:8000
-    depends_on:
-      - mosquitto
-      - ultrafeeder
-      - weather_api
-    networks:
-      - piccolo_net
