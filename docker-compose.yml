@@ -612,7 +612,7 @@ volumes:
   # --- openHASP 5-Inch Telemetry Publisher ---
   hasp_publisher:
     build:
-      context: ./HASP_Publisher
+      context: ./hasp-publisher
       dockerfile: Dockerfile
     container_name: hasp_publisher
     restart: unless-stopped
