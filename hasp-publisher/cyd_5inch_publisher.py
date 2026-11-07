@@ -33,7 +33,9 @@ TEMPEST_MQTT_TOPIC = os.getenv("TEMPEST_MQTT_TOPIC", "tempest/#")
 HOME_LAT = float(os.getenv("HOME_LATITUDE", "28.6611"))
 HOME_LON = float(os.getenv("HOME_LONGITUDE", "-81.3656"))
 
-AIRCRAFT_JSON_URL = os.getenv("AIRCRAFT_JSON_URL", "http://ultrafeeder:80/data/aircraft.json")
+AIRCRAFT_JSON_URL = os.getenv(
+    "AIRCRAFT_JSON_URL", "http://ultrafeeder:80/data/aircraft.json"
+)
 WEATHER_API_URL = os.getenv("WEATHER_API_URL", "http://weather_api:8000").rstrip("/")
 METAR_URL = "https://aviationweather.gov/api/data/metar?ids=KSFB,KORL&format=json"
 
@@ -42,9 +44,9 @@ ALERT_DISPLAY_SECONDS = 10
 AIRCRAFT_COOLDOWN_SECONDS = 300
 
 FLIGHT_CAT_COLORS = {
-    "VFR": "#2dd4bf",   # Teal/Green
+    "VFR": "#2dd4bf",  # Teal/Green
     "MVFR": "#38bdf8",  # Sky Blue
-    "IFR": "#ef4444",   # Red
+    "IFR": "#ef4444",  # Red
     "LIFR": "#e879f9",  # Magenta
 }
 
@@ -105,20 +107,20 @@ def resolve_mdi_icon(icon_str: str) -> str:
     """Maps Tempest/WeatherFlow icon strings (e.g. 'possibly-thunderstorm-day') to openHASP MDI unicodes."""
     s = (icon_str or "").lower()
     if "thunder" in s or "lightning" in s or "tstorm" in s:
-        return "\uF593"  # Thunderstorm
+        return "\uf593"  # Thunderstorm
     if "rain" in s or "shower" in s or "drizzle" in s or "sleet" in s:
-        return "\uF597"  # Rain
+        return "\uf597"  # Rain
     if "wind" in s:
-        return "\uF5A0"  # Windy
+        return "\uf5a0"  # Windy
     if "partly-cloudy" in s:
-        return "\uF595"  # Partly Cloudy
+        return "\uf595"  # Partly Cloudy
     if "cloudy" in s or "overcast" in s or "fog" in s:
-        return "\uF590"  # Cloudy
+        return "\uf590"  # Cloudy
     if "night" in s:
-        return "\uF594"  # Clear Night (Moon)
+        return "\uf594"  # Clear Night (Moon)
     if "clear" in s or "sun" in s:
-        return "\uF599"  # Clear Day (Sun)
-    return "\uF595"
+        return "\uf599"  # Clear Day (Sun)
+    return "\uf595"
 
 
 def haversine_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -145,8 +147,22 @@ def calculate_bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> int
 
 def deg_to_cardinal(deg: float) -> str:
     dirs = [
-        "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
-        "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW",
+        "N",
+        "NNE",
+        "NE",
+        "ENE",
+        "E",
+        "ESE",
+        "SE",
+        "SSE",
+        "S",
+        "SSW",
+        "SW",
+        "WSW",
+        "W",
+        "WNW",
+        "NW",
+        "NNW",
     ]
     return dirs[round(deg / 22.5) % 16]
 
@@ -215,7 +231,9 @@ def poll_current_weather_apis():
         if cur.get("dew_point_f") is not None:
             weather_state["dew_point_f"] = float(cur["dew_point_f"])
         if cur.get("relative_humidity") is not None:
-            weather_state["relative_humidity"] = int(round(float(cur["relative_humidity"])))
+            weather_state["relative_humidity"] = int(
+                round(float(cur["relative_humidity"]))
+            )
         if cur.get("wind_avg_mph") is not None:
             weather_state["wind_avg_mph"] = float(cur["wind_avg_mph"])
         if cur.get("wind_gust_mph") is not None:
@@ -229,7 +247,9 @@ def poll_current_weather_apis():
             weather_state["sea_level_pressure_inhg"] = slp
             now_ts = time.time()
             pressure_history.append((now_ts, slp))
-            pressure_history = [(t, p) for t, p in pressure_history if now_ts - t <= 10800]
+            pressure_history = [
+                (t, p) for t, p in pressure_history if now_ts - t <= 10800
+            ]
             if len(pressure_history) >= 2:
                 delta = slp - pressure_history[0][1]
                 if delta >= 0.03:
@@ -245,7 +265,9 @@ def poll_current_weather_apis():
         if cur.get("lightning_strike_count") is not None:
             weather_state["lightning_strike_count"] = int(cur["lightning_strike_count"])
         if cur.get("lightning_strike_last_distance") is not None:
-            weather_state["lightning_strike_last_distance"] = float(cur["lightning_strike_last_distance"])
+            weather_state["lightning_strike_last_distance"] = float(
+                cur["lightning_strike_last_distance"]
+            )
         if cur.get("conditions"):
             weather_state["conditions"] = str(cur["conditions"])
         if cur.get("icon"):
@@ -277,13 +299,22 @@ def poll_current_weather_apis():
         r.raise_for_status()
         av = r.json()
         if av.get("density_altitude_ft") is not None:
-            weather_state["density_altitude_ft"] = int(round(float(av["density_altitude_ft"])))
+            weather_state["density_altitude_ft"] = int(
+                round(float(av["density_altitude_ft"]))
+            )
         if av.get("station_pressure_inhg") is not None:
             weather_state["station_pressure_inhg"] = float(av["station_pressure_inhg"])
         if av.get("station_pressure_mb") is not None:
-            weather_state["station_pressure_mb"] = int(round(float(av["station_pressure_mb"])))
-        if av.get("sea_level_pressure_inhg") is not None and weather_state["sea_level_pressure_inhg"] is None:
-            weather_state["sea_level_pressure_inhg"] = float(av["sea_level_pressure_inhg"])
+            weather_state["station_pressure_mb"] = int(
+                round(float(av["station_pressure_mb"]))
+            )
+        if (
+            av.get("sea_level_pressure_inhg") is not None
+            and weather_state["sea_level_pressure_inhg"] is None
+        ):
+            weather_state["sea_level_pressure_inhg"] = float(
+                av["sea_level_pressure_inhg"]
+            )
     except Exception as exc:
         print(f"[WEATHER_API] /api/weather/aviation error: {exc}")
 
@@ -312,13 +343,17 @@ def poll_forecast_weather_apis():
                     if (dt_utc - now_utc).total_seconds() >= -3300:
                         dt_local = dt_utc.astimezone()
                         t_label = dt_local.strftime("%I %p").lstrip("0")
-                        upcoming.append({
-                            "time": t_label,
-                            "icon": str(item.get("icon", "partly-cloudy-day")),
-                            "temp": int(round(float(item.get("temp_f", 75)))),
-                            "pop": int(round(float(item.get("precip_probability", 0)))),
-                            "wind_dir": str(item.get("wind_direction", "")).strip(),
-                        })
+                        upcoming.append(
+                            {
+                                "time": t_label,
+                                "icon": str(item.get("icon", "partly-cloudy-day")),
+                                "temp": int(round(float(item.get("temp_f", 75)))),
+                                "pop": int(
+                                    round(float(item.get("precip_probability", 0)))
+                                ),
+                                "wind_dir": str(item.get("wind_direction", "")).strip(),
+                            }
+                        )
                 except ValueError:
                     continue
 
@@ -338,7 +373,11 @@ def poll_forecast_weather_apis():
             weather_state["hourly"] = upcoming[:6]
 
             # If current wind_direction is empty string "", borrow the current hour's wind_direction
-            if not weather_state["wind_direction"] and upcoming and upcoming[0].get("wind_dir"):
+            if (
+                not weather_state["wind_direction"]
+                and upcoming
+                and upcoming[0].get("wind_dir")
+            ):
                 weather_state["wind_direction"] = upcoming[0]["wind_dir"]
     except Exception as exc:
         print(f"[WEATHER_API] /api/weather/forecast/hourly error: {exc}")
@@ -351,13 +390,15 @@ def poll_forecast_weather_apis():
         if isinstance(daily_list, list) and daily_list:
             parsed_daily = []
             for d in daily_list[:5]:
-                parsed_daily.append({
-                    "day": str(d.get("day_name", d.get("date", "---")))[:3],
-                    "icon": str(d.get("icon", "partly-cloudy-day")),
-                    "hi": int(round(float(d.get("temp_max_f", 80)))),
-                    "lo": int(round(float(d.get("temp_min_f", 65)))),
-                    "pop": int(round(float(d.get("precip_probability", 0)))),
-                })
+                parsed_daily.append(
+                    {
+                        "day": str(d.get("day_name", d.get("date", "---")))[:3],
+                        "icon": str(d.get("icon", "partly-cloudy-day")),
+                        "hi": int(round(float(d.get("temp_max_f", 80)))),
+                        "lo": int(round(float(d.get("temp_min_f", 65)))),
+                        "pop": int(round(float(d.get("precip_probability", 0)))),
+                    }
+                )
             weather_state["daily"] = parsed_daily
     except Exception as exc:
         print(f"[WEATHER_API] /api/weather/forecast/daily error: {exc}")
@@ -380,8 +421,12 @@ def parse_tempest_mqtt(payload_str: str):
         weather_state["wind_deg"] = int(data["ob"][2])
         weather_state["wind_direction"] = deg_to_cardinal(weather_state["wind_deg"])
     elif msg_type == "evt_strike" and "evt" in data and len(data["evt"]) >= 2:
-        weather_state["lightning_last_time"] = datetime.fromtimestamp(data["evt"][0]).strftime("%I:%M %p").lstrip("0")
-        weather_state["lightning_strike_last_distance"] = round(float(data["evt"][1]) * 0.621371, 1)
+        weather_state["lightning_last_time"] = (
+            datetime.fromtimestamp(data["evt"][0]).strftime("%I:%M %p").lstrip("0")
+        )
+        weather_state["lightning_strike_last_distance"] = round(
+            float(data["evt"][1]) * 0.621371, 1
+        )
         weather_state["lightning_strike_count"] += 1
 
 
@@ -397,8 +442,14 @@ def build_weather_commands() -> list:
     cond_icon = resolve_mdi_icon(w["icon"])
 
     temp_str = f"{w['temp_f']:.1f}°F" if w["temp_f"] is not None else "--.-°F"
-    feels_str = f"Feels Like {w['feels_like_f']:.1f}°F" if w["feels_like_f"] is not None else "Feels Like --.-°F"
-    hum_str = f"{w['relative_humidity']}%" if w["relative_humidity"] is not None else "--%"
+    feels_str = (
+        f"Feels Like {w['feels_like_f']:.1f}°F"
+        if w["feels_like_f"] is not None
+        else "Feels Like --.-°F"
+    )
+    hum_str = (
+        f"{w['relative_humidity']}%" if w["relative_humidity"] is not None else "--%"
+    )
     dew_str = f"{w['dew_point_f']:.1f}°F" if w["dew_point_f"] is not None else "--°F"
 
     # Format wind direction gracefully when API returns ""
@@ -418,33 +469,76 @@ def build_weather_commands() -> list:
         ltg_main = "None (1h)"
         ltg_sub = "Dist: -- mi | Count: 0"
     else:
-        ltg_main = w["lightning_last_time"] if w["lightning_last_time"] != "None" else f"{ltg_cnt} Strikes"
+        ltg_main = (
+            w["lightning_last_time"]
+            if w["lightning_last_time"] != "None"
+            else f"{ltg_cnt} Strikes"
+        )
         dist_txt = f"{ltg_dist:.1f} mi" if ltg_dist is not None else "-- mi"
         ltg_sub = f"Dist: {dist_txt} | Count: {ltg_cnt}"
 
     # Format WBGT Card
     wbgt_val = w["wbgt_f"]
     if wbgt_val is None:
-        wbgt_str, wbgt_label = "--.-°F", "Awaiting Sensor"
+        wbgt_str, wbgt_label, wbgt_color = "--.-°F", "Awaiting Sensor", "#94a3b8"
+    elif wbgt_val < 78.0:
+        wbgt_str, wbgt_label, wbgt_color = (
+            f"{wbgt_val:.1f}°F",
+            "Pleasant / Low Stress",
+            "#2dd4bf",
+        )
+    elif wbgt_val <= 82.0:
+        wbgt_str, wbgt_label, wbgt_color = (
+            f"{wbgt_val:.1f}°F",
+            "Warm / Moderate Caution",
+            "#facc15",
+        )
+    elif wbgt_val <= 86.0:
+        wbgt_str, wbgt_label, wbgt_color = (
+            f"{wbgt_val:.1f}°F",
+            "Unpleasant / High Heat",
+            "#fb923c",
+        )
+    elif wbgt_val < 90.0:
+        wbgt_str, wbgt_label, wbgt_color = (
+            f"{wbgt_val:.1f}°F",
+            "Oppressive / Very High",
+            "#ef4444",
+        )
     else:
-        wbgt_str = f"{wbgt_val:.1f}°F"
-        wbgt_label = (
-            "Low Thermal Stress" if wbgt_val < 78.0
-            else "Moderate Caution" if wbgt_val < 82.0
-            else "High Heat Stress" if wbgt_val < 86.0
-            else "Extreme Danger"
+        wbgt_str, wbgt_label, wbgt_color = (
+            f"{wbgt_val:.1f}°F",
+            "Extreme Heat Danger",
+            "#e879f9",
         )
 
     # Format VPD & Aviation Density Card
     vpd_val = w["vpd_kpa"]
     if vpd_val is None:
-        vpd_str, vpd_label = "-.-- kPa", "Awaiting Sensor"
+        vpd_str, vpd_label, vpd_color = "-.-- kPa", "Awaiting Sensor", "#94a3b8"
+    elif vpd_val < 0.40:
+        vpd_str, vpd_label, vpd_color = (
+            f"{vpd_val:.2f} kPa",
+            "Clammy / Saturated Air",
+            "#38bdf8",
+        )
+    elif vpd_val <= 1.20:
+        vpd_str, vpd_label, vpd_color = (
+            f"{vpd_val:.2f} kPa",
+            "Pleasant / Ideal Comfort",
+            "#2dd4bf",
+        )
+    elif vpd_val <= 1.60:
+        vpd_str, vpd_label, vpd_color = (
+            f"{vpd_val:.2f} kPa",
+            "Dry / Fast Evaporation",
+            "#facc15",
+        )
     else:
-        vpd_str = f"{vpd_val:.2f} kPa"
-        vpd_label = (
-            "Saturated / Damp Air" if vpd_val < 0.4
-            else "Optimal Transpiration" if vpd_val <= 1.6
-            else "High Air Dryness"
+        vpd_str, vpd_label, vpd_color = (
+            f"{vpd_val:.2f} kPa",
+            "Parched / High Dryness",
+            "#fb923c",
         )
 
     da_str = f"Density Alt: {w['density_altitude_ft']:+,} ft"
@@ -479,12 +573,14 @@ def build_weather_commands() -> list:
         f"p1b27.text={ltg_main}",
         f"p1b28.text={ltg_sub}",
         f"p1b30.text={w['illuminance_lux']:,} lux",
-        f"p1b31.text=\uF5DE {sunrise_str}  \uF5DF {sunset_str}",
+        f"p1b31.text=\uf5de {sunrise_str}  \uf5df {sunset_str}",
         # Page 1: Bottom 3 Advanced Environmental Cards
         f"p1b41.text={wbgt_str}",
+        f"p1b41.text_color={wbgt_color}",
         f"p1b42.text={wbgt_label}",
         f"p1b43.text=UV Index: {w['uv_index']:.2f} | {w['solar_radiation']} W/m²",
         f"p1b45.text={vpd_str}",
+        f"p1b45.text_color={vpd_color}",
         f"p1b46.text={vpd_label}",
         f"p1b47.text={da_str}",
         f"p1b49.text={slp_str}",
@@ -495,22 +591,26 @@ def build_weather_commands() -> list:
     # Page 3: 6-Hour Forecast (Top 6 cards)
     for idx, hr in enumerate(w.get("hourly", [])[:6]):
         h_icon = resolve_mdi_icon(hr.get("icon", "partly-cloudy-day"))
-        cmds.extend([
-            f"p3b{20 + idx}.text={hr['time']}",
-            f"p3b{30 + idx}.text={h_icon}",
-            f"p3b{40 + idx}.text={hr['temp']}°F",
-            f"p3b{50 + idx}.text=\uF596 {hr['pop']}%",
-        ])
+        cmds.extend(
+            [
+                f"p3b{20 + idx}.text={hr['time']}",
+                f"p3b{30 + idx}.text={h_icon}",
+                f"p3b{40 + idx}.text={hr['temp']}°F",
+                f"p3b{50 + idx}.text=\uf596 {hr['pop']}%",
+            ]
+        )
 
     # Page 3: 5-Day Forecast (Bottom 5 cards)
     for idx, day in enumerate(w.get("daily", [])[:5]):
         d_icon = resolve_mdi_icon(day.get("icon", "partly-cloudy-day"))
-        cmds.extend([
-            f"p3b{60 + idx}.text={day['day']}",
-            f"p3b{70 + idx}.text={d_icon}",
-            f"p3b{80 + idx}.text={day['hi']}° / {day['lo']}°",
-            f"p3b{90 + idx}.text=\uF596 {day['pop']}%",
-        ])
+        cmds.extend(
+            [
+                f"p3b{60 + idx}.text={day['day']}",
+                f"p3b{70 + idx}.text={d_icon}",
+                f"p3b{80 + idx}.text={day['hi']}° / {day['lo']}°",
+                f"p3b{90 + idx}.text=\uf596 {day['pop']}%",
+            ]
+        )
 
     return cmds
 
@@ -551,7 +651,8 @@ def process_aviation(client: mqtt.Client) -> list:
 
     now = time.time()
     seen_close_aircraft = {
-        hx: ts for hx, ts in seen_close_aircraft.items()
+        hx: ts
+        for hx, ts in seen_close_aircraft.items()
         if now - ts < AIRCRAFT_COOLDOWN_SECONDS
     }
 
@@ -578,32 +679,42 @@ def process_aviation(client: mqtt.Client) -> list:
 
     if closest_dist <= PROXIMITY_RADIUS_NM:
         top_ac = closest_three[0]
-        top_callsign = top_ac.get("flight", top_ac.get("r", top_ac.get("hex", "UNK"))).strip()
-        cmds.extend([
-            f"p0b4.text=\uF015 ALERT: {top_callsign} ({closest_dist:.1f} NM)",
-            "p0b4.text_color=#ef4444",
-            "p2b3.border_color=#ef4444",
-        ])
+        top_callsign = top_ac.get(
+            "flight", top_ac.get("r", top_ac.get("hex", "UNK"))
+        ).strip()
+        cmds.extend(
+            [
+                f"p0b4.text=\uf015 ALERT: {top_callsign} ({closest_dist:.1f} NM)",
+                "p0b4.text_color=#ef4444",
+                "p2b3.border_color=#ef4444",
+            ]
+        )
         for ac in closest_three:
             hx = ac.get("hex", "unknown")
             if ac["dist_nm"] <= PROXIMITY_RADIUS_NM and hx not in seen_close_aircraft:
                 seen_close_aircraft[hx] = now
                 revert_page_at = now + ALERT_DISPLAY_SECONDS
-                print(f"[ALERT] {top_callsign} at {ac['dist_nm']:.1f} NM! Switching to Page 2.")
+                print(
+                    f"[ALERT] {top_callsign} at {ac['dist_nm']:.1f} NM! Switching to Page 2."
+                )
                 client.publish(f"hasp/{HASP_NODE}/command/page", "2")
                 break
     else:
-        cmds.extend([
-            "p0b4.text=\uF015 ADS-B: CLEAR (<3NM)",
-            "p0b4.text_color=#2dd4bf",
-            "p2b3.border_color=#334155",
-        ])
+        cmds.extend(
+            [
+                "p0b4.text=\uf015 ADS-B: CLEAR (<3NM)",
+                "p0b4.text_color=#2dd4bf",
+                "p2b3.border_color=#334155",
+            ]
+        )
 
     base_ids = [10, 20, 30]
     for idx, base_id in enumerate(base_ids):
         if idx < len(closest_three):
             ac = closest_three[idx]
-            callsign = (ac.get("flight") or ac.get("r") or ac.get("hex") or "N/A").strip()
+            callsign = (
+                ac.get("flight") or ac.get("r") or ac.get("hex") or "N/A"
+            ).strip()
             ac_type = (ac.get("t") or "---").strip()
             reg = (ac.get("r") or "N/A").strip()
             dist = ac["dist_nm"]
@@ -615,27 +726,41 @@ def process_aviation(client: mqtt.Client) -> list:
             desc = (ac.get("desc") or "UNKNOWN AIRCRAFT TYPE").strip()
             db_flags = int(ac.get("dbFlags", 0) or 0)
 
-            tag = "[MILITARY]" if (db_flags & 1) else "[LEO / GOV]" if (db_flags & 2) else "[CIVIL]"
+            tag = (
+                "[MILITARY]"
+                if (db_flags & 1)
+                else "[LEO / GOV]"
+                if (db_flags & 2)
+                else "[CIVIL]"
+            )
             alt_str = f"{alt:,} ft" if isinstance(alt, int) else f"{alt} ft"
-            vrate_str = f"+{vrate} fpm" if isinstance(vrate, (int, float)) and vrate > 0 else f"{vrate} fpm"
+            vrate_str = (
+                f"+{vrate} fpm"
+                if isinstance(vrate, (int, float)) and vrate > 0
+                else f"{vrate} fpm"
+            )
 
-            cmds.extend([
-                f"p2b{base_id}.text={callsign[:9]}",
-                f"p2b{base_id + 1}.text={ac_type[:5]}",
-                f"p2b{base_id + 2}.text={dist:.1f} NM  {brg:03d}°",
-                f"p2b{base_id + 3}.text={gs} kts",
-                f"p2b{base_id + 4}.text={alt_str} ({vrate_str})",
-                f"p2b{base_id + 5}.text=Reg: {reg}  |  {desc[:34]}  |  Sqk: {squawk}  |  {tag}",
-            ])
+            cmds.extend(
+                [
+                    f"p2b{base_id}.text={callsign[:9]}",
+                    f"p2b{base_id + 1}.text={ac_type[:5]}",
+                    f"p2b{base_id + 2}.text={dist:.1f} NM  {brg:03d}°",
+                    f"p2b{base_id + 3}.text={gs} kts",
+                    f"p2b{base_id + 4}.text={alt_str} ({vrate_str})",
+                    f"p2b{base_id + 5}.text=Reg: {reg}  |  {desc[:34]}  |  Sqk: {squawk}  |  {tag}",
+                ]
+            )
         else:
-            cmds.extend([
-                f"p2b{base_id}.text=---",
-                f"p2b{base_id + 1}.text=----",
-                f"p2b{base_id + 2}.text=--.- NM ---°",
-                f"p2b{base_id + 3}.text=--- kts",
-                f"p2b{base_id + 4}.text=----- ft (--- fpm)",
-                f"p2b{base_id + 5}.text=No aircraft in slot #{idx + 1}",
-            ])
+            cmds.extend(
+                [
+                    f"p2b{base_id}.text=---",
+                    f"p2b{base_id + 1}.text=----",
+                    f"p2b{base_id + 2}.text=--.- NM ---°",
+                    f"p2b{base_id + 3}.text=--- kts",
+                    f"p2b{base_id + 4}.text=----- ft (--- fpm)",
+                    f"p2b{base_id + 5}.text=No aircraft in slot #{idx + 1}",
+                ]
+            )
 
     return cmds
 
@@ -682,7 +807,9 @@ def publish_batch(client: mqtt.Client, commands: list):
         return
     chunk_size = 24
     for i in range(0, len(commands), chunk_size):
-        client.publish(f"hasp/{HASP_NODE}/command/json", json.dumps(commands[i:i + chunk_size]))
+        client.publish(
+            f"hasp/{HASP_NODE}/command/json", json.dumps(commands[i : i + chunk_size])
+        )
 
 
 def main():
