@@ -93,18 +93,47 @@ current_backlight_mode = None
 # PNG ICON MAPPING & MATH HELPERS
 # ==============================================================================
 def resolve_png_icon(icon_str: str) -> str:
-    """Maps Tempest/WeatherFlow string conditions to Local PNG filename sources."""
-    s = (icon_str or "").lower()
-    if "thunder" in s or "lightning" in s or "tstorm" in s:
+    """Maps the API condition/icon strings to simplified local PNGs, separating 'Possible' variants."""
+    s = (icon_str or "").lower().strip()
+
+    # 1. Thunderstorms
+    if "thunderstorms possible" in s or "thunderstorm possible" in s:
+        return "L:/cond_tstorm_possible.png"
+    if "thunderstorm" in s:  # Catches "Thunderstorms Likely"
         return "L:/cond_tstorm.png"
-    if "rain" in s or "shower" in s or "drizzle" in s or "sleet" in s:
+
+    # 2. Snow & Wintry Mix
+    if "snow" in s or "wintry" in s:
+        return "L:/cond_snow.png"
+
+    # 3. Rain
+    if "rain possible" in s:
+        return "L:/cond_rain_possible.png"
+    if "rain" in s or "shower" in s or "drizzle" in s:
+        # Catches Very Light, Light, Moderate, Heavy, Very Heavy, Extreme, and Likely
         return "L:/cond_rain.png"
-    if "cloudy" in s or "overcast" in s or "fog" in s:
+
+    # 4. Wind
+    if "wind" in s:
+        return "L:/cond_wind.png"
+
+    # 5. Partly Cloudy
+    if "partly" in s:
+        if "night" in s:
+            return "L:/cond_moon.png"
+        return "L:/cond_partly.png"
+
+    # 6. Cloudy / Foggy
+    if "cloud" in s or "fog" in s or "overcast" in s:
         return "L:/cond_cloudy.png"
+
+    # 7. Clear / Sunny / Clear Night
     if "night" in s:
         return "L:/cond_moon.png"
     if "clear" in s or "sun" in s:
         return "L:/cond_sun.png"
+
+    # Fallback
     return "L:/cond_cloudy.png"
 
 
