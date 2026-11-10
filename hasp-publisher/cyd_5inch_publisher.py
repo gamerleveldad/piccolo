@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 openHASP 5-Inch (800x480) Telemetry Publisher for Piccolo (Raspberry Pi 5)
-Mapped directly to Piccolo's Weather_API routes and FontAwesome 5 Graphics.
+Uses Local PNG Image Assets for true graphical UI and includes Auto Backlight Dimming.
 """
 
 import json
@@ -21,9 +21,7 @@ MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_USER = os.getenv("MQTT_USER", "")
 MQTT_PASS = os.getenv("MQTT_PASS", "")
 HASP_NODE = os.getenv("HASP_NODE", "plate_5inch")
-
 TEMPEST_MQTT_TOPIC = os.getenv("TEMPEST_MQTT_TOPIC", "tempest/#")
-
 HOME_LAT = float(os.getenv("HOME_LATITUDE", "28.6611"))
 HOME_LON = float(os.getenv("HOME_LONGITUDE", "-81.3656"))
 
@@ -37,17 +35,6 @@ PROXIMITY_RADIUS_NM = 3.0
 ALERT_DISPLAY_SECONDS = 10
 AIRCRAFT_COOLDOWN_SECONDS = 300
 
-# Updated to FontAwesome 5 Solid (Built into openHASP)
-FA_ICONS = {
-    "clear-day": "\uf185",  # fa-sun
-    "clear-night": "\uf186",  # fa-moon
-    "partly-cloudy": "\uf6c4",  # fa-cloud-sun
-    "cloudy": "\uf0c2",  # fa-cloud
-    "rain": "\uf73d",  # fa-cloud-rain
-    "thunderstorm": "\uf0e7",  # fa-bolt
-    "wind": "\uf72e",  # fa-wind
-}
-
 FLIGHT_CAT_COLORS = {
     "VFR": "#2dd4bf",
     "MVFR": "#38bdf8",
@@ -56,7 +43,7 @@ FLIGHT_CAT_COLORS = {
 }
 
 # ==============================================================================
-# LIVE TELEMETRY STATE
+# STATE TRACKING
 # ==============================================================================
 weather_state = {
     "temp_f": None,
@@ -99,55 +86,49 @@ last_api_forecast_fetch = 0
 last_weather_push = 0
 cached_metar_cmds = []
 pressure_history = []
-current_backlight_mode = None  # "day" or "night"
+current_backlight_mode = None
 
 
 # ==============================================================================
-# ICON & GEOSPATIAL HELPERS
+# PNG ICON MAPPING & MATH HELPERS
 # ==============================================================================
-def resolve_fa_icon(icon_str: str) -> str:
+def resolve_png_icon(icon_str: str) -> str:
+    """Maps Tempest/WeatherFlow string conditions to Local PNG filename sources."""
     s = (icon_str or "").lower()
     if "thunder" in s or "lightning" in s or "tstorm" in s:
-        return FA_ICONS["thunderstorm"]
+        return "L:/cond_tstorm.png"
     if "rain" in s or "shower" in s or "drizzle" in s or "sleet" in s:
-        return FA_ICONS["rain"]
-    if "wind" in s:
-        return FA_ICONS["wind"]
-    if "partly-cloudy" in s:
-        return FA_ICONS["partly-cloudy"]
+        return "L:/cond_rain.png"
     if "cloudy" in s or "overcast" in s or "fog" in s:
-        return FA_ICONS["cloudy"]
+        return "L:/cond_cloudy.png"
     if "night" in s:
-        return FA_ICONS["clear-night"]
+        return "L:/cond_moon.png"
     if "clear" in s or "sun" in s:
-        return FA_ICONS["clear-day"]
-    return FA_ICONS["partly-cloudy"]
+        return "L:/cond_sun.png"
+    return "L:/cond_cloudy.png"
 
 
 def haversine_nm(lat1, lon1, lat2, lon2):
     r_nm = 3440.065
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
     a = (
-        math.sin(dphi / 2.0) ** 2
-        + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2.0) ** 2
+        math.sin(math.radians(lat2 - lat1) / 2.0) ** 2
+        + math.cos(math.radians(lat1))
+        * math.cos(math.radians(lat2))
+        * math.sin(math.radians(lon2 - lon1) / 2.0) ** 2
     )
     return 2.0 * r_nm * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
 
 
 def calculate_bearing(lat1, lon1, lat2, lon2):
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dlambda = math.radians(lon2 - lon1)
-    x = math.sin(dlambda) * math.cos(phi2)
-    y = math.cos(phi1) * math.sin(phi2) - (
-        math.sin(phi1) * math.cos(phi2) * math.cos(dlambda)
-    )
+    x = math.sin(math.radians(lon2 - lon1)) * math.cos(math.radians(lat2))
+    y = math.cos(math.radians(lat1)) * math.sin(math.radians(lat2)) - math.sin(
+        math.radians(lat1)
+    ) * math.cos(math.radians(lat2)) * math.cos(math.radians(lon2 - lon1))
     return int((math.degrees(math.atan2(x, y)) + 360) % 360)
 
 
 def deg_to_cardinal(deg: float) -> str:
-    dirs = [
+    return [
         "N",
         "NNE",
         "NE",
@@ -164,16 +145,14 @@ def deg_to_cardinal(deg: float) -> str:
         "WNW",
         "NW",
         "NNW",
-    ]
-    return dirs[round(deg / 22.5) % 16]
+    ][round(deg / 22.5) % 16]
 
 
 def calculate_sun_times(lat: float, lon: float):
     now = datetime.now()
-    day_of_year = now.timetuple().tm_yday
-    tz_offset = now.astimezone().utcoffset().total_seconds() / 3600.0
-
-    gamma = 2.0 * math.pi / 365.0 * (day_of_year - 1)
+    doy = now.timetuple().tm_yday
+    tz = now.astimezone().utcoffset().total_seconds() / 3600.0
+    gamma = 2.0 * math.pi / 365.0 * (doy - 1)
     eqtime = 229.18 * (
         0.000075
         + 0.001868 * math.cos(gamma)
@@ -188,149 +167,140 @@ def calculate_sun_times(lat: float, lon: float):
         - 0.006758 * math.cos(2 * gamma)
         + 0.000907 * math.sin(2 * gamma)
     )
-
-    lat_rad = math.radians(lat)
-    cos_ha = (math.cos(math.radians(90.833)) / (math.cos(lat_rad) * math.cos(decl))) - (
-        math.tan(lat_rad) * math.tan(decl)
+    cos_ha = max(
+        -1.0,
+        min(
+            1.0,
+            (
+                math.cos(math.radians(90.833))
+                / (math.cos(math.radians(lat)) * math.cos(decl))
+            )
+            - (math.tan(math.radians(lat)) * math.tan(decl)),
+        ),
     )
-    cos_ha = max(-1.0, min(1.0, cos_ha))
     ha_deg = math.degrees(math.acos(cos_ha))
-
-    sunrise_min = 720.0 - 4.0 * (lon + ha_deg) - eqtime + tz_offset * 60.0
-    sunset_min = 720.0 - 4.0 * (lon - ha_deg) - eqtime + tz_offset * 60.0
-
-    def fmt_min(m: float) -> str:
-        m = int(round(m)) % 1440
-        hr, mn = divmod(m, 60)
-        return now.replace(hour=hr, minute=mn).strftime("%I:%M %p").lstrip("0")
-
-    return fmt_min(sunrise_min), fmt_min(sunset_min), sunrise_min, sunset_min
+    s_rise, s_set = (
+        720.0 - 4.0 * (lon + ha_deg) - eqtime + tz * 60.0,
+        720.0 - 4.0 * (lon - ha_deg) - eqtime + tz * 60.0,
+    )
+    return (
+        now.replace(hour=int(s_rise // 60) % 24, minute=int(s_rise % 60))
+        .strftime("%I:%M %p")
+        .lstrip("0"),
+        now.replace(hour=int(s_set // 60) % 24, minute=int(s_set % 60))
+        .strftime("%I:%M %p")
+        .lstrip("0"),
+        s_rise,
+        s_set,
+    )
 
 
 # ==============================================================================
-# AUTOMATIC BACKLIGHT CONTROLLER
+# BACKLIGHT DIMMER
 # ==============================================================================
 def update_backlight(client: mqtt.Client):
     global current_backlight_mode
     _, _, sunrise_min, sunset_min = calculate_sun_times(HOME_LAT, HOME_LON)
-
     now = datetime.now()
-    now_min = now.hour * 60 + now.minute
-
-    is_day = sunrise_min <= now_min <= sunset_min
+    is_day = sunrise_min <= (now.hour * 60 + now.minute) <= sunset_min
     target_mode = "day" if is_day else "night"
 
     if current_backlight_mode != target_mode:
-        brightness = (
-            255 if is_day else 15
-        )  # 15/255 is ~6% brightness for completely dark rooms
-        payload = json.dumps({"brightness": brightness})
-        client.publish(f"hasp/{HASP_NODE}/command/backlight", payload)
+        brightness = 255 if is_day else 15
+        client.publish(
+            f"hasp/{HASP_NODE}/command/backlight",
+            json.dumps({"brightness": brightness}),
+        )
         current_backlight_mode = target_mode
-        print(f"[BACKLIGHT] Switching to {target_mode} mode (Brightness: {brightness})")
+        print(f"[BACKLIGHT] Switched to {target_mode} mode (Brightness: {brightness})")
 
 
 # ==============================================================================
-# WEATHER POLLING & FORMATTING
+# WEATHER POLLING (Identical mapping to API)
 # ==============================================================================
 def poll_current_weather_apis():
     global weather_state, pressure_history
     try:
-        r = requests.get(f"{WEATHER_API_URL}/api/weather/current", timeout=3)
-        if r.status_code == 200:
-            cur = r.json()
-            if cur.get("temp_f") is not None:
-                weather_state["temp_f"] = float(cur["temp_f"])
-            if cur.get("feels_like_f") is not None:
-                weather_state["feels_like_f"] = float(cur["feels_like_f"])
-            if cur.get("dew_point_f") is not None:
-                weather_state["dew_point_f"] = float(cur["dew_point_f"])
-            if cur.get("relative_humidity") is not None:
-                weather_state["relative_humidity"] = int(
-                    round(float(cur["relative_humidity"]))
+        cur = requests.get(f"{WEATHER_API_URL}/api/weather/current", timeout=3).json()
+        if cur.get("temp_f") is not None:
+            weather_state["temp_f"] = float(cur["temp_f"])
+        if cur.get("feels_like_f") is not None:
+            weather_state["feels_like_f"] = float(cur["feels_like_f"])
+        if cur.get("dew_point_f") is not None:
+            weather_state["dew_point_f"] = float(cur["dew_point_f"])
+        if cur.get("relative_humidity") is not None:
+            weather_state["relative_humidity"] = int(
+                round(float(cur["relative_humidity"]))
+            )
+        if cur.get("wind_avg_mph") is not None:
+            weather_state["wind_avg_mph"] = float(cur["wind_avg_mph"])
+        if cur.get("wind_gust_mph") is not None:
+            weather_state["wind_gust_mph"] = float(cur["wind_gust_mph"])
+        if cur.get("wind_direction"):
+            weather_state["wind_direction"] = str(cur["wind_direction"]).strip()
+        if cur.get("precip_in") is not None:
+            weather_state["precip_in"] = float(cur["precip_in"])
+        if cur.get("sea_level_pressure_inhg") is not None:
+            slp = float(cur["sea_level_pressure_inhg"])
+            weather_state["sea_level_pressure_inhg"] = slp
+            now_ts = time.time()
+            pressure_history.append((now_ts, slp))
+            pressure_history = [
+                (t, p) for t, p in pressure_history if now_ts - t <= 10800
+            ]
+            if len(pressure_history) >= 2:
+                delta = slp - pressure_history[0][1]
+                weather_state["pressure_trend"] = (
+                    f"Rising ({delta:+.2f})"
+                    if delta >= 0.03
+                    else f"Falling ({delta:+.2f})"
+                    if delta <= -0.03
+                    else f"Steady ({delta:+.2f})"
                 )
-            if cur.get("wind_avg_mph") is not None:
-                weather_state["wind_avg_mph"] = float(cur["wind_avg_mph"])
-            if cur.get("wind_gust_mph") is not None:
-                weather_state["wind_gust_mph"] = float(cur["wind_gust_mph"])
-            if cur.get("wind_direction"):
-                weather_state["wind_direction"] = str(cur["wind_direction"]).strip()
-            if cur.get("precip_in") is not None:
-                weather_state["precip_in"] = float(cur["precip_in"])
-
-            if cur.get("sea_level_pressure_inhg") is not None:
-                slp = float(cur["sea_level_pressure_inhg"])
-                weather_state["sea_level_pressure_inhg"] = slp
-                now_ts = time.time()
-                pressure_history.append((now_ts, slp))
-                pressure_history = [
-                    (t, p) for t, p in pressure_history if now_ts - t <= 10800
-                ]
-                if len(pressure_history) >= 2:
-                    delta = slp - pressure_history[0][1]
-                    if delta >= 0.03:
-                        weather_state["pressure_trend"] = f"Rising ({delta:+.2f})"
-                    elif delta <= -0.03:
-                        weather_state["pressure_trend"] = f"Falling ({delta:+.2f})"
-                    else:
-                        weather_state["pressure_trend"] = f"Steady ({delta:+.2f})"
-
-            if cur.get("uv_index") is not None:
-                weather_state["uv_index"] = float(cur["uv_index"])
-            if cur.get("solar_radiation") is not None:
-                weather_state["solar_radiation"] = int(
-                    round(float(cur["solar_radiation"]))
-                )
-            if cur.get("lightning_strike_count") is not None:
-                weather_state["lightning_strike_count"] = int(
-                    cur["lightning_strike_count"]
-                )
-            if cur.get("lightning_strike_last_distance") is not None:
-                weather_state["lightning_strike_last_distance"] = float(
-                    cur["lightning_strike_last_distance"]
-                )
-            if cur.get("conditions"):
-                weather_state["conditions"] = str(cur["conditions"])
-            if cur.get("icon"):
-                weather_state["icon"] = str(cur["icon"])
+        if cur.get("uv_index") is not None:
+            weather_state["uv_index"] = float(cur["uv_index"])
+        if cur.get("solar_radiation") is not None:
+            weather_state["solar_radiation"] = int(round(float(cur["solar_radiation"])))
+        if cur.get("lightning_strike_count") is not None:
+            weather_state["lightning_strike_count"] = int(cur["lightning_strike_count"])
+        if cur.get("lightning_strike_last_distance") is not None:
+            weather_state["lightning_strike_last_distance"] = float(
+                cur["lightning_strike_last_distance"]
+            )
+        if cur.get("conditions"):
+            weather_state["conditions"] = str(cur["conditions"])
+        if cur.get("icon"):
+            weather_state["icon"] = str(cur["icon"])
     except:
         pass
-
     try:
-        r = requests.get(f"{WEATHER_API_URL}/api/weather/advanced/current", timeout=3)
-        if r.status_code == 200:
-            adv = r.json()
-            if adv.get("wbgt_f") is not None:
-                weather_state["wbgt_f"] = float(adv["wbgt_f"])
-            if adv.get("vpd_kpa") is not None:
-                weather_state["vpd_kpa"] = float(adv["vpd_kpa"])
-            if adv.get("delta_t_c") is not None:
-                weather_state["delta_t_c"] = float(adv["delta_t_c"])
-            if adv.get("air_density_kg_m3") is not None:
-                weather_state["air_density_kg_m3"] = float(adv["air_density_kg_m3"])
-            if adv.get("illuminance_lux") is not None:
-                weather_state["illuminance_lux"] = int(
-                    round(float(adv["illuminance_lux"]))
-                )
+        adv = requests.get(
+            f"{WEATHER_API_URL}/api/weather/advanced/current", timeout=3
+        ).json()
+        if adv.get("wbgt_f") is not None:
+            weather_state["wbgt_f"] = float(adv["wbgt_f"])
+        if adv.get("vpd_kpa") is not None:
+            weather_state["vpd_kpa"] = float(adv["vpd_kpa"])
+        if adv.get("delta_t_c") is not None:
+            weather_state["delta_t_c"] = float(adv["delta_t_c"])
+        if adv.get("air_density_kg_m3") is not None:
+            weather_state["air_density_kg_m3"] = float(adv["air_density_kg_m3"])
+        if adv.get("illuminance_lux") is not None:
+            weather_state["illuminance_lux"] = int(round(float(adv["illuminance_lux"])))
     except:
         pass
-
     try:
-        r = requests.get(f"{WEATHER_API_URL}/api/weather/aviation", timeout=3)
-        if r.status_code == 200:
-            av = r.json()
-            if av.get("density_altitude_ft") is not None:
-                weather_state["density_altitude_ft"] = int(
-                    round(float(av["density_altitude_ft"]))
-                )
-            if av.get("station_pressure_inhg") is not None:
-                weather_state["station_pressure_inhg"] = float(
-                    av["station_pressure_inhg"]
-                )
-            if av.get("station_pressure_mb") is not None:
-                weather_state["station_pressure_mb"] = int(
-                    round(float(av["station_pressure_mb"]))
-                )
+        av = requests.get(f"{WEATHER_API_URL}/api/weather/aviation", timeout=3).json()
+        if av.get("density_altitude_ft") is not None:
+            weather_state["density_altitude_ft"] = int(
+                round(float(av["density_altitude_ft"]))
+            )
+        if av.get("station_pressure_inhg") is not None:
+            weather_state["station_pressure_inhg"] = float(av["station_pressure_inhg"])
+        if av.get("station_pressure_mb") is not None:
+            weather_state["station_pressure_mb"] = int(
+                round(float(av["station_pressure_mb"]))
+            )
     except:
         pass
 
@@ -338,72 +308,60 @@ def poll_current_weather_apis():
 def poll_forecast_weather_apis():
     global weather_state
     try:
-        r = requests.get(f"{WEATHER_API_URL}/api/weather/forecast/hourly", timeout=4)
-        if r.status_code == 200:
-            hourly_list = r.json()
-            if isinstance(hourly_list, list) and hourly_list:
-                now_utc = datetime.now(timezone.utc)
-                upcoming = []
-                for item in hourly_list:
-                    t_raw = item.get("time", "")
-                    try:
-                        dt_utc = datetime.fromisoformat(t_raw.replace("Z", "+00:00"))
-                        if (dt_utc - now_utc).total_seconds() >= -3300:
-                            upcoming.append(
-                                {
-                                    "time": dt_utc.astimezone()
-                                    .strftime("%I %p")
-                                    .lstrip("0"),
-                                    "icon": str(item.get("icon", "partly-cloudy-day")),
-                                    "temp": int(round(float(item.get("temp_f", 75)))),
-                                    "pop": int(
-                                        round(float(item.get("precip_probability", 0)))
-                                    ),
-                                    "wind_dir": str(
-                                        item.get("wind_direction", "")
-                                    ).strip(),
-                                }
-                            )
-                    except ValueError:
-                        continue
-
-                if len(upcoming) < 6:
-                    upcoming = [
-                        {
-                            "time": str(item.get("time", ""))[11:16],
-                            "icon": str(item.get("icon", "partly-cloudy-day")),
-                            "temp": int(round(float(item.get("temp_f", 75)))),
-                            "pop": int(round(float(item.get("precip_probability", 0)))),
-                            "wind_dir": str(item.get("wind_direction", "")).strip(),
-                        }
-                        for item in hourly_list[:6]
-                    ]
-
-                weather_state["hourly"] = upcoming[:6]
-                if (
-                    not weather_state["wind_direction"]
-                    and upcoming
-                    and upcoming[0].get("wind_dir")
-                ):
-                    weather_state["wind_direction"] = upcoming[0]["wind_dir"]
+        hourly_list = requests.get(
+            f"{WEATHER_API_URL}/api/weather/forecast/hourly", timeout=4
+        ).json()
+        if isinstance(hourly_list, list) and hourly_list:
+            upcoming = []
+            for item in hourly_list:
+                try:
+                    dt_utc = datetime.fromisoformat(
+                        item.get("time", "").replace("Z", "+00:00")
+                    )
+                    if (dt_utc - datetime.now(timezone.utc)).total_seconds() >= -3300:
+                        upcoming.append(
+                            {
+                                "time": dt_utc.astimezone()
+                                .strftime("%I %p")
+                                .lstrip("0"),
+                                "icon": str(item.get("icon", "partly-cloudy-day")),
+                                "temp": int(round(float(item.get("temp_f", 75)))),
+                                "pop": int(
+                                    round(float(item.get("precip_probability", 0)))
+                                ),
+                                "wind_dir": str(item.get("wind_direction", "")).strip(),
+                            }
+                        )
+                except:
+                    continue
+            if len(upcoming) < 6:
+                upcoming = [
+                    {
+                        "time": str(item.get("time", ""))[11:16],
+                        "icon": str(item.get("icon", "partly-cloudy-day")),
+                        "temp": int(round(float(item.get("temp_f", 75)))),
+                        "pop": int(round(float(item.get("precip_probability", 0)))),
+                    }
+                    for item in hourly_list[:6]
+                ]
+            weather_state["hourly"] = upcoming[:6]
     except:
         pass
-
     try:
-        r = requests.get(f"{WEATHER_API_URL}/api/weather/forecast/daily", timeout=4)
-        if r.status_code == 200:
-            daily_list = r.json()
-            if isinstance(daily_list, list) and daily_list:
-                weather_state["daily"] = [
-                    {
-                        "day": str(d.get("day_name", "---"))[:3],
-                        "icon": str(d.get("icon", "partly-cloudy-day")),
-                        "hi": int(round(float(d.get("temp_max_f", 80)))),
-                        "lo": int(round(float(d.get("temp_min_f", 65)))),
-                        "pop": int(round(float(d.get("precip_probability", 0)))),
-                    }
-                    for d in daily_list[:5]
-                ]
+        daily_list = requests.get(
+            f"{WEATHER_API_URL}/api/weather/forecast/daily", timeout=4
+        ).json()
+        if isinstance(daily_list, list) and daily_list:
+            weather_state["daily"] = [
+                {
+                    "day": str(d.get("day_name", "---"))[:3],
+                    "icon": str(d.get("icon", "partly-cloudy-day")),
+                    "hi": int(round(float(d.get("temp_max_f", 80)))),
+                    "lo": int(round(float(d.get("temp_min_f", 65)))),
+                    "pop": int(round(float(d.get("precip_probability", 0)))),
+                }
+                for d in daily_list[:5]
+            ]
     except:
         pass
 
@@ -414,13 +372,11 @@ def parse_tempest_mqtt(payload_str: str):
         data = json.loads(payload_str)
     except:
         return
-
-    msg_type = data.get("type", "")
-    if msg_type == "rapid_wind" and "ob" in data and len(data["ob"]) >= 3:
+    if data.get("type") == "rapid_wind" and len(data.get("ob", [])) >= 3:
         weather_state["wind_avg_mph"] = float(data["ob"][1]) * 2.23694
         weather_state["wind_deg"] = int(data["ob"][2])
         weather_state["wind_direction"] = deg_to_cardinal(weather_state["wind_deg"])
-    elif msg_type == "evt_strike" and "evt" in data and len(data["evt"]) >= 2:
+    elif data.get("type") == "evt_strike" and len(data.get("evt", [])) >= 2:
         weather_state["lightning_last_time"] = (
             datetime.fromtimestamp(data["evt"][0]).strftime("%I:%M %p").lstrip("0")
         )
@@ -434,20 +390,6 @@ def build_weather_commands() -> list:
     w = weather_state
     sunrise_str, sunset_str, _, _ = calculate_sun_times(HOME_LAT, HOME_LON)
 
-    cond_text = w["conditions"]
-    cond_icon = resolve_fa_icon(w["icon"])
-
-    temp_str = f"{w['temp_f']:.1f}°F" if w["temp_f"] is not None else "--.-°F"
-    feels_str = (
-        f"Feels Like {w['feels_like_f']:.1f}°F"
-        if w["feels_like_f"] is not None
-        else "Feels Like --.-°F"
-    )
-    hum_str = (
-        f"{w['relative_humidity']}%" if w["relative_humidity"] is not None else "--%"
-    )
-    dew_str = f"{w['dew_point_f']:.1f}°F" if w["dew_point_f"] is not None else "--°F"
-
     if w["wind_direction"] and w["wind_deg"] is not None:
         wind_dir_str = f"Dir: {w['wind_direction']} ({w['wind_deg']:03d}°)"
     elif w["wind_direction"]:
@@ -458,8 +400,7 @@ def build_weather_commands() -> list:
         wind_dir_str = "Dir: Calm" if w["wind_avg_mph"] < 1.0 else "Dir: Variable"
 
     ltg_cnt = w["lightning_strike_count"]
-    ltg_dist = w["lightning_strike_last_distance"]
-    if ltg_cnt == 0 and ltg_dist is None:
+    if ltg_cnt == 0 and w["lightning_strike_last_distance"] is None:
         ltg_main, ltg_sub = "None (1h)", "Dist: -- mi | Count: 0"
     else:
         ltg_main = (
@@ -467,8 +408,11 @@ def build_weather_commands() -> list:
             if w["lightning_last_time"] != "None"
             else f"{ltg_cnt} Strikes"
         )
-        dist_txt = f"{ltg_dist:.1f} mi" if ltg_dist is not None else "-- mi"
-        ltg_sub = f"Dist: {dist_txt} | Count: {ltg_cnt}"
+        ltg_sub = (
+            f"Dist: {w['lightning_strike_last_distance']:.1f} mi | Count: {ltg_cnt}"
+            if w["lightning_strike_last_distance"] is not None
+            else f"Dist: -- mi | Count: {ltg_cnt}"
+        )
 
     wbgt_val = w["wbgt_f"]
     if wbgt_val is None:
@@ -536,24 +480,20 @@ def build_weather_commands() -> list:
     if w["delta_t_c"] is not None:
         da_str += f" | ΔT: {w['delta_t_c']:.1f}°C"
 
-    slp_str = (
-        f"{w['sea_level_pressure_inhg']:.2f} inHg"
-        if w["sea_level_pressure_inhg"] is not None
-        else "--.-- inHg"
+    stn_sub = (
+        f"Stn: {w['station_pressure_inhg']:.2f} inHg ({w['station_pressure_mb']} mb)"
+        if w["station_pressure_inhg"] is not None
+        else "Station Status: Online"
     )
-    if w["station_pressure_inhg"] is not None and w["station_pressure_mb"] is not None:
-        stn_sub = f"Stn: {w['station_pressure_inhg']:.2f} inHg ({w['station_pressure_mb']} mb)"
-    elif w["air_density_kg_m3"] is not None:
-        stn_sub = f"Air Density: {w['air_density_kg_m3']:.3f} kg/m³"
-    else:
-        stn_sub = "Station Status: Online"
 
     cmds = [
-        f"p1b10.text={temp_str}",
-        f"p1b11.text={cond_icon}",
-        f"p1b12.text={cond_text}",
-        f"p1b13.text={feels_str}",
-        f"p1b14.text=Humidity: {hum_str} | Dew: {dew_str}",
+        f"p1b10.text={f'{w['temp_f']:.1f}°F' if w['temp_f'] is not None else '--.-°F'}",
+        f"p1b11.src={resolve_png_icon(w['icon'])}",
+        f"p1b12.text={w['conditions']}",
+        f"p1b13.text=Feels Like {w['feels_like_f']:.1f}°F"
+        if w["feels_like_f"] is not None
+        else "Feels Like --.-°F",
+        f"p1b14.text=Humidity: {f'{w['relative_humidity']}%' if w['relative_humidity'] is not None else '--%'} | Dew: {f'{w['dew_point_f']:.1f}°F' if w['dew_point_f'] is not None else '--°F'}",
         f"p1b21.text={w['wind_avg_mph']:.1f} ({w['wind_gust_mph']:.1f}) mph",
         f"p1b22.text={wind_dir_str}",
         f"p1b24.text={w['precip_in']:.2f} in",
@@ -561,7 +501,8 @@ def build_weather_commands() -> list:
         f"p1b27.text={ltg_main}",
         f"p1b28.text={ltg_sub}",
         f"p1b30.text={w['illuminance_lux']:,} lux",
-        f"p1b31.text=\uf185 {sunrise_str}   \uf186 {sunset_str}",
+        f"p1b31.text={sunrise_str}",
+        f"p1b32.text={sunset_str}",
         f"p1b41.text={wbgt_str}",
         f"p1b41.text_color={wbgt_color}",
         f"p1b42.text={wbgt_label}",
@@ -570,68 +511,59 @@ def build_weather_commands() -> list:
         f"p1b45.text_color={vpd_color}",
         f"p1b46.text={vpd_label}",
         f"p1b47.text={da_str}",
-        f"p1b49.text={slp_str}",
+        f"p1b49.text={f'{w['sea_level_pressure_inhg']:.2f} inHg' if w['sea_level_pressure_inhg'] is not None else '--.-- inHg'}",
         f"p1b50.text=Trend: {w['pressure_trend']}",
         f"p1b51.text={stn_sub}",
     ]
 
     for idx, hr in enumerate(w.get("hourly", [])[:6]):
-        h_icon = resolve_fa_icon(hr.get("icon", "partly-cloudy-day"))
         cmds.extend(
             [
                 f"p3b{20 + idx}.text={hr['time']}",
-                f"p3b{30 + idx}.text={h_icon}",
+                f"p3b{30 + idx}.src={resolve_png_icon(hr.get('icon'))}",
                 f"p3b{40 + idx}.text={hr['temp']}°F",
-                f"p3b{50 + idx}.text=\uf043 {hr['pop']}%",
+                f"p3b{50 + idx}.text={hr['pop']}%",
             ]
         )
-
     for idx, day in enumerate(w.get("daily", [])[:5]):
-        d_icon = resolve_fa_icon(day.get("icon", "partly-cloudy-day"))
         cmds.extend(
             [
                 f"p3b{60 + idx}.text={day['day']}",
-                f"p3b{70 + idx}.text={d_icon}",
+                f"p3b{70 + idx}.src={resolve_png_icon(day.get('icon'))}",
                 f"p3b{80 + idx}.text={day['hi']}° / {day['lo']}°",
-                f"p3b{90 + idx}.text=\uf043 {day['pop']}%",
+                f"p3b{90 + idx}.text={day['pop']}%",
             ]
         )
 
     return cmds
 
 
-# ==============================================================================
-# AVIATION & METAR
-# ==============================================================================
 def fetch_dual_metars() -> list:
     metar_map = {
         "KSFB": {"cat": "VFR", "raw": "KSFB: METAR unavailable"},
         "KORL": {"cat": "VFR", "raw": "KORL: METAR unavailable"},
     }
     try:
-        r = requests.get(METAR_URL, timeout=5)
-        for item in r.json():
-            icao = item.get("icaoId", "")
-            if icao in metar_map:
-                metar_map[icao]["cat"] = item.get("fltCat", "VFR")
-                metar_map[icao]["raw"] = item.get("rawOb", f"{icao}: No raw text")
+        for item in requests.get(METAR_URL, timeout=5).json():
+            if item.get("icaoId", "") in metar_map:
+                metar_map[item["icaoId"]]["cat"] = item.get("fltCat", "VFR")
+                metar_map[item["icaoId"]]["raw"] = item.get(
+                    "rawOb", f"{item['icaoId']}: No raw text"
+                )
     except:
         pass
-
-    sfb_cat, orl_cat = metar_map["KSFB"]["cat"], metar_map["KORL"]["cat"]
     return [
-        f"p2b39.text=[{sfb_cat}]",
-        f"p2b39.text_color={FLIGHT_CAT_COLORS.get(sfb_cat, '#2dd4bf')}",
+        f"p2b39.text=[{metar_map['KSFB']['cat']}]",
+        f"p2b39.text_color={FLIGHT_CAT_COLORS.get(metar_map['KSFB']['cat'], '#2dd4bf')}",
         f"p2b40.text={metar_map['KSFB']['raw']}",
-        f"p2b42.text=[{orl_cat}]",
-        f"p2b42.text_color={FLIGHT_CAT_COLORS.get(orl_cat, '#2dd4bf')}",
+        f"p2b42.text=[{metar_map['KORL']['cat']}]",
+        f"p2b42.text_color={FLIGHT_CAT_COLORS.get(metar_map['KORL']['cat'], '#2dd4bf')}",
         f"p2b41.text={metar_map['KORL']['raw']}",
     ]
 
 
 def process_aviation(client: mqtt.Client) -> list:
     global revert_page_at, seen_close_aircraft
-
     now = time.time()
     seen_close_aircraft = {
         hx: ts
@@ -660,12 +592,9 @@ def process_aviation(client: mqtt.Client) -> list:
 
     if closest_dist <= PROXIMITY_RADIUS_NM:
         top_ac = closest_three[0]
-        top_callsign = top_ac.get(
-            "flight", top_ac.get("r", top_ac.get("hex", "UNK"))
-        ).strip()
         cmds.extend(
             [
-                f"p0b4.text=\uf072 ALERT: {top_callsign} ({closest_dist:.1f} NM)",
+                f"p0b4.text=ALERT: {top_ac.get('flight', top_ac.get('r', top_ac.get('hex', 'UNK'))).strip()} ({closest_dist:.1f} NM)",
                 "p0b4.text_color=#ef4444",
                 "p2b3.border_color=#ef4444",
             ]
@@ -680,47 +609,32 @@ def process_aviation(client: mqtt.Client) -> list:
     else:
         cmds.extend(
             [
-                "p0b4.text=\uf072 ADS-B: CLEAR (<3NM)",
+                "p0b4.text=ADS-B: CLEAR (<3NM)",
                 "p0b4.text_color=#2dd4bf",
                 "p2b3.border_color=#334155",
             ]
         )
 
-    base_ids = [10, 20, 30]
-    for idx, base_id in enumerate(base_ids):
+    for idx, base_id in enumerate([10, 20, 30]):
         if idx < len(closest_three):
             ac = closest_three[idx]
-            callsign = (
-                ac.get("flight") or ac.get("r") or ac.get("hex") or "N/A"
-            ).strip()
-            ac_type = (ac.get("t") or "---").strip()
-            reg = (ac.get("r") or "N/A").strip()
-            db_flags = int(ac.get("dbFlags", 0) or 0)
-            tag = (
-                "[MILITARY]"
-                if (db_flags & 1)
-                else "[LEO / GOV]"
-                if (db_flags & 2)
-                else "[CIVIL]"
-            )
             alt = ac.get("alt_baro", "---")
             vrate = ac.get("baro_rate", ac.get("geom_rate", 0)) or 0
-
-            alt_str = f"{alt:,} ft" if isinstance(alt, int) else f"{alt} ft"
-            vrate_str = (
-                f"+{vrate} fpm"
-                if isinstance(vrate, (int, float)) and vrate > 0
-                else f"{vrate} fpm"
+            tag = (
+                "[MILITARY]"
+                if (int(ac.get("dbFlags", 0)) & 1)
+                else "[LEO / GOV]"
+                if (int(ac.get("dbFlags", 0)) & 2)
+                else "[CIVIL]"
             )
-
             cmds.extend(
                 [
-                    f"p2b{base_id}.text={callsign[:9]}",
-                    f"p2b{base_id + 1}.text={ac_type[:5]}",
+                    f"p2b{base_id}.text={(ac.get('flight') or ac.get('r') or ac.get('hex') or 'N/A').strip()[:9]}",
+                    f"p2b{base_id + 1}.text={(ac.get('t') or '---').strip()[:5]}",
                     f"p2b{base_id + 2}.text={ac['dist_nm']:.1f} NM  {ac['brg']:03d}°",
                     f"p2b{base_id + 3}.text={int(ac.get('gs', 0))} kts",
-                    f"p2b{base_id + 4}.text={alt_str} ({vrate_str})",
-                    f"p2b{base_id + 5}.text=Reg: {reg}  |  {(ac.get('desc') or 'UNKNOWN AIRCRAFT TYPE').strip()[:34]}  |  Sqk: {ac.get('squawk', '----')}  |  {tag}",
+                    f"p2b{base_id + 4}.text={f'{alt:,} ft' if isinstance(alt, int) else f'{alt} ft'} ({f'+{vrate} fpm' if isinstance(vrate, (int, float)) and vrate > 0 else f'{vrate} fpm'})",
+                    f"p2b{base_id + 5}.text=Reg: {(ac.get('r') or 'N/A').strip()}  |  {(ac.get('desc') or 'UNKNOWN AIRCRAFT TYPE').strip()[:34]}  |  Sqk: {ac.get('squawk', '----')}  |  {tag}",
                 ]
             )
         else:
@@ -734,15 +648,10 @@ def process_aviation(client: mqtt.Client) -> list:
                     f"p2b{base_id + 5}.text=No aircraft in slot #{idx + 1}",
                 ]
             )
-
     return cmds
 
 
-# ==============================================================================
-# MQTT CALLBACKS & MAIN LOOP
-# ==============================================================================
 def on_connect(client, userdata, flags, rc, properties=None):
-    print(f"[MQTT] Connected to {MQTT_BROKER}:{MQTT_PORT} (rc={rc})")
     client.subscribe(f"hasp/{HASP_NODE}/state/p0b1")
     client.subscribe(f"hasp/{HASP_NODE}/state/page")
     client.subscribe(TEMPEST_MQTT_TOPIC)
@@ -751,7 +660,6 @@ def on_connect(client, userdata, flags, rc, properties=None):
 def on_message(client, userdata, msg):
     global previous_page, revert_page_at
     topic, payload = msg.topic, msg.payload.decode("utf-8", errors="ignore")
-
     if topic.startswith(f"hasp/{HASP_NODE}/"):
         if topic.endswith("/state/page"):
             try:
@@ -784,7 +692,6 @@ def publish_batch(client: mqtt.Client, commands: list):
 def main():
     global revert_page_at, cached_metar_cmds, last_metar_fetch
     global last_api_current_fetch, last_api_forecast_fetch, last_weather_push
-
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     if MQTT_USER:
         client.username_pw_set(MQTT_USER, MQTT_PASS)
@@ -792,39 +699,30 @@ def main():
     client.on_message = on_message
     client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
     client.loop_start()
-
     try:
         while True:
             now = time.time()
             batch_commands = []
-
             if revert_page_at and now >= revert_page_at:
                 client.publish(f"hasp/{HASP_NODE}/command/page", str(previous_page))
                 revert_page_at = None
-
             if now - last_metar_fetch >= 600:
                 cached_metar_cmds = fetch_dual_metars()
                 last_metar_fetch = now
-
             if now - last_api_current_fetch >= 15:
                 poll_current_weather_apis()
-                update_backlight(client)  # Re-evaluate Day/Night cycle
+                update_backlight(client)
                 last_api_current_fetch = now
-
             if now - last_api_forecast_fetch >= 60:
                 poll_forecast_weather_apis()
                 last_api_forecast_fetch = now
-
             if now - last_weather_push >= 4:
                 batch_commands.extend(build_weather_commands())
                 batch_commands.extend(cached_metar_cmds)
                 last_weather_push = now
-
             batch_commands.extend(process_aviation(client))
             publish_batch(client, batch_commands)
-
             time.sleep(2)
-
     except KeyboardInterrupt:
         pass
     finally:
