@@ -258,10 +258,21 @@ async def get_current_weather() -> Dict[str, Any]:
       |> keep(columns: ["_field", "_value"])
     '''
 
+    # NEW: Flux query to sum the 1-minute rain_mm chunks starting from midnight local time
+    daily_rain_query = f'''
+    import "timezone"
+    option location = timezone.location(name: "America/New_York")
+    from(bucket: "{INFLUXDB_BUCKET}")
+      |> range(start: today())
+      |> filter(fn: (r) => r["_measurement"] == "weatherflow_obs" and r["_field"] == "rain_mm")
+      |> sum()
+    '''
+
     try:
         query_api = app.state.influx_client.query_api()
         obs_tables = await query_api.query(obs_query)
         hourly_tables = await query_api.query(hourly_condition_query)
+        rain_tables = await query_api.query(daily_rain_query)
 
         raw_data = {}
         for table in obs_tables:
@@ -272,6 +283,12 @@ async def get_current_weather() -> Dict[str, Any]:
             for record in table.records:
                 raw_data[record.get_field()] = record.get_value()
 
+        # Extract the summed daily rain total
+        daily_rain_mm = 0.0
+        for table in rain_tables:
+            for record in table.records:
+                daily_rain_mm = record.get_value()
+
         return {
             "time": datetime.now(timezone.utc).isoformat(),
             "temp_f": c_to_f(raw_data.get("air_temperature")),
@@ -281,7 +298,7 @@ async def get_current_weather() -> Dict[str, Any]:
             "wind_avg_mph": ms_to_mph(raw_data.get("wind_avg")),
             "wind_gust_mph": ms_to_mph(raw_data.get("wind_gust")),
             "wind_direction": raw_data.get("wind_direction_cardinal", ""),
-            "precip_in": mm_to_inches(raw_data.get("precip_accum_local_day")),
+            "precip_in": mm_to_inches(daily_rain_mm),  # Updated to use the summed value
             "sea_level_pressure_inhg": hpa_to_inhg(
                 raw_data.get("calculated_sea_level_pressure")
             ),
