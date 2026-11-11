@@ -241,6 +241,7 @@ async def get_current_weather() -> Dict[str, Any]:
     start_str = current_hour_start.strftime("%Y-%m-%dT%H:%M:%SZ")
     stop_str = current_hour_end.strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    # 1. Base Observations Query
     obs_query = f'''
     from(bucket: "{INFLUXDB_BUCKET}")
       |> range(start: -1h)
@@ -249,6 +250,7 @@ async def get_current_weather() -> Dict[str, Any]:
       |> keep(columns: ["_field", "_value"])
     '''
 
+    # 2. Hourly Conditions Query
     hourly_condition_query = f'''
     from(bucket: "{INFLUXDB_BUCKET}")
       |> range(start: {start_str}, stop: {stop_str})
@@ -258,14 +260,16 @@ async def get_current_weather() -> Dict[str, Any]:
       |> keep(columns: ["_field", "_value"])
     '''
 
-    # NEW: Flux query to sum the 1-minute rain_mm chunks starting from midnight local time
+    # 3. FIX: Get the absolute maximum daily accumulation since midnight
     daily_rain_query = f'''
     import "timezone"
     option location = timezone.location(name: "America/New_York")
     from(bucket: "{INFLUXDB_BUCKET}")
       |> range(start: today())
-      |> filter(fn: (r) => r["_measurement"] == "weatherflow_obs" and r["_field"] == "rain_mm")
-      |> sum()
+      |> filter(fn: (r) => r["_measurement"] == "weatherflow_obs")
+      |> filter(fn: (r) => r["_field"] == "precip_accum_local_day")
+      |> max()
+      |> keep(columns: ["_field", "_value"])
     '''
 
     try:
@@ -283,11 +287,15 @@ async def get_current_weather() -> Dict[str, Any]:
             for record in table.records:
                 raw_data[record.get_field()] = record.get_value()
 
-        # Extract the summed daily rain total
+        # Safely extract the max daily rain (ratchet mechanism)
         daily_rain_mm = 0.0
         for table in rain_tables:
             for record in table.records:
-                daily_rain_mm = record.get_value()
+                if record.get_value() is not None:
+                    daily_rain_mm = float(record.get_value())
+
+        # Direct conversion to preserve decimal places
+        precip_inches = round(daily_rain_mm / 25.4, 2)
 
         return {
             "time": datetime.now(timezone.utc).isoformat(),
@@ -298,7 +306,7 @@ async def get_current_weather() -> Dict[str, Any]:
             "wind_avg_mph": ms_to_mph(raw_data.get("wind_avg")),
             "wind_gust_mph": ms_to_mph(raw_data.get("wind_gust")),
             "wind_direction": raw_data.get("wind_direction_cardinal", ""),
-            "precip_in": mm_to_inches(daily_rain_mm),  # Updated to use the summed value
+            "precip_in": precip_inches,
             "sea_level_pressure_inhg": hpa_to_inhg(
                 raw_data.get("calculated_sea_level_pressure")
             ),
