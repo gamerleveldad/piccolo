@@ -267,7 +267,7 @@ async def get_current_weather() -> Dict[str, Any]:
     from(bucket: "{INFLUXDB_BUCKET}")
       |> range(start: today())
       |> filter(fn: (r) => r["_measurement"] == "weatherflow_obs")
-      |> filter(fn: (r) => r["_field"] == "precip_accum_local_day")
+      |> filter(fn: (r) => r["_field"] == "local_daily_rain_accumulation_final")
       |> max()
       |> keep(columns: ["_field", "_value"])
     '''
