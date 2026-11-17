@@ -6,6 +6,7 @@ openHASP 5-Inch (800x480) Telemetry Publisher for Piccolo (Raspberry Pi 5)
 import json
 import math
 import os
+import re
 import time
 from datetime import datetime, timezone
 
@@ -33,6 +34,39 @@ METAR_URL = "https://aviationweather.gov/api/data/metar?ids=KSFB,KORL&format=jso
 PROXIMITY_RADIUS_NM = 3.0
 ALERT_DISPLAY_SECONDS = 10
 AIRCRAFT_COOLDOWN_SECONDS = 300
+EMERGENCY_SQUAWKS = {"7500", "7600", "7700"}
+
+AIRLINE_LOGO_WHITELIST = {
+    "SWA",
+    "NKS",
+    "DAL",
+    "JBU",
+    "FFT",
+    "AAL",
+    "UAL",
+    "MXY",
+    "ACA",
+    "AFR",
+    "BAW",
+    "UAE",
+    "ASA",
+    "AAY",
+    "SCX",
+    "EIN",
+    "AMX",
+    "VIR",
+    "AJT",
+    "ABX",
+    "CKS",
+    "GTI",
+    "UPS",
+    "MTN",
+    "FDX",
+    "EJA",
+    "LXJ",
+    "VJT",
+    "WUP",
+}
 
 FLIGHT_CAT_COLORS = {
     "VFR": "#2dd4bf",
@@ -90,7 +124,7 @@ current_backlight_mode = None
 
 
 # ==============================================================================
-# PNG ICON MAPPING & MATH HELPERS
+# ICON, COLOR & MATH HELPERS
 # ==============================================================================
 def resolve_png_icon(icon_str: str) -> str:
     s = (icon_str or "").lower().strip()
@@ -115,6 +149,33 @@ def resolve_png_icon(icon_str: str) -> str:
     if "clear" in s or "sun" in s:
         return "L:/cond_sun.png"
     return "L:/cond_cloudy.png"
+
+
+def resolve_aircraft_icon(callsign: str, db_flags: int) -> str:
+    if db_flags & 1:
+        return "L:/air_mil.png"
+    match = re.match(r"^([A-Z]{3})", (callsign or "").strip().upper())
+    if match:
+        prefix = match.group(1)
+        if prefix in AIRLINE_LOGO_WHITELIST:
+            return f"L:/air_{prefix}.png"
+    return "L:/air_generic.png"
+
+
+def get_temp_color(temp_f) -> str:
+    if temp_f is None:
+        return "#ffffff"
+    if temp_f < 30.0:
+        return "#2563eb"  # Dark Blue
+    if temp_f < 60.0:
+        return "#38bdf8"  # Light Blue
+    if temp_f < 80.0:
+        return "#22c55e"  # Green
+    if temp_f <= 90.0:
+        return "#facc15"  # Yellow
+    if temp_f <= 100.0:
+        return "#ef4444"  # Red
+    return "#b91c1c"  # Dark Red
 
 
 def haversine_nm(lat1, lon1, lat2, lon2):
@@ -389,11 +450,14 @@ def build_weather_commands() -> list:
     sunrise_str, sunset_str, _, _ = calculate_sun_times(HOME_LAT, HOME_LON)
 
     temp_str = f"{w['temp_f']:.1f}°F" if w["temp_f"] is not None else "--.-°F"
+    temp_color = get_temp_color(w["temp_f"])
     feels_str = (
         f"Feels Like {w['feels_like_f']:.1f}°F"
         if w["feels_like_f"] is not None
         else "Feels Like --.-°F"
     )
+    feels_color = get_temp_color(w["feels_like_f"])
+
     hum_str = (
         f"{w['relative_humidity']}%" if w["relative_humidity"] is not None else "--%"
     )
@@ -426,6 +490,7 @@ def build_weather_commands() -> list:
         dist_txt = f"{ltg_dist:.1f} mi" if ltg_dist is not None else "-- mi"
         ltg_sub = f"Dist: {dist_txt} | Count: {ltg_cnt}"
 
+    # WBGT 5-color comfort gradient (Green -> Red)
     wbgt_val = w["wbgt_f"]
     if wbgt_val is None:
         wbgt_str, wbgt_label, wbgt_color = "--.-°F", "Awaiting Sensor", "#94a3b8"
@@ -433,47 +498,54 @@ def build_weather_commands() -> list:
         wbgt_str, wbgt_label, wbgt_color = (
             f"{wbgt_val:.1f}°F",
             "Pleasant / Low Stress",
-            "#2dd4bf",
+            "#22c55e",
         )
     elif wbgt_val <= 82.0:
         wbgt_str, wbgt_label, wbgt_color = (
             f"{wbgt_val:.1f}°F",
             "Warm / Moderate Caution",
-            "#facc15",
+            "#a3e635",
         )
     elif wbgt_val <= 86.0:
         wbgt_str, wbgt_label, wbgt_color = (
             f"{wbgt_val:.1f}°F",
             "Unpleasant / High Heat",
-            "#fb923c",
+            "#facc15",
         )
-    elif wbgt_val < 90.0:
+    elif wbgt_val <= 90.0:
         wbgt_str, wbgt_label, wbgt_color = (
             f"{wbgt_val:.1f}°F",
             "Oppressive / Very High",
-            "#ef4444",
+            "#fb923c",
         )
     else:
         wbgt_str, wbgt_label, wbgt_color = (
             f"{wbgt_val:.1f}°F",
             "Extreme Heat Danger",
-            "#e879f9",
+            "#ef4444",
         )
 
+    # VPD 5-color comfort gradient (Green = Ideal Comfort -> Red = Extreme Dryness)
     vpd_val = w["vpd_kpa"]
     if vpd_val is None:
         vpd_str, vpd_label, vpd_color = "-.-- kPa", "Awaiting Sensor", "#94a3b8"
+    elif 0.40 <= vpd_val <= 1.20:
+        vpd_str, vpd_label, vpd_color = (
+            f"{vpd_val:.2f} kPa",
+            "Pleasant / Ideal Comfort",
+            "#22c55e",
+        )
     elif vpd_val < 0.40:
         vpd_str, vpd_label, vpd_color = (
             f"{vpd_val:.2f} kPa",
             "Clammy / Saturated Air",
-            "#38bdf8",
+            "#a3e635",
         )
-    elif vpd_val <= 1.20:
+    elif vpd_val <= 1.40:
         vpd_str, vpd_label, vpd_color = (
             f"{vpd_val:.2f} kPa",
-            "Pleasant / Ideal Comfort",
-            "#2dd4bf",
+            "Mild Dryness / Breezy",
+            "#a3e635",
         )
     elif vpd_val <= 1.60:
         vpd_str, vpd_label, vpd_color = (
@@ -481,11 +553,17 @@ def build_weather_commands() -> list:
             "Dry / Fast Evaporation",
             "#facc15",
         )
+    elif vpd_val <= 2.00:
+        vpd_str, vpd_label, vpd_color = (
+            f"{vpd_val:.2f} kPa",
+            "Very Dry / High Stress",
+            "#fb923c",
+        )
     else:
         vpd_str, vpd_label, vpd_color = (
             f"{vpd_val:.2f} kPa",
-            "Parched / High Dryness",
-            "#fb923c",
+            "Parched / Extreme Dryness",
+            "#ef4444",
         )
 
     da_str = f"Density Alt: {w['density_altitude_ft']:+,} ft"
@@ -500,35 +578,37 @@ def build_weather_commands() -> list:
     cmds = [
         # Main Conditions (Top Left)
         f"p1b10.text={temp_str}",
+        f"p1b10.text_color={temp_color}",
         f"p1b11.src={resolve_png_icon(w['icon'])}",
         f"p1b12.text={w['conditions']}",
         f"p1b13.text={feels_str}",
+        f"p1b13.text_color={feels_color}",
         f"p1b14.text=Humidity: {hum_str} | Dew: {dew_str}",
         # Wind Block (Top Middle)
         f"p1b21.text={w['wind_avg_mph']:.1f} ({w['wind_gust_mph']:.1f}) mph",
         f"p1b22.text={wind_dir_str}",
-        # WBGT Block (Top Right - Swapped with Rain)
+        # WBGT Block (Top Right)
         f"p1b24.text={wbgt_str}",
         f"p1b24.text_color={wbgt_color}",
         f"p1b25.text={wbgt_label}",
         "p1b25.text_color=#f8fafc",
-        # Lightning Block (Middle Middle - Unchanged)
+        # Lightning Block (Middle Middle)
         f"p1b27.text={ltg_main}",
         f"p1b28.text={ltg_sub}",
         "p1b28.text_color=#facc15",
-        # VPD Deficit Block (Middle Right - Swapped with Solar Lux)
+        # VPD Deficit Block (Middle Right)
         f"p1b30.text={vpd_str}",
         f"p1b30.text_color={vpd_color}",
         f"p1b31.text={vpd_label}",
         "p1b31.text_color=#f8fafc",
-        # Rain & Chance Block (Bottom Left - Swapped with WBGT + Rain Chance added)
+        # Rain & Chance Block (Bottom Left)
         f"p1b41.text={w['precip_in']:.2f} in",
         "p1b41.text_color=#ffffff",
         f"p1b42.text=Rate: {w['rain_rate_in_hr']:.2f} in/hr",
         "p1b42.text_color=#38bdf8",
-        f"p1b43.text=Today's Chance: {w['today_pop']}%",
+        f"p1b43.text=Rain Chance: {w['today_pop']}%",
         "p1b43.text_color=#2dd4bf",
-        # Solar Lux & UV & Sun Block (Bottom Middle - Swapped with VPD + UV Index added)
+        # Solar Lux & UV & Sun Block (Bottom Middle)
         f"p1b45.text={w['illuminance_lux']:,} lux",
         "p1b45.text_color=#facc15",
         f"p1b46.text=UV Index: {w['uv_index']:.2f} | {w['solar_radiation']} W/m²",
@@ -610,26 +690,35 @@ def process_aviation(client: mqtt.Client) -> list:
 
     valid_aircraft.sort(key=lambda x: x["dist_nm"])
     closest_three = valid_aircraft[:3]
-    closest_dist = closest_three[0]["dist_nm"] if closest_three else 99.9
 
     now_label = datetime.now().strftime("%I:%M %p | %b %d").lstrip("0")
     cmds = [
         f"p0b5.text={now_label}",
-        f"p2b2.text={len(valid_aircraft)} Aircraft Tracked | Closest: {closest_dist:.1f} NM",
+        f"p2b2.text={len(valid_aircraft)} Tracked",
     ]
 
-    if closest_dist <= PROXIMITY_RADIUS_NM:
+    # Top Toolbar: Always display nearest aircraft (Callsign, Description, Dist, Brg, Alt)
+    if closest_three:
         top_ac = closest_three[0]
         top_cs = (
             top_ac.get("flight") or top_ac.get("r") or top_ac.get("hex") or "UNK"
-        ).strip()
+        ).strip()[:8]
+        top_desc = (top_ac.get("desc") or top_ac.get("t") or "UNKNOWN").strip()[:18]
+        top_alt = top_ac.get("alt_baro", "---")
+        top_alt_str = f"{top_alt:,}ft" if isinstance(top_alt, int) else f"{top_alt}ft"
+        top_sqk = str(top_ac.get("squawk") or "").strip()
+        is_close = top_ac["dist_nm"] <= PROXIMITY_RADIUS_NM
+        is_emerg = top_sqk in EMERGENCY_SQUAWKS
+
+        bar_text = f"{top_cs} | {top_desc} | {top_ac['dist_nm']:.1f}NM {top_ac['brg']:03d}° | {top_alt_str}"
+        bar_color = "#ef4444" if (is_close or is_emerg) else "#2dd4bf"
         cmds.extend(
             [
-                f"p0b4.text=ALERT: {top_cs} ({closest_dist:.1f} NM)",
-                "p0b4.text_color=#ef4444",
-                "p2b3.border_color=#ef4444",
+                f"p0b4.text={bar_text}",
+                f"p0b4.text_color={bar_color}",
             ]
         )
+
         for ac in closest_three:
             hx = ac.get("hex", "unknown")
             if ac["dist_nm"] <= PROXIMITY_RADIUS_NM and hx not in seen_close_aircraft:
@@ -640,20 +729,22 @@ def process_aviation(client: mqtt.Client) -> list:
     else:
         cmds.extend(
             [
-                "p0b4.text=ADS-B: CLEAR (<3NM)",
-                "p0b4.text_color=#2dd4bf",
-                "p2b3.border_color=#334155",
+                "p0b4.text=ADS-B: No Traffic Tracked",
+                "p0b4.text_color=#94a3b8",
             ]
         )
 
+    # Page 2 Rows (Slots 1, 2, 3)
+    card_ids = [3, 4, 5]
     for idx, base_id in enumerate([10, 20, 30]):
+        card_id = card_ids[idx]
         if idx < len(closest_three):
             ac = closest_three[idx]
             cs = (ac.get("flight") or ac.get("r") or ac.get("hex") or "N/A").strip()[:9]
             ac_type = (ac.get("t") or "---").strip()[:5]
             reg = (ac.get("r") or "N/A").strip()
             desc = (ac.get("desc") or "UNKNOWN AIRCRAFT TYPE").strip()[:34]
-            sqk = ac.get("squawk", "----")
+            sqk = str(ac.get("squawk") or "----").strip()
             alt = ac.get("alt_baro", "---")
             vrate = ac.get("baro_rate", ac.get("geom_rate", 0)) or 0
             db_flags = int(ac.get("dbFlags", 0) or 0)
@@ -671,12 +762,26 @@ def process_aviation(client: mqtt.Client) -> list:
                 if isinstance(vrate, (int, float)) and vrate > 0
                 else f"{vrate} fpm"
             )
+            logo_src = resolve_aircraft_icon(cs, db_flags)
+
+            # Red border if emergency squawk (7500/7600/7700) or <3NM proximity alert
+            is_emerg_sqk = sqk in EMERGENCY_SQUAWKS
+            is_prox = ac["dist_nm"] <= PROXIMITY_RADIUS_NM
+            if is_emerg_sqk or is_prox:
+                border_col = "#ef4444"
+                border_w = 3 if is_emerg_sqk else 2
+            else:
+                border_col = "#334155"
+                border_w = 1
 
             cmds.extend(
                 [
+                    f"p2b{card_id}.border_color={border_col}",
+                    f"p2b{card_id}.border_width={border_w}",
+                    f"p2b{base_id + 6}.src={logo_src}",
                     f"p2b{base_id}.text={cs}",
                     f"p2b{base_id + 1}.text={ac_type}",
-                    f"p2b{base_id + 2}.text={ac['dist_nm']:.1f} NM  {ac['brg']:03d}°",
+                    f"p2b{base_id + 2}.text={ac['dist_nm']:.1f} NM {ac['brg']:03d}°",
                     f"p2b{base_id + 3}.text={int(ac.get('gs', 0))} kts",
                     f"p2b{base_id + 4}.text={alt_str} ({vrate_str})",
                     f"p2b{base_id + 5}.text=Reg: {reg}  |  {desc}  |  Sqk: {sqk}  |  {tag}",
@@ -685,6 +790,9 @@ def process_aviation(client: mqtt.Client) -> list:
         else:
             cmds.extend(
                 [
+                    f"p2b{card_id}.border_color=#334155",
+                    f"p2b{card_id}.border_width=1",
+                    f"p2b{base_id + 6}.src=L:/air_generic.png",
                     f"p2b{base_id}.text=---",
                     f"p2b{base_id + 1}.text=----",
                     f"p2b{base_id + 2}.text=--.- NM ---°",
