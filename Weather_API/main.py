@@ -26,7 +26,6 @@ PG_PASS = os.environ.get("POSTGRES_PASSWORD")
 # --- Lifespan Resource Management (Connection Pooling) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Create persistent InfluxDB client & Postgres Connection Pool
     app.state.influx_client = InfluxDBClientAsync(
         url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG
     )
@@ -39,7 +38,6 @@ async def lifespan(app: FastAPI):
         max_size=10,
     )
     yield
-    # Shutdown: Cleanly close pools and sockets
     await app.state.influx_client.close()
     await app.state.pg_pool.close()
 
@@ -74,6 +72,20 @@ def mm_to_inches(mm_val: float | None) -> float:
 
 def hpa_to_inhg(hpa_val: float | None) -> float | None:
     return round(hpa_val * 0.0295301, 2) if hpa_val is not None else None
+
+
+def calculate_vpd_kpa(
+    temp_c: float | None, rh: float | None, raw_vpd_hpa: float | None = None
+) -> float | None:
+    if temp_c is not None and rh is not None:
+        es_kpa = 0.61078 * math.exp((17.27 * float(temp_c)) / (float(temp_c) + 237.3))
+        vpd = es_kpa * max(0.0, 1.0 - (float(rh) / 100.0))
+        return round(vpd, 2)
+    if raw_vpd_hpa is not None:
+        # weatherflow-collector writes calculated_vpd in hPa (1 kPa = 10 hPa)
+        val = float(raw_vpd_hpa)
+        return round(val / 10.0, 2) if val > 3.5 else round(val, 2)
+    return None
 
 
 def calculate_heat_misery(wbgt_c: float | None) -> int:
@@ -167,9 +179,7 @@ async def get_daily_forecast() -> List[Dict[str, Any]]:
       |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
     '''
     local_tz = ZoneInfo("America/New_York")
-    now_date_str = datetime.now(local_tz).strftime(
-        "%Y-%m-%d"
-    )  # Get today's local date string
+    now_date_str = datetime.now(local_tz).strftime("%Y-%m-%d")
 
     try:
         query_api = app.state.influx_client.query_api()
@@ -202,7 +212,6 @@ async def get_daily_forecast() -> List[Dict[str, Any]]:
             for record in table.records:
                 rec_time = record.get_time().astimezone(local_tz)
                 date_key = rec_time.strftime("%Y-%m-%d")
-                # PREVENT SHIFT: Skip yesterday's forecast entirely
                 if date_key < now_date_str:
                     continue
                 day_name = rec_time.strftime("%a")
@@ -250,7 +259,17 @@ async def get_current_weather() -> Dict[str, Any]:
       |> keep(columns: ["_field", "_value"])
     '''
 
-    # 2. Hourly Conditions Query
+    # 2. Recent 5-minute precipitation/lightning window for live condition overrides
+    recent_wx_query = f'''
+    from(bucket: "{INFLUXDB_BUCKET}")
+      |> range(start: -5m)
+      |> filter(fn: (r) => r["_measurement"] == "weatherflow_obs")
+      |> filter(fn: (r) => r["_field"] == "precip_accum_last_1m" or r["_field"] == "precip_rate" or r["_field"] == "precip_type" or r["_field"] == "lightning_strike_count")
+      |> max()
+      |> keep(columns: ["_field", "_value"])
+    '''
+
+    # 3. Hourly Conditions Query (fallback when dry)
     hourly_condition_query = f'''
     from(bucket: "{INFLUXDB_BUCKET}")
       |> range(start: {start_str}, stop: {stop_str})
@@ -260,14 +279,14 @@ async def get_current_weather() -> Dict[str, Any]:
       |> keep(columns: ["_field", "_value"])
     '''
 
-    # 3. FIX: Get the absolute maximum daily accumulation since midnight
+    # 4. Daily accumulation ratchet since local midnight
     daily_rain_query = f'''
     import "timezone"
     option location = timezone.location(name: "America/New_York")
     from(bucket: "{INFLUXDB_BUCKET}")
       |> range(start: today())
       |> filter(fn: (r) => r["_measurement"] == "weatherflow_obs")
-      |> filter(fn: (r) => r["_field"] == "local_daily_rain_accumulation_final")
+      |> filter(fn: (r) => r["_field"] == "local_daily_rain_accumulation_final" or r["_field"] == "precip_accum_local_day")
       |> max()
       |> keep(columns: ["_field", "_value"])
     '''
@@ -275,6 +294,7 @@ async def get_current_weather() -> Dict[str, Any]:
     try:
         query_api = app.state.influx_client.query_api()
         obs_tables = await query_api.query(obs_query)
+        recent_tables = await query_api.query(recent_wx_query)
         hourly_tables = await query_api.query(hourly_condition_query)
         rain_tables = await query_api.query(daily_rain_query)
 
@@ -283,19 +303,74 @@ async def get_current_weather() -> Dict[str, Any]:
             for record in table.records:
                 raw_data[record.get_field()] = record.get_value()
 
+        recent_data = {}
+        for table in recent_tables:
+            for record in table.records:
+                recent_data[record.get_field()] = record.get_value()
+
         for table in hourly_tables:
             for record in table.records:
                 raw_data[record.get_field()] = record.get_value()
 
-        # Safely extract the max daily rain (ratchet mechanism)
         daily_rain_mm = 0.0
         for table in rain_tables:
             for record in table.records:
                 if record.get_value() is not None:
-                    daily_rain_mm = float(record.get_value())
+                    val = float(record.get_value())
+                    if val > daily_rain_mm:
+                        daily_rain_mm = val
 
-        # Direct conversion to preserve decimal places
         precip_inches = round(daily_rain_mm / 25.4, 2)
+
+        # Calculate instantaneous rain rate (in/hr) from latest 1-minute accumulation
+        latest_1m_mm = float(raw_data.get("precip_accum_last_1m") or 0.0)
+        latest_rate_mm_hr = float(raw_data.get("precip_rate") or 0.0)
+        if latest_1m_mm > 0:
+            rain_rate_in_hr = round((latest_1m_mm / 25.4) * 60.0, 2)
+        elif latest_rate_mm_hr > 0:
+            rain_rate_in_hr = round(latest_rate_mm_hr / 25.4, 2)
+        else:
+            rain_rate_in_hr = 0.0
+
+        # Override forecast conditions/icon when local Tempest sensors detect active rain or lightning
+        conditions = raw_data.get("conditions", "Unknown")
+        icon = raw_data.get("icon", "unknown")
+
+        recent_1m_mm = float(recent_data.get("precip_accum_last_1m") or 0.0)
+        recent_rate_mm_hr = float(recent_data.get("precip_rate") or 0.0)
+        recent_rate_in_hr = (
+            (recent_1m_mm / 25.4) * 60.0
+            if recent_1m_mm > 0
+            else (recent_rate_mm_hr / 25.4)
+        )
+        recent_precip_type = int(recent_data.get("precip_type") or 0)
+        recent_ltg = int(recent_data.get("lightning_strike_count") or 0)
+
+        if recent_ltg > 0:
+            if recent_rate_in_hr > 0 or recent_precip_type == 1:
+                conditions = "Thunderstorms"
+                icon = "thunderstorm"
+            else:
+                conditions = "Thunderstorms Possible"
+                icon = "thunderstorms-possible"
+        elif recent_rate_in_hr >= 0.30:
+            conditions = "Heavy Rain"
+            icon = "rain"
+        elif recent_rate_in_hr >= 0.05:
+            conditions = "Rain"
+            icon = "rain"
+        elif recent_rate_in_hr > 0 or recent_precip_type == 1:
+            conditions = "Light Rain"
+            icon = "rain"
+        else:
+            solar_rad = raw_data.get("solar_radiation")
+            if (
+                solar_rad is not None
+                and float(solar_rad) == 0
+                and isinstance(icon, str)
+                and icon.endswith("-day")
+            ):
+                icon = icon[:-4] + "-night"
 
         return {
             "time": datetime.now(timezone.utc).isoformat(),
@@ -307,6 +382,7 @@ async def get_current_weather() -> Dict[str, Any]:
             "wind_gust_mph": ms_to_mph(raw_data.get("wind_gust")),
             "wind_direction": raw_data.get("wind_direction_cardinal", ""),
             "precip_in": precip_inches,
+            "rain_rate_in_hr": rain_rate_in_hr,
             "sea_level_pressure_inhg": hpa_to_inhg(
                 raw_data.get("calculated_sea_level_pressure")
             ),
@@ -316,8 +392,8 @@ async def get_current_weather() -> Dict[str, Any]:
             "lightning_strike_last_distance": raw_data.get(
                 "lightning_strike_last_distance"
             ),
-            "conditions": raw_data.get("conditions", "Unknown"),
-            "icon": raw_data.get("icon", "unknown"),
+            "conditions": conditions,
+            "icon": icon,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -516,13 +592,16 @@ async def get_current_advanced() -> Dict[str, Any]:
         for table in tables:
             for record in table.records:
                 wbgt_c = record.values.get("wet_bulb_globe_temperature")
-                vpd = record.values.get("calculated_vpd")
+                temp_c = record.values.get("air_temperature")
+                rh = record.values.get("relative_humidity")
+                raw_vpd = record.values.get("calculated_vpd")
+                vpd_kpa = calculate_vpd_kpa(temp_c, rh, raw_vpd)
                 return {
                     "time": record.get_time().isoformat(),
                     "wbgt_f": c_to_f(wbgt_c),
                     "heat_misery_index": calculate_heat_misery(wbgt_c),
-                    "vpd_kpa": vpd,
-                    "humidity_misery_index": calculate_humidity_misery(vpd),
+                    "vpd_kpa": vpd_kpa,
+                    "humidity_misery_index": calculate_humidity_misery(vpd_kpa),
                     "delta_t_c": record.values.get("delta_t"),
                     "air_density_kg_m3": record.values.get("air_density"),
                     "illuminance_lux": record.values.get("illuminance"),
@@ -555,15 +634,18 @@ async def get_hourly_advanced() -> List[Dict[str, Any]]:
         for table in tables:
             for record in table.records:
                 feels_c = record.values.get("feels_like")
-                vpd = record.values.get("calculated_vpd")
+                temp_c = record.values.get("air_temperature")
+                rh = record.values.get("relative_humidity")
+                raw_vpd = record.values.get("calculated_vpd")
+                vpd_kpa = calculate_vpd_kpa(temp_c, rh, raw_vpd)
                 heat_misery = calculate_heat_misery(feels_c)
 
                 forecast_data.append(
                     {
                         "time": record.get_time().isoformat(),
                         "heat_misery_index": heat_misery,
-                        "vpd_kpa": vpd,
-                        "humidity_misery_index": calculate_humidity_misery(vpd),
+                        "vpd_kpa": vpd_kpa,
+                        "humidity_misery_index": calculate_humidity_misery(vpd_kpa),
                     }
                 )
         return forecast_data
@@ -616,7 +698,6 @@ async def get_pool_evaporation() -> Dict[str, Any]:
     start_time = now - timedelta(days=3)
     start_str = start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # Downsample via aggregateWindow to reduce memory footprint from tens of thousands to ~72 records
     query = f'''
     from(bucket: "{INFLUXDB_BUCKET}")
       |> range(start: {start_str})
@@ -702,7 +783,6 @@ async def get_pool_evaporation() -> Dict[str, Any]:
 
 @app.get("/api/weather/lightning/recent")
 async def get_recent_lightning() -> List[Dict[str, Any]]:
-    # Leak-proof connection borrowing via async with context manager
     async with app.state.pg_pool.acquire() as conn:
         records = await conn.fetch("""
             SELECT lat, lon, timestamp

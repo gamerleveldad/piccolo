@@ -21,7 +21,7 @@ MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_USER = os.getenv("MQTT_USER", "")
 MQTT_PASS = os.getenv("MQTT_PASS", "")
 HASP_NODE = os.getenv("HASP_NODE", "plate_5inch")
-TEMPEST_MQTT_TOPIC = os.getenv("TEMPEST_MQTT_TOPIC", "tempest/#")
+TEMPEST_MQTT_TOPIC = os.getenv("TEMPEST_MQTT_TOPIC", "weather/tempest/live")
 HOME_LAT = float(os.getenv("HOME_LATITUDE", "28.6611"))
 HOME_LON = float(os.getenv("HOME_LONGITUDE", "-81.3656"))
 
@@ -118,6 +118,8 @@ last_metar_fetch = 0
 last_api_current_fetch = 0
 last_api_forecast_fetch = 0
 last_weather_push = 0
+last_mqtt_snapshot_ts = 0
+last_mqtt_rain_ts = 0
 cached_metar_cmds = []
 pressure_history = []
 current_backlight_mode = None
@@ -285,30 +287,34 @@ def update_backlight(client: mqtt.Client):
 # ==============================================================================
 def poll_current_weather_apis():
     global weather_state, pressure_history
+    now_ts = time.time()
+    mqtt_fresh = (now_ts - last_mqtt_snapshot_ts) < 90
+
     try:
         cur = requests.get(f"{WEATHER_API_URL}/api/weather/current", timeout=3).json()
-        if cur.get("temp_f") is not None:
+        if cur.get("temp_f") is not None and not mqtt_fresh:
             weather_state["temp_f"] = float(cur["temp_f"])
         if cur.get("feels_like_f") is not None:
             weather_state["feels_like_f"] = float(cur["feels_like_f"])
         if cur.get("dew_point_f") is not None:
             weather_state["dew_point_f"] = float(cur["dew_point_f"])
-        if cur.get("relative_humidity") is not None:
+        if cur.get("relative_humidity") is not None and not mqtt_fresh:
             weather_state["relative_humidity"] = int(
                 round(float(cur["relative_humidity"]))
             )
-        if cur.get("wind_avg_mph") is not None:
+        if cur.get("wind_avg_mph") is not None and not mqtt_fresh:
             weather_state["wind_avg_mph"] = float(cur["wind_avg_mph"])
-        if cur.get("wind_gust_mph") is not None:
+        if cur.get("wind_gust_mph") is not None and not mqtt_fresh:
             weather_state["wind_gust_mph"] = float(cur["wind_gust_mph"])
-        if cur.get("wind_direction"):
+        if cur.get("wind_direction") and not mqtt_fresh:
             weather_state["wind_direction"] = str(cur["wind_direction"]).strip()
         if cur.get("precip_in") is not None:
             weather_state["precip_in"] = float(cur["precip_in"])
+        if cur.get("rain_rate_in_hr") is not None and not mqtt_fresh:
+            weather_state["rain_rate_in_hr"] = float(cur["rain_rate_in_hr"])
         if cur.get("sea_level_pressure_inhg") is not None:
             slp = float(cur["sea_level_pressure_inhg"])
             weather_state["sea_level_pressure_inhg"] = slp
-            now_ts = time.time()
             pressure_history.append((now_ts, slp))
             pressure_history = [
                 (t, p) for t, p in pressure_history if now_ts - t <= 10800
@@ -350,7 +356,7 @@ def poll_current_weather_apis():
             weather_state["delta_t_c"] = float(adv["delta_t_c"])
         if adv.get("air_density_kg_m3") is not None:
             weather_state["air_density_kg_m3"] = float(adv["air_density_kg_m3"])
-        if adv.get("illuminance_lux") is not None:
+        if adv.get("illuminance_lux") is not None and not mqtt_fresh:
             weather_state["illuminance_lux"] = int(round(float(adv["illuminance_lux"])))
     except Exception:
         pass
@@ -426,23 +432,65 @@ def poll_forecast_weather_apis():
 
 
 def parse_tempest_mqtt(payload_str: str):
-    global weather_state
+    global weather_state, last_mqtt_snapshot_ts, last_mqtt_rain_ts
     try:
         data = json.loads(payload_str)
     except Exception:
         return
-    if data.get("type") == "rapid_wind" and len(data.get("ob", [])) >= 3:
-        weather_state["wind_avg_mph"] = float(data["ob"][1]) * 2.23694
-        weather_state["wind_deg"] = int(data["ob"][2])
-        weather_state["wind_direction"] = deg_to_cardinal(weather_state["wind_deg"])
-    elif data.get("type") == "evt_strike" and len(data.get("evt", [])) >= 2:
-        weather_state["lightning_last_time"] = (
-            datetime.fromtimestamp(data["evt"][0]).strftime("%I:%M %p").lstrip("0")
-        )
-        weather_state["lightning_strike_last_distance"] = round(
-            float(data["evt"][1]) * 0.621371, 1
-        )
-        weather_state["lightning_strike_count"] += 1
+
+    update_type = data.get("update_type") or data.get("type")
+
+    # Normalized payload from tempest_bridge.py (weather/tempest/live)
+    if update_type == "sensor_snapshot":
+        last_mqtt_snapshot_ts = time.time()
+        if data.get("temp_f") is not None:
+            weather_state["temp_f"] = float(data["temp_f"])
+        if data.get("humidity") is not None:
+            weather_state["relative_humidity"] = int(round(float(data["humidity"])))
+        if data.get("lux") is not None:
+            weather_state["illuminance_lux"] = int(round(float(data["lux"])))
+        if data.get("wind_gust_mph") is not None:
+            weather_state["wind_gust_mph"] = float(data["wind_gust_mph"])
+        if data.get("wind_direction_deg") is not None:
+            weather_state["wind_deg"] = int(data["wind_direction_deg"])
+            weather_state["wind_direction"] = deg_to_cardinal(weather_state["wind_deg"])
+        if data.get("rain_rate_in_hr") is not None:
+            rate = float(data["rain_rate_in_hr"])
+            weather_state["rain_rate_in_hr"] = rate
+            if rate > 0:
+                last_mqtt_rain_ts = time.time()
+
+    elif update_type == "rapid_wind":
+        if "wind_speed_mph" in data:
+            weather_state["wind_avg_mph"] = float(data["wind_speed_mph"])
+            if data.get("wind_direction_deg") is not None:
+                weather_state["wind_deg"] = int(data["wind_direction_deg"])
+                weather_state["wind_direction"] = deg_to_cardinal(
+                    weather_state["wind_deg"]
+                )
+        elif len(data.get("ob", [])) >= 3:
+            weather_state["wind_avg_mph"] = float(data["ob"][1]) * 2.23694
+            weather_state["wind_deg"] = int(data["ob"][2])
+            weather_state["wind_direction"] = deg_to_cardinal(weather_state["wind_deg"])
+
+    elif update_type in ("lightning_strike", "evt_strike"):
+        if "distance_miles" in data:
+            ts = data.get("timestamp") or time.time()
+            weather_state["lightning_last_time"] = (
+                datetime.fromtimestamp(ts).strftime("%I:%M %p").lstrip("0")
+            )
+            weather_state["lightning_strike_last_distance"] = round(
+                float(data["distance_miles"]), 1
+            )
+            weather_state["lightning_strike_count"] += 1
+        elif len(data.get("evt", [])) >= 2:
+            weather_state["lightning_last_time"] = (
+                datetime.fromtimestamp(data["evt"][0]).strftime("%I:%M %p").lstrip("0")
+            )
+            weather_state["lightning_strike_last_distance"] = round(
+                float(data["evt"][1]) * 0.621371, 1
+            )
+            weather_state["lightning_strike_count"] += 1
 
 
 def build_weather_commands() -> list:
@@ -457,6 +505,18 @@ def build_weather_commands() -> list:
         else "Feels Like --.-°F"
     )
     feels_color = get_temp_color(w["feels_like_f"])
+
+    # Real-time MQTT rain override so condition icon reflects active rain immediately
+    cond_text = w["conditions"]
+    cond_icon = w["icon"]
+    if w["rain_rate_in_hr"] > 0 or (time.time() - last_mqtt_rain_ts) < 180:
+        if "thunder" not in cond_text.lower():
+            if w["rain_rate_in_hr"] >= 0.30:
+                cond_text, cond_icon = "Heavy Rain", "rain"
+            elif w["rain_rate_in_hr"] >= 0.05:
+                cond_text, cond_icon = "Rain", "rain"
+            else:
+                cond_text, cond_icon = "Light Rain", "rain"
 
     hum_str = (
         f"{w['relative_humidity']}%" if w["relative_humidity"] is not None else "--%"
@@ -579,8 +639,8 @@ def build_weather_commands() -> list:
         # Main Conditions (Top Left)
         f"p1b10.text={temp_str}",
         f"p1b10.text_color={temp_color}",
-        f"p1b11.src={resolve_png_icon(w['icon'])}",
-        f"p1b12.text={w['conditions']}",
+        f"p1b11.src={resolve_png_icon(cond_icon)}",
+        f"p1b12.text={cond_text}",
         f"p1b13.text={feels_str}",
         f"p1b13.text_color={feels_color}",
         f"p1b14.text=Humidity: {hum_str} | Dew: {dew_str}",
@@ -697,7 +757,6 @@ def process_aviation(client: mqtt.Client) -> list:
         f"p2b2.text={len(valid_aircraft)} Tracked",
     ]
 
-    # Top Toolbar: Always display nearest aircraft (Callsign, Description, Dist, Brg, Alt)
     if closest_three:
         top_ac = closest_three[0]
         top_cs = (
@@ -734,7 +793,6 @@ def process_aviation(client: mqtt.Client) -> list:
             ]
         )
 
-    # Page 2 Rows (Slots 1, 2, 3)
     card_ids = [3, 4, 5]
     for idx, base_id in enumerate([10, 20, 30]):
         card_id = card_ids[idx]
@@ -764,7 +822,6 @@ def process_aviation(client: mqtt.Client) -> list:
             )
             logo_src = resolve_aircraft_icon(cs, db_flags)
 
-            # Red border if emergency squawk (7500/7600/7700) or <3NM proximity alert
             is_emerg_sqk = sqk in EMERGENCY_SQUAWKS
             is_prox = ac["dist_nm"] <= PROXIMITY_RADIUS_NM
             if is_emerg_sqk or is_prox:
@@ -807,7 +864,9 @@ def process_aviation(client: mqtt.Client) -> list:
 def on_connect(client, userdata, flags, rc, properties=None):
     client.subscribe(f"hasp/{HASP_NODE}/state/p0b1")
     client.subscribe(f"hasp/{HASP_NODE}/state/page")
-    client.subscribe(TEMPEST_MQTT_TOPIC)
+    client.subscribe("weather/tempest/live")
+    if TEMPEST_MQTT_TOPIC and TEMPEST_MQTT_TOPIC != "weather/tempest/live":
+        client.subscribe(TEMPEST_MQTT_TOPIC)
 
 
 def on_message(client, userdata, msg):
