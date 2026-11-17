@@ -1,0 +1,154 @@
+cat << 'EOF' > /tmp/pages.jsonl
+{"page":0,"id":1,"obj":"btnmatrix","x":0,"y":436,"w":800,"h":44,"options":["Weather","Aviation (ADS-B)","6Hr / 5Day Forecast"],"bg_color":"#0f172a","bg_color10":"#1e293b","text_color":"#f8fafc","border_color":"#334155","border_width":1,"radius":0}
+{"page":0,"id":2,"obj":"obj","x":0,"y":0,"w":800,"h":36,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":0,"click":0}
+{"page":0,"id":3,"obj":"label","x":12,"y":8,"w":240,"h":22,"text":"Eye of Sauron","text_font":16,"text_color":"#f8fafc"}
+{"page":0,"id":100,"obj":"img","x":230,"y":6,"w":24,"h":24,"src":"L:/ico_plane.png"}
+{"page":0,"id":4,"obj":"label","x":260,"y":8,"w":280,"h":22,"text":"ADS-B: CLEAR (<3NM)","text_font":16,"text_color":"#2dd4bf","align":"center"}
+{"page":0,"id":5,"obj":"label","x":550,"y":8,"w":238,"h":22,"text":"--:-- -- | --- --","text_font":16,"text_color":"#38bdf8","align":"right"}
+{"page":1,"id":0,"bg_color":"#0f172a"}
+{"page":1,"id":1,"obj":"obj","x":10,"y":44,"w":280,"h":185,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":1,"id":2,"obj":"obj","x":300,"y":44,"w":240,"h":88,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":1,"id":3,"obj":"obj","x":550,"y":44,"w":240,"h":88,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":1,"id":4,"obj":"obj","x":300,"y":141,"w":240,"h":88,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":1,"id":5,"obj":"obj","x":550,"y":141,"w":240,"h":88,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":1,"id":6,"obj":"obj","x":10,"y":240,"w":252,"h":184,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":1,"id":7,"obj":"obj","x":274,"y":240,"w":252,"h":184,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":1,"id":8,"obj":"obj","x":538,"y":240,"w":252,"h":184,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":1,"id":10,"obj":"label","x":24,"y":56,"w":170,"h":56,"text":"--.-°F","text_font":48,"text_color":"#ffffff"}
+{"page":1,"id":11,"obj":"img","x":210,"y":54,"w":64,"h":64,"src":"L:/cond_cloudy.png"}
+{"page":1,"id":12,"obj":"label","x":24,"y":120,"w":252,"h":28,"text":"Partly Cloudy","text_font":24,"text_color":"#f8fafc"}
+{"page":1,"id":13,"obj":"label","x":24,"y":156,"w":252,"h":22,"text":"Feels Like --.-°F","text_font":16,"text_color":"#38bdf8"}
+{"page":1,"id":14,"obj":"label","x":24,"y":186,"w":252,"h":20,"text":"Humidity: --% | Dew: --°F","text_font":14,"text_color":"#94a3b8"}
+{"page":1,"id":120,"obj":"img","x":312,"y":48,"w":24,"h":24,"src":"L:/ico_wind.png"}
+{"page":1,"id":20,"obj":"label","x":342,"y":52,"w":186,"h":18,"text":"Wind / Gust","text_font":14,"text_color":"#94a3b8"}
+{"page":1,"id":21,"obj":"label","x":312,"y":76,"w":216,"h":28,"text":"0.0 (0.0) mph","text_font":24,"text_color":"#ffffff"}
+{"page":1,"id":22,"obj":"label","x":312,"y":106,"w":216,"h":18,"text":"Dir: --- (---°)","text_font":14,"text_color":"#38bdf8"}
+{"page":1,"id":123,"obj":"img","x":562,"y":48,"w":24,"h":24,"src":"L:/ico_thermo.png"}
+{"page":1,"id":23,"obj":"label","x":592,"y":52,"w":186,"h":18,"text":"WBGT Index","text_font":14,"text_color":"#94a3b8"}
+{"page":1,"id":24,"obj":"label","x":562,"y":76,"w":216,"h":28,"text":"--.-°F","text_font":24,"text_color":"#2dd4bf"}
+{"page":1,"id":25,"obj":"label","x":562,"y":106,"w":216,"h":18,"text":"Low Thermal Stress","text_font":14,"text_color":"#f8fafc"}
+{"page":1,"id":126,"obj":"img","x":312,"y":145,"w":24,"h":24,"src":"L:/ico_bolt.png"}
+{"page":1,"id":26,"obj":"label","x":342,"y":149,"w":186,"h":18,"text":"Last Lightning Strike","text_font":14,"text_color":"#94a3b8"}
+{"page":1,"id":27,"obj":"label","x":312,"y":173,"w":216,"h":28,"text":"None (1h)","text_font":24,"text_color":"#ffffff"}
+{"page":1,"id":28,"obj":"label","x":312,"y":203,"w":216,"h":18,"text":"Dist: -- mi | Count: 0","text_font":14,"text_color":"#facc15"}
+{"page":1,"id":129,"obj":"img","x":562,"y":145,"w":24,"h":24,"src":"L:/ico_drop.png"}
+{"page":1,"id":29,"obj":"label","x":592,"y":149,"w":186,"h":18,"text":"VPD Deficit","text_font":14,"text_color":"#94a3b8"}
+{"page":1,"id":30,"obj":"label","x":562,"y":173,"w":216,"h":28,"text":"-.-- kPa","text_font":24,"text_color":"#2dd4bf"}
+{"page":1,"id":31,"obj":"label","x":562,"y":203,"w":216,"h":18,"text":"Optimal Transpiration","text_font":14,"text_color":"#f8fafc"}
+{"page":1,"id":140,"obj":"img","x":24,"y":250,"w":24,"h":24,"src":"L:/ico_rain.png"}
+{"page":1,"id":40,"obj":"label","x":54,"y":254,"w":194,"h":22,"text":"Rain (Today / Rate)","text_font":16,"text_color":"#94a3b8"}
+{"page":1,"id":41,"obj":"label","x":24,"y":288,"w":224,"h":38,"text":"0.00 in","text_font":32,"text_color":"#ffffff"}
+{"page":1,"id":42,"obj":"label","x":24,"y":338,"w":224,"h":22,"text":"Rate: 0.00 in/hr","text_font":16,"text_color":"#38bdf8"}
+{"page":1,"id":143,"obj":"img","x":24,"y":372,"w":20,"h":20,"src":"L:/ico_drop.png"}
+{"page":1,"id":43,"obj":"label","x":48,"y":372,"w":200,"h":22,"text":"Today's Chance: 0%","text_font":16,"text_color":"#2dd4bf"}
+{"page":1,"id":144,"obj":"img","x":288,"y":250,"w":24,"h":24,"src":"L:/ico_sun.png"}
+{"page":1,"id":44,"obj":"label","x":318,"y":254,"w":194,"h":22,"text":"Solar Lux & Sun","text_font":16,"text_color":"#94a3b8"}
+{"page":1,"id":45,"obj":"label","x":288,"y":288,"w":224,"h":38,"text":"0 lux","text_font":32,"text_color":"#facc15"}
+{"page":1,"id":46,"obj":"label","x":288,"y":338,"w":224,"h":22,"text":"UV Index: 0.00 | 0 W/m²","text_font":16,"text_color":"#f8fafc"}
+{"page":1,"id":147,"obj":"img","x":288,"y":372,"w":20,"h":20,"src":"L:/ico_sunrise.png"}
+{"page":1,"id":47,"obj":"label","x":312,"y":373,"w":76,"h":20,"text":"--:--","text_font":14,"text_color":"#94a3b8"}
+{"page":1,"id":153,"obj":"img","x":396,"y":372,"w":20,"h":20,"src":"L:/ico_sunset.png"}
+{"page":1,"id":53,"obj":"label","x":420,"y":373,"w":80,"h":20,"text":"--:--","text_font":14,"text_color":"#94a3b8"}
+{"page":1,"id":48,"obj":"label","x":552,"y":254,"w":224,"h":22,"text":"Barometer & Tempest","text_font":16,"text_color":"#94a3b8"}
+{"page":1,"id":49,"obj":"label","x":552,"y":288,"w":224,"h":38,"text":"--.-- inHg","text_font":32,"text_color":"#38bdf8"}
+{"page":1,"id":50,"obj":"label","x":552,"y":334,"w":224,"h":20,"text":"Trend: Steady (+0.00)","text_font":16,"text_color":"#f8fafc"}
+{"page":1,"id":51,"obj":"label","x":552,"y":362,"w":224,"h":20,"text":"Density Alt: +0 ft","text_font":14,"text_color":"#2dd4bf"}
+{"page":1,"id":52,"obj":"label","x":552,"y":388,"w":224,"h":20,"text":"Stn: -- inHg (-- mb)","text_font":14,"text_color":"#94a3b8"}
+{"page":2,"id":0,"bg_color":"#0f172a"}
+{"page":2,"id":1,"obj":"label","x":12,"y":44,"w":380,"h":24,"text":"Local Traffic (ADS-B Raw Feed)","text_font":16,"text_color":"#ffffff"}
+{"page":2,"id":2,"obj":"label","x":400,"y":44,"w":388,"h":24,"text":"0 Aircraft Tracked | Closest: -- NM","text_font":16,"text_color":"#38bdf8","align":"right"}
+{"page":2,"id":7,"obj":"label","x":22,"y":72,"w":756,"h":20,"text":"CALLSIGN       TYPE      DIST / BRG         SPEED        ALT / VSPEED          AIRCRAFT DESCRIPTION","text_font":14,"text_color":"#94a3b8"}
+{"page":2,"id":3,"obj":"obj","x":10,"y":96,"w":780,"h":62,"bg_color":"#1e293b","border_color":"#334155","border_width":2,"radius":8,"click":0}
+{"page":2,"id":4,"obj":"obj","x":10,"y":165,"w":780,"h":62,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":2,"id":5,"obj":"obj","x":10,"y":234,"w":780,"h":62,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":2,"id":6,"obj":"obj","x":10,"y":312,"w":780,"h":114,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":2,"id":10,"obj":"label","x":22,"y":104,"w":125,"h":28,"text":"---","text_font":24,"text_color":"#ffffff"}
+{"page":2,"id":11,"obj":"label","x":150,"y":104,"w":80,"h":28,"text":"----","text_font":24,"text_color":"#facc15"}
+{"page":2,"id":12,"obj":"label","x":235,"y":104,"w":165,"h":28,"text":"--.- NM ---°","text_font":24,"text_color":"#2dd4bf"}
+{"page":2,"id":13,"obj":"label","x":405,"y":104,"w":110,"h":28,"text":"--- kts","text_font":24,"text_color":"#ffffff"}
+{"page":2,"id":14,"obj":"label","x":520,"y":108,"w":258,"h":24,"text":"----- ft (--- fpm)","text_font":16,"text_color":"#38bdf8"}
+{"page":2,"id":15,"obj":"label","x":22,"y":135,"w":756,"h":18,"text":"Scanning local ADS-B feed...","text_font":14,"text_color":"#94a3b8"}
+{"page":2,"id":20,"obj":"label","x":22,"y":173,"w":125,"h":28,"text":"---","text_font":24,"text_color":"#ffffff"}
+{"page":2,"id":21,"obj":"label","x":150,"y":173,"w":80,"h":28,"text":"----","text_font":24,"text_color":"#facc15"}
+{"page":2,"id":22,"obj":"label","x":235,"y":173,"w":165,"h":28,"text":"--.- NM ---°","text_font":24,"text_color":"#2dd4bf"}
+{"page":2,"id":23,"obj":"label","x":405,"y":173,"w":110,"h":28,"text":"--- kts","text_font":24,"text_color":"#ffffff"}
+{"page":2,"id":24,"obj":"label","x":520,"y":177,"w":258,"h":24,"text":"----- ft (--- fpm)","text_font":16,"text_color":"#38bdf8"}
+{"page":2,"id":25,"obj":"label","x":22,"y":204,"w":756,"h":18,"text":"--","text_font":14,"text_color":"#94a3b8"}
+{"page":2,"id":30,"obj":"label","x":22,"y":242,"w":125,"h":28,"text":"---","text_font":24,"text_color":"#ffffff"}
+{"page":2,"id":31,"obj":"label","x":150,"y":242,"w":80,"h":28,"text":"----","text_font":24,"text_color":"#facc15"}
+{"page":2,"id":32,"obj":"label","x":235,"y":242,"w":165,"h":28,"text":"--.- NM ---°","text_font":24,"text_color":"#2dd4bf"}
+{"page":2,"id":33,"obj":"label","x":405,"y":242,"w":110,"h":28,"text":"--- kts","text_font":24,"text_color":"#ffffff"}
+{"page":2,"id":34,"obj":"label","x":520,"y":246,"w":258,"h":24,"text":"----- ft (--- fpm)","text_font":16,"text_color":"#38bdf8"}
+{"page":2,"id":35,"obj":"label","x":22,"y":273,"w":756,"h":18,"text":"--","text_font":14,"text_color":"#94a3b8"}
+{"page":2,"id":38,"obj":"label","x":22,"y":320,"w":756,"h":18,"text":"CENTRAL FLORIDA AVIATION METARs (KSFB & KORL)","text_font":14,"text_color":"#94a3b8"}
+{"page":2,"id":39,"obj":"label","x":22,"y":348,"w":70,"h":24,"text":"[VFR]","text_font":16,"text_color":"#2dd4bf"}
+{"page":2,"id":40,"obj":"label","x":96,"y":348,"w":682,"h":24,"text":"KSFB: Waiting for METAR poll...","text_font":16,"text_color":"#ffffff","mode":"loop"}
+{"page":2,"id":42,"obj":"label","x":22,"y":386,"w":70,"h":24,"text":"[VFR]","text_font":16,"text_color":"#2dd4bf"}
+{"page":2,"id":41,"obj":"label","x":96,"y":386,"w":682,"h":24,"text":"KORL: Waiting for METAR poll...","text_font":16,"text_color":"#ffffff","mode":"loop"}
+{"page":3,"id":0,"bg_color":"#0f172a"}
+{"page":3,"id":1,"obj":"obj","x":10,"y":44,"w":123,"h":184,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":3,"id":2,"obj":"obj","x":141,"y":44,"w":123,"h":184,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":3,"id":3,"obj":"obj","x":272,"y":44,"w":123,"h":184,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":3,"id":4,"obj":"obj","x":404,"y":44,"w":123,"h":184,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":3,"id":5,"obj":"obj","x":535,"y":44,"w":123,"h":184,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":3,"id":6,"obj":"obj","x":667,"y":44,"w":123,"h":184,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":3,"id":20,"obj":"label","x":14,"y":54,"w":115,"h":22,"text":"-- PM","text_font":16,"text_color":"#94a3b8","align":"center"}
+{"page":3,"id":21,"obj":"label","x":145,"y":54,"w":115,"h":22,"text":"-- PM","text_font":16,"text_color":"#94a3b8","align":"center"}
+{"page":3,"id":22,"obj":"label","x":276,"y":54,"w":115,"h":22,"text":"-- PM","text_font":16,"text_color":"#94a3b8","align":"center"}
+{"page":3,"id":23,"obj":"label","x":408,"y":54,"w":115,"h":22,"text":"-- PM","text_font":16,"text_color":"#94a3b8","align":"center"}
+{"page":3,"id":24,"obj":"label","x":539,"y":54,"w":115,"h":22,"text":"-- PM","text_font":16,"text_color":"#94a3b8","align":"center"}
+{"page":3,"id":25,"obj":"label","x":671,"y":54,"w":115,"h":22,"text":"-- PM","text_font":16,"text_color":"#94a3b8","align":"center"}
+{"page":3,"id":30,"obj":"img","x":47,"y":88,"w":48,"h":48,"src":"L:/cond_cloudy.png"}
+{"page":3,"id":31,"obj":"img","x":178,"y":88,"w":48,"h":48,"src":"L:/cond_cloudy.png"}
+{"page":3,"id":32,"obj":"img","x":309,"y":88,"w":48,"h":48,"src":"L:/cond_cloudy.png"}
+{"page":3,"id":33,"obj":"img","x":441,"y":88,"w":48,"h":48,"src":"L:/cond_cloudy.png"}
+{"page":3,"id":34,"obj":"img","x":572,"y":88,"w":48,"h":48,"src":"L:/cond_cloudy.png"}
+{"page":3,"id":35,"obj":"img","x":704,"y":88,"w":48,"h":48,"src":"L:/cond_cloudy.png"}
+{"page":3,"id":40,"obj":"label","x":14,"y":142,"w":115,"h":30,"text":"--°F","text_font":24,"text_color":"#ffffff","align":"center"}
+{"page":3,"id":41,"obj":"label","x":145,"y":142,"w":115,"h":30,"text":"--°F","text_font":24,"text_color":"#ffffff","align":"center"}
+{"page":3,"id":42,"obj":"label","x":276,"y":142,"w":115,"h":30,"text":"--°F","text_font":24,"text_color":"#ffffff","align":"center"}
+{"page":3,"id":43,"obj":"label","x":408,"y":142,"w":115,"h":30,"text":"--°F","text_font":24,"text_color":"#ffffff","align":"center"}
+{"page":3,"id":44,"obj":"label","x":539,"y":142,"w":115,"h":30,"text":"--°F","text_font":24,"text_color":"#ffffff","align":"center"}
+{"page":3,"id":45,"obj":"label","x":671,"y":142,"w":115,"h":30,"text":"--°F","text_font":24,"text_color":"#ffffff","align":"center"}
+{"page":3,"id":150,"obj":"img","x":30,"y":188,"w":20,"h":20,"src":"L:/ico_drop.png"}
+{"page":3,"id":50,"obj":"label","x":54,"y":188,"w":75,"h":22,"text":"0%","text_font":16,"text_color":"#38bdf8"}
+{"page":3,"id":151,"obj":"img","x":161,"y":188,"w":20,"h":20,"src":"L:/ico_drop.png"}
+{"page":3,"id":51,"obj":"label","x":185,"y":188,"w":75,"h":22,"text":"0%","text_font":16,"text_color":"#38bdf8"}
+{"page":3,"id":152,"obj":"img","x":292,"y":188,"w":20,"h":20,"src":"L:/ico_drop.png"}
+{"page":3,"id":52,"obj":"label","x":316,"y":188,"w":75,"h":22,"text":"0%","text_font":16,"text_color":"#38bdf8"}
+{"page":3,"id":153,"obj":"img","x":424,"y":188,"w":20,"h":20,"src":"L:/ico_drop.png"}
+{"page":3,"id":53,"obj":"label","x":448,"y":188,"w":75,"h":22,"text":"0%","text_font":16,"text_color":"#38bdf8"}
+{"page":3,"id":154,"obj":"img","x":555,"y":188,"w":20,"h":20,"src":"L:/ico_drop.png"}
+{"page":3,"id":54,"obj":"label","x":579,"y":188,"w":75,"h":22,"text":"0%","text_font":16,"text_color":"#38bdf8"}
+{"page":3,"id":155,"obj":"img","x":687,"y":188,"w":20,"h":20,"src":"L:/ico_drop.png"}
+{"page":3,"id":55,"obj":"label","x":711,"y":188,"w":75,"h":22,"text":"0%","text_font":16,"text_color":"#38bdf8"}
+{"page":3,"id":7,"obj":"obj","x":10,"y":240,"w":148,"h":186,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":3,"id":8,"obj":"obj","x":168,"y":240,"w":148,"h":186,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":3,"id":9,"obj":"obj","x":326,"y":240,"w":148,"h":186,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":3,"id":10,"obj":"obj","x":484,"y":240,"w":148,"h":186,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":3,"id":11,"obj":"obj","x":642,"y":240,"w":148,"h":186,"bg_color":"#1e293b","border_color":"#334155","border_width":1,"radius":8,"click":0}
+{"page":3,"id":60,"obj":"label","x":14,"y":250,"w":140,"h":22,"text":"Day 1","text_font":16,"text_color":"#94a3b8","align":"center"}
+{"page":3,"id":61,"obj":"label","x":172,"y":250,"w":140,"h":22,"text":"Day 2","text_font":16,"text_color":"#94a3b8","align":"center"}
+{"page":3,"id":62,"obj":"label","x":330,"y":250,"w":140,"h":22,"text":"Day 3","text_font":16,"text_color":"#94a3b8","align":"center"}
+{"page":3,"id":63,"obj":"label","x":488,"y":250,"w":140,"h":22,"text":"Day 4","text_font":16,"text_color":"#94a3b8","align":"center"}
+{"page":3,"id":64,"obj":"label","x":646,"y":250,"w":140,"h":22,"text":"Day 5","text_font":16,"text_color":"#94a3b8","align":"center"}
+{"page":3,"id":70,"obj":"img","x":60,"y":284,"w":48,"h":48,"src":"L:/cond_cloudy.png"}
+{"page":3,"id":71,"obj":"img","x":218,"y":284,"w":48,"h":48,"src":"L:/cond_cloudy.png"}
+{"page":3,"id":72,"obj":"img","x":376,"y":284,"w":48,"h":48,"src":"L:/cond_cloudy.png"}
+{"page":3,"id":73,"obj":"img","x":534,"y":284,"w":48,"h":48,"src":"L:/cond_cloudy.png"}
+{"page":3,"id":74,"obj":"img","x":692,"y":284,"w":48,"h":48,"src":"L:/cond_cloudy.png"}
+{"page":3,"id":80,"obj":"label","x":14,"y":338,"w":140,"h":30,"text":"--° / --°","text_font":24,"text_color":"#ffffff","align":"center"}
+{"page":3,"id":81,"obj":"label","x":172,"y":338,"w":140,"h":30,"text":"--° / --°","text_font":24,"text_color":"#ffffff","align":"center"}
+{"page":3,"id":82,"obj":"label","x":330,"y":338,"w":140,"h":30,"text":"--° / --°","text_font":24,"text_color":"#ffffff","align":"center"}
+{"page":3,"id":83,"obj":"label","x":488,"y":338,"w":140,"h":30,"text":"--° / --°","text_font":24,"text_color":"#ffffff","align":"center"}
+{"page":3,"id":84,"obj":"label","x":646,"y":338,"w":140,"h":30,"text":"--° / --°","text_font":24,"text_color":"#ffffff","align":"center"}
+{"page":3,"id":190,"obj":"img","x":46,"y":386,"w":20,"h":20,"src":"L:/ico_drop.png"}
+{"page":3,"id":90,"obj":"label","x":70,"y":386,"w":84,"h":22,"text":"0%","text_font":16,"text_color":"#38bdf8"}
+{"page":3,"id":191,"obj":"img","x":204,"y":386,"w":20,"h":20,"src":"L:/ico_drop.png"}
+{"page":3,"id":91,"obj":"label","x":228,"y":386,"w":84,"h":22,"text":"0%","text_font":16,"text_color":"#38bdf8"}
+{"page":3,"id":192,"obj":"img","x":362,"y":386,"w":20,"h":20,"src":"L:/ico_drop.png"}
+{"page":3,"id":92,"obj":"label","x":386,"y":386,"w":84,"h":22,"text":"0%","text_font":16,"text_color":"#38bdf8"}
+{"page":3,"id":193,"obj":"img","x":520,"y":386,"w":20,"h":20,"src":"L:/ico_drop.png"}
+{"page":3,"id":93,"obj":"label","x":544,"y":386,"w":84,"h":22,"text":"0%","text_font":16,"text_color":"#38bdf8"}
+{"page":3,"id":194,"obj":"img","x":678,"y":386,"w":20,"h":20,"src":"L:/ico_drop.png"}
+{"page":3,"id":94,"obj":"label","x":702,"y":386,"w":84,"h":22,"text":"0%","text_font":16,"text_color":"#38bdf8"}
